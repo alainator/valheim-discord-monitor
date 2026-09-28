@@ -86,11 +86,15 @@ RE_TIMEOUT = re.compile(_TS + r"ZRpc timeout detected")
 # prints these but NOT per-player "Destroying" lines or "now 0 player(s)", so anyone
 # online would otherwise stay stuck as online — we flush them on any of these.
 RE_SHUTDOWN = re.compile(_TS + r"(?:Game - )?OnApplicationQuit|ZNet Shutdown|ZNet OnDestroy")
+# A player turned away by bannedlist.txt / permittedlist.txt. The id is whatever the
+# server compared against the lists: "Steam_7656…" / "Xbox_…" on current builds, a bare
+# SteamID64 on older Steam-only ones — so it is exactly what belongs in the list files.
+RE_REFUSED = re.compile(_TS + r"Player (?P<name>.+?) : (?P<id>\S+) is blacklisted or not in whitelist")
 
 
 @dataclass
 class Event:
-    kind: str                   # login | logout | death | respawn | server_up | player_count
+    kind: str                   # login | logout | death | respawn | server_up | count | join_refused
     player: Optional[str] = None
     extra: dict = field(default_factory=dict)
 
@@ -155,6 +159,16 @@ class ValheimLogParser:
             yield Event("logout", name, {"count": len(self.s.online), "stale": True})
         self.s.server_count = 0
 
+    def _drop_pending(self, host_id: str) -> None:
+        """A refused peer never spawns a character, so forget its connection id; otherwise
+        the next real login would be paired with it (and linked to the wrong SteamID)."""
+        bare = host_id.split("_", 1)[1] if "_" in host_id else host_id
+        for cid in list(self.s.pending_ids):
+            if cid in (host_id, bare) or self.s.id_to_steam.get(cid) == bare:
+                self.s.pending_ids.remove(cid)
+                self.s.id_to_steam.pop(cid, None)
+                return
+
     def _feed(self, line: str) -> Iterator[Event]:
         line = line.rstrip("\r\n")
         if not line:
@@ -180,6 +194,13 @@ class ValheimLogParser:
             # still think is online (a stuck player whose disconnect we never saw).
             if self.s.server_count == 0 and self.s.online:
                 yield from self._flush()
+            return
+
+        m = RE_REFUSED.search(line)
+        if m:
+            name, host_id = m.group("name").strip(), m.group("id")
+            self._drop_pending(host_id)
+            yield Event("join_refused", name, {"host_id": host_id})
             return
 
         m = RE_ZDOID.search(line)
@@ -280,11 +301,11 @@ class Discord:
     COLORS = {"login": 0x57F287, "logout": 0x95A5A6, "death": 0xED4245, "respawn": 0xFEE75C, "server_up": 0x5865F2,
               "player_joined": 0x57F287, "player_left": 0x95A5A6, "server_online": 0x57F287, "server_offline": 0xED4245,
               "server_restart": 0xE0A13C, "maintenance_start": 0x5865F2, "maintenance_done": 0x57F287,
-              "maintenance_failed": 0xED4245, "maintenance_pending": 0xE0A13C}
+              "maintenance_failed": 0xED4245, "maintenance_pending": 0xE0A13C, "join_refused": 0xE67E22}
     EMOJI = {"login": "🟢", "logout": "🔴", "death": "💀", "respawn": "🔥", "server_up": "🛡️",
              "player_joined": "🟢", "player_left": "🔴", "server_online": "🟢", "server_offline": "🔴",
              "server_restart": "🔻", "maintenance_start": "🛠️", "maintenance_done": "✅",
-             "maintenance_failed": "⚠️", "maintenance_pending": "🕑"}
+             "maintenance_failed": "⚠️", "maintenance_pending": "🕑", "join_refused": "🚫"}
     DEFAULT_MESSAGES = {
         "login": "**{player}** has arrived in {server}.",
         "logout": "**{player}** has left {server}.",
@@ -294,6 +315,8 @@ class Discord:
         "server_restart": "**{server}** is restarting — all players have been disconnected.",
         "server_online": "**{server}** is back online!",
         "server_offline": "**{server}** is offline — it went down and hasn't come back.",
+        # Someone on the ban list, or not on the permitted list, tried to connect.
+        "join_refused": "**{player}** tried to join {server} but isn't allowed in.",
         # Count-only events (a2s source): no names available.
         "player_joined": "{who} arrived in {server}. **{count}/{max}** online.",
         "player_left": "{who} left {server}. **{count}/{max}** online.",
@@ -1064,7 +1087,7 @@ def main():
         tailer = OffsetTailer(source, cfg.get("state_file", "monitor_state.json"), start_at_end=not args.from_start)
     parser = ValheimLogParser()
     log_events = {"login", "logout", "death", "respawn", "server_up",
-                  "server_restart", "server_online", "server_offline"}
+                  "server_restart", "server_online", "server_offline", "join_refused"}
     default_log_events = {"login", "logout", "death", "server_restart", "server_online", "server_offline"}
     events = set(cfg.get("events") or ()) & log_events or default_log_events
 
@@ -1089,6 +1112,13 @@ def main():
         except Exception as e:
             log.warning("Steam refresh failed: %s", e)
 
+    # Refused joins go to a private admin channel with Permit / Ban buttons. They reach the
+    # public webhook too only if "join_refused" is listed in `events`.
+    admin = None
+    if (cfg.get("admin_bot") or {}).get("enabled"):
+        from admin_bot import build_admin_bot
+        admin = build_admin_bot(cfg, server_name)
+
     maint = build_maintenance(cfg, source, discord, server_name)
     if maint:
         log.info("Maintenance on: checks every %.0f min when empty; backup window %s %s; updates %s%s",
@@ -1101,8 +1131,9 @@ def main():
     offline_grace = float(cfg.get("offline_grace_seconds", 300))
     down_since = None
     offline_posted = False
-    log.info("Monitoring %s source for %s; posting %s every %.0fs%s", cfg["source"]["type"], server_name,
-             sorted(events), interval, "; recording stats" if store else "")
+    log.info("Monitoring %s source for %s; posting %s every %.0fs%s%s", cfg["source"]["type"], server_name,
+             sorted(events), interval, "; recording stats" if store else "",
+             "; admin bot on" if admin else "")
     render_site("(startup)")
 
     backoff = interval
@@ -1120,6 +1151,8 @@ def main():
                             changed = True
                         except Exception as e:
                             log.warning("DB write failed for %s: %s", ev.kind, e)
+                    if ev.kind == "join_refused" and admin:
+                        admin.notify_refused(ev.player, ev.extra["host_id"], ev.extra.get("ts"))
                     if maint:
                         maint.observe(ev, len(parser.s.online))
                     if not (maint and maint.suppressing(ev.kind)):

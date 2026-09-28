@@ -38,6 +38,16 @@
       "server_up": "{server} is online."
     }
   },
+  "admin_bot": {
+    "enabled": false,
+    "token": "YOUR-BOT-TOKEN-OR-USE-DISCORD_BOT_TOKEN-ENV",
+    "guild_id": "YOUR-DISCORD-SERVER-ID",
+    "channel_id": "YOUR-PRIVATE-ADMIN-CHANNEL-ID",
+    "admin_user_ids": ["YOUR-DISCORD-USER-ID"],
+    "admin_role_ids": [],
+    "save_dir": "/home/valheim/valheim_save_data",
+    "repeat_cooldown_seconds": 600
+  },
   "steam": {
     "enabled": true,
     "api_key": "YOUR-STEAM-WEB-API-KEY-OR-USE-STEAM_API_KEY-ENV",

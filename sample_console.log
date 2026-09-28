@@ -31,3 +31,6 @@ ZPlayFabSocket::Dispose. State: CLOSED
 09/14/2026 09:06:41: ZRpc timeout detected
 09/14/2026 09:06:41: Destroying abandoned non persistent zdo 3641457403:2299 owner 3641457403
 09/14/2026 09:06:41: Destroying abandoned non persistent zdo 3641457403:1 owner 3641457403
+09/14/2026 09:10:02: PlayFab listen socket child connected to remote player C0FFEE0000000003
+09/14/2026 09:10:02: PlayFab socket with remote ID playfab/C0FFEE0000000003 received local Platform ID Steam_76561190000000003
+09/14/2026 09:10:03: Player Stranger : Steam_76561190000000003 is blacklisted or not in whitelist.

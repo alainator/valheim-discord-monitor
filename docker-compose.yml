@@ -1,0 +1,34 @@
+# Self-hosted setup: the Valheim dedicated server runs on this same Linux box as the
+# `valheim` user (e.g. the Pi My Life Up guide: server in /home/valheim/valheimserver,
+# -savedir /home/valheim/valheim_save_data) and writes its console to
+# /home/valheim/logs/valheim_console.log.
+#
+#   cp config.selfhosted.example.json config.json   # then fill in the webhook, bot token, ids
+#   docker compose up -d --build
+#   docker compose logs -f
+services:
+  valheim-discord-monitor:
+    build: .
+    image: valheim-discord-monitor
+    container_name: valheim-discord-monitor
+    working_dir: /app
+    volumes:
+      # The repo itself: code, config.json, and the state/stats files it writes
+      # (monitor_state.json, valheim_stats.db) so they survive rebuilds.
+      - .:/app
+      # The server's console log, read-only.
+      - /home/valheim/logs:/logs:ro
+      # The save dir holds permittedlist.txt / bannedlist.txt / adminlist.txt. Writable
+      # so the Discord admin bot's Permit / Ban buttons can edit them. Drop this line
+      # (or add :ro) if you don't enable admin_bot.
+      - /home/valheim/valheim_save_data:/valheim_save_data
+    environment:
+      # Match the server's clock so times in logs and on the stats page line up.
+      TZ: ${TZ:-UTC}
+    # Secrets can live in .env instead of config.json: DISCORD_WEBHOOK_URL,
+    # DISCORD_BOT_TOKEN, STEAM_API_KEY, ...
+    env_file:
+      - path: .env
+        required: false
+    command: python valheim_discord_monitor.py --config config.json
+    restart: unless-stopped

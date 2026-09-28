@@ -1,0 +1,5 @@
+# Only the Discord admin bot (admin_bot.py) needs anything beyond the standard library.
+discord.py>=2.4,<3
+# Optional extras, uncomment if you use them:
+# paramiko      # sftp source
+# playwright    # nexus source / LOW.MS panel sign-in (also needs: playwright install chromium)
