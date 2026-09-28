@@ -384,40 +384,65 @@ A player who keeps retrying triggers only one notice per `repeat_cooldown_second
 
 ### Status voice channel
 
-The bot can also keep a voice channel's **name** showing the server's state, so everyone
-sees it at the top of the channel list without opening anything:
+The bot keeps a **voice** channel's **name** showing the server's state, so everyone sees it
+in the channel list without opening anything.
 
-| Server | Channel name (default) |
-|---|---|
-| People playing | `🟢 Valheim: 3 online` |
-| Up, nobody on | `🟢 Valheim: empty` |
-| Down or restarting | `🔴 Valheim: offline` |
+**Two features, easy to mix up:**
 
-Setup:
-1. Create a voice channel. Nobody needs to join it: in its permissions, deny **Connect**
-   for @everyone so it's just a label.
+| Setting | Channel type | What you get |
+|---|---|---|
+| `status_channel` (this section) | **Voice** channel | The channel's *name* changes: `🟢 Valheim: 3 online` |
+| [`status_board`](#status-board) | **Text** channel | One *message* the bot keeps editing, with who's on, version, uptime, last save, backup and raid |
+
+You can use either or both, but each needs its own channel of the right type. The bot
+won't rename a text channel: it logs a warning and skips it.
+
+**The channel shows one of three names at a time**, whichever matches the server right now:
+
+| Server state | Setting | Default name |
+|---|---|---|
+| People playing | `online` | `🟢 Valheim: 3 online` (the number follows the player count) |
+| Up, nobody on | `empty` | `🟢 Valheim: empty` |
+| Down or restarting | `offline` | `🔴 Valheim: offline` |
+
+**Setup:**
+1. Create a **voice** channel. Nobody needs to join it: in its permissions, deny
+   **Connect** for @everyone so it's just a label.
 2. In the same permissions screen, add the bot with **View Channel** and **Manage Channels**.
-3. Copy the channel's ID and add a `status_channel` block inside `admin_bot`:
+3. Right-click the channel → **Copy Channel ID**, and add this inside the `admin_bot` block:
+   ```json
+   "status_channel": { "channel_id": "123456789012345678" }
+   ```
+   That's all that's required. To change the wording, add any of the three names; you
+   only need the ones you want to change:
    ```json
    "status_channel": {
      "channel_id": "123456789012345678",
-     "online": "🟢 Valheim: {count} online",
-     "empty": "🟢 Valheim: empty",
-     "offline": "🔴 Valheim: offline"
+     "online": "⚔️ {server}: {count} online",
+     "empty": "💤 {server}: empty",
+     "offline": "🔴 {server}: down"
    }
    ```
-   Only `channel_id` is required. The three names are templates: `{count}` is the number
-   online and `{server}` is `server_name`, e.g. `"⚔️ {server}: {count}/10"`.
-4. `docker compose up -d --force-recreate`. The log shows `admin_bot: status channel is '…'`.
+   `{count}` is the number online; `{server}` is `server_name`.
+4. `docker compose up -d --force-recreate`, then check the log:
+   `admin_bot: status channel is '…'; it's renamed when the server's state changes`.
 
-How current it is:
-- **Rate limit:** Discord lets a bot rename a channel only **twice per 10 minutes**, so the
-  bot renames at most once every 5 minutes. A burst of joins and leaves in between costs
-  one rename with the latest count. It's usually current, and at worst about 5 minutes behind.
-- **Right after the monitor starts:** the name stays as it was until the count is known
-  (the next join, or the server's 10-minute "Connections" log line).
-- **When it shows offline:** as soon as the server logs a shutdown, or if the log has been
-  silent for `stale_after_seconds` (15 min), which catches a crash.
+**What to expect:**
+- **Nothing happens straight away.** The name only changes when the server's state
+  changes: someone joins or leaves, or the server stops or starts. If the name already
+  matches, nothing needs doing.
+- **At most one rename every 5 minutes.** Discord lets a bot rename a channel only twice
+  per 10 minutes. When a change has to wait, the log says when it will happen:
+  `status channel: renaming to '🟢 Valheim: empty' at 16:19:45`. A burst of joins and
+  leaves in between costs one rename, with the latest count. So a player who joins and
+  leaves within a minute can leave the channel saying "1 online" for up to 5 minutes.
+- **Restarting the monitor starts the 5-minute wait again,** so avoid recreating the
+  container repeatedly while testing.
+- **Right after the monitor starts,** the name is left alone until the count is known: the
+  next join or leave, or the server's `Connections` log line every 10 minutes.
+- **Offline** shows as soon as the server logs a shutdown, or once the log has been silent
+  for `stale_after_seconds` (15 min), which catches a crash.
+- **Log times are UTC** unless you set `TZ` in `.env`, e.g. `TZ=America/Los_Angeles`.
 
 ### Testing it
 
@@ -513,6 +538,11 @@ The admin bot keeps **one message** in a channel up to date:
 Times use Discord's own relative timestamps, so they stay current by themselves. The bot
 only edits the message when something changes.
 
+**At start-up** the board fills in the version, portals, and when the server last booted,
+saved, backed up and was raided, all read from the existing log. Who's online shows once
+the count is known: at the next join or leave, or the server's next count line within 10
+minutes. Until then the title is ⚪.
+
 1. Make a text channel (e.g. `#server-status`), ideally read-only for everyone.
 2. Give the bot **View Channel**, **Send Messages**, **Embed Links** and **Read Message
    History** there.
@@ -520,8 +550,10 @@ only edits the message when something changes.
    ```json
    "status_board": { "channel_id": "123456789012345678" }
    ```
-4. Recreate the container. The bot posts the message once and remembers it in
-   `status_board.json`. Delete the message and it posts a fresh one.
+4. Recreate the container. The bot posts the message once (log: `status board posted in
+   #…`) and remembers it in `status_board.json`. Delete the message and it posts a fresh
+   one. **After moving the board to another channel,** delete the old message; the new
+   channel gets a fresh one.
 
 It works alongside the [status voice channel](#status-voice-channel): the channel name is
 the glanceable version, and the board has the details.

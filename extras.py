@@ -57,6 +57,7 @@ class LiveState:
     last_backup: Optional[float] = None
     portals: Optional[int] = None
     last_raid: Optional[tuple] = None                  # (name, real epoch)
+    booted: bool = False                               # saw a boot, so the count starts at 0
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def observe(self, ev, now: Optional[float] = None) -> Optional[dict]:
@@ -93,7 +94,7 @@ class LiveState:
                 self.session_deaths.clear()
                 self.count = 0
             elif k == "server_online":
-                self.down, self.up_since, self.count = False, now, 0
+                self.down, self.up_since, self.count, self.booted = False, now, 0, True
                 self.online.clear()
             elif k == "server_version":
                 self.version = ev.extra.get("version")
@@ -114,7 +115,8 @@ class LiveState:
             return {"online": names, "count": max(count, len(names)), "down": self.down,
                     "up_since": self.up_since, "version": self.version, "last_save": self.last_save,
                     "last_backup": self.last_backup, "portals": self.portals, "last_raid": self.last_raid,
-                    "known": self.count is not None or bool(names) or self.up_since is not None}
+                    # up_since alone isn't enough: it can come from reading old log lines.
+                    "known": self.count is not None or bool(names) or self.booted}
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +313,7 @@ def render_board(snap: dict, server_name: str) -> dict:
     if snap["down"]:
         title, color, desc = f"🔴 {server_name}: offline", 0xED4245, "The server is down or restarting."
     elif not snap["known"]:
-        title, color, desc = f"⚪ {server_name}", 0x95A5A6, "Waiting for the server's next update…"
+        title, color, desc = f"⚪ {server_name}", 0x95A5A6, "Checking who's online… (known at the next join or leave, or within 10 minutes)"
     elif snap["count"] > 0:
         title, color = f"🟢 {server_name}: {snap['count']} online", 0x57F287
         desc = "\n".join(player_lines(snap))

@@ -1014,21 +1014,52 @@ def build_maintenance(cfg: dict, source, discord: "Discord", server_name: str):
 
 
 def prime_live_state(live, source) -> None:
-    """The monitor starts at the end of the log, so learn the server's version and portal
-    count from what's already there (local files only; cheap)."""
+    """The monitor starts at the end of the log, so fill the status board from what's
+    already there: version, portals, and when the server last booted, saved, backed up
+    and was raided (local files only; one quick read at start-up).
+
+    Log times are the server's wall clock. The file's modification time is the real time
+    its last line was written, which gives the offset to convert them."""
     if not isinstance(source, LocalFileSource):
         return
+    last_ts = boot = shutdown = save = backup = None
+    raid = None
     try:
         with open(source.path, encoding="utf-8", errors="replace") as f:
             for line in f:
-                m = RE_VERSION.search(line)
-                if m:
+                ts = parse_log_ts(line)
+                if ts is not None:
+                    last_ts = ts
+                if (m := RE_VERSION.search(line)):
                     live.version = m.group("version")
-                m = RE_PORTALS.search(line)
-                if m:
+                elif (m := RE_PORTALS.search(line)):
                     live.portals = int(m.group("n"))
+                elif RE_READY.search(line):
+                    boot = last_ts
+                elif RE_SHUTDOWN.search(line):
+                    shutdown = last_ts
+                elif RE_SAVED.search(line):
+                    save = last_ts
+                elif RE_BACKUP.search(line):
+                    backup = last_ts
+                elif (m := RE_RAID.search(line)):
+                    raid = (raid_name(m.group("event")), last_ts)
+        mtime = os.path.getmtime(source.path)
     except OSError as e:
         log.debug("Couldn't pre-read the log: %s", e)
+        return
+    if last_ts is None:
+        return
+    # Round to a quarter hour: time zones are whole or quarter hours, the rest is lag.
+    offset = round((mtime - last_ts) / 900.0) * 900
+
+    def real(ts):
+        return ts + offset if ts is not None else None
+    if boot is not None and (shutdown is None or boot >= shutdown):
+        live.up_since = real(boot)
+    live.last_save, live.last_backup = real(save), real(backup)
+    if raid and raid[1] is not None:
+        live.last_raid = (raid[0], real(raid[1]))
 
 
 def record_event(store, ev: "Event") -> None:
