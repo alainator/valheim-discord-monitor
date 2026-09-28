@@ -435,7 +435,7 @@ class AdminBot:
                 board = extras.render_board(self.live.snapshot(), self.server_name)
                 sig = json.dumps(board, sort_keys=True)
                 if sig != last:
-                    embed = discord.Embed.from_dict({**board, "footer": {"text": "Updates automatically"}})
+                    embed = discord.Embed.from_dict({**board, "footer": {"text": "Live · refreshes on its own"}})
                     embed.timestamp = discord.utils.utcnow()
                     try:
                         if msg is None:

@@ -136,3 +136,42 @@ class BackupTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrimeTest(unittest.TestCase):
+    def test_board_fields_from_the_existing_log(self):
+        from valheim_discord_monitor import LocalFileSource, prime_live_state
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "console.log")
+            with open(path, "w") as f:
+                f.write("09/28/2026 10:00:00: Valheim version: l-1.0.16 (network version 40)\n"
+                        "09/28/2026 10:00:05: Game server connected\n"
+                        "09/28/2026 10:00:06: [ Connected 7 portals ]\n"
+                        "09/28/2026 11:00:00: Random event set:army_moder\n"
+                        "09/28/2026 11:30:00: World save (5/5) done. Total time [108ms]\n"
+                        "09/28/2026 11:30:01: Backup created in Alheim_backup_auto-1 [1ms]\n"
+                        "09/28/2026 12:00:00:  Connections 0 ZDOS:1  sent:0 recv:0\n")
+            log_noon = dt.datetime(2026, 9, 28, 12, 0, tzinfo=dt.timezone.utc).timestamp()
+            real_noon = log_noon + 7 * 3600 + 42           # server 7 h behind UTC, file touched 42 s later
+            os.utime(path, (real_noon, real_noon))
+            live = extras.LiveState()
+            prime_live_state(live, LocalFileSource(path))
+            off = 7 * 3600
+            self.assertEqual((live.version, live.portals), ("l-1.0.16", 7))
+            self.assertEqual(live.up_since, log_noon - 2 * 3600 + 5 + off)
+            self.assertEqual(live.last_save, log_noon - 1800 + off)
+            self.assertEqual(live.last_backup, log_noon - 1799 + off)
+            self.assertEqual(live.last_raid, ("Moder's army (drakes)", log_noon - 3600 + off))
+            # Known history, but not who's online now: the board must not claim "empty".
+            self.assertFalse(live.snapshot()["known"])
+            self.assertTrue(extras.render_board(live.snapshot(), "S")["title"].startswith("⚪"))
+
+    def test_down_server_has_no_up_since(self):
+        from valheim_discord_monitor import LocalFileSource, prime_live_state
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "console.log")
+            with open(path, "w") as f:
+                f.write("09/28/2026 10:00:05: Game server connected\n09/28/2026 11:00:00: OnApplicationQuit\n")
+            live = extras.LiveState()
+            prime_live_state(live, LocalFileSource(path))
+            self.assertIsNone(live.up_since)

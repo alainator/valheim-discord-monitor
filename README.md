@@ -538,6 +538,11 @@ The admin bot keeps **one message** in a channel up to date:
 Times use Discord's own relative timestamps, so they stay current by themselves. The bot
 only edits the message when something changes.
 
+**At start-up** the board fills in the version, portals, and when the server last booted,
+saved, backed up and was raided, all read from the existing log. Who's online shows once
+the count is known: at the next join or leave, or the server's next count line within 10
+minutes. Until then the title is ⚪.
+
 1. Make a text channel (e.g. `#server-status`), ideally read-only for everyone.
 2. Give the bot **View Channel**, **Send Messages**, **Embed Links** and **Read Message
    History** there.
