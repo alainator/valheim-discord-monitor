@@ -189,7 +189,7 @@ If the server uses `bannedlist.txt` or `permittedlist.txt`, Valheim turns away a
 banned or not permitted and logs:
 
 ```
-Player Stranger : Steam_76561198000000000 is blacklisted or not in whitelist.
+Player Stranger : V_76561198000000000 is blacklisted or not in whitelist.
 ```
 
 Log mode turns that line into a **`join_refused`** event. Nothing is logged when
@@ -219,9 +219,10 @@ lists are doing their job. There are two ways to receive it:
 
 The bot edits the list files directly, so it has to run **on the same machine as
 the server** (self-hosted, `file` source) with write access to the save dir. It
-writes the ID exactly as the server printed it (`Steam_…` / `Xbox_…` on current
-builds, a bare SteamID64 on older ones), and matches `Steam_7656…` and bare
-`7656…` as the same player. Community docs say list edits apply without a restart
+writes the ID exactly as the server printed it. Since Valheim 1.0 that's `V_…` for Steam
+(`X_`, `S_`, `N_` for Xbox, PlayStation, Nintendo); before that it was `Steam_…` /
+`Xbox_…`, and old Steam-only builds used a bare SteamID64. `V_7656…`, `Steam_7656…` and a
+bare `7656…` are matched as the same player. Community docs say list edits apply without a restart
 (the next join attempt is checked against the file). If a change doesn't seem to take
 effect, `sudo systemctl restart valheimserver`.
 
@@ -292,7 +293,7 @@ unlock) plus a "Recent Unlocks" feed across everyone.
 
 How the link is made: nothing to configure per player. When a Steam player
 connects, the server log carries a handshake line
-(`PlayFab socket … received local Platform ID Steam_7656…`) that the monitor
+(`PlayFab socket … received local Platform ID V_7656…`, or `Steam_7656…` before 1.0) that the monitor
 correlates to that player's character login, storing the character↔SteamID
 mapping. A background refresh then pulls, from the **public** Steam Web API:
 

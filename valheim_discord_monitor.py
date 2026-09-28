@@ -87,8 +87,9 @@ RE_TIMEOUT = re.compile(_TS + r"ZRpc timeout detected")
 # online would otherwise stay stuck as online — we flush them on any of these.
 RE_SHUTDOWN = re.compile(_TS + r"(?:Game - )?OnApplicationQuit|ZNet Shutdown|ZNet OnDestroy")
 # A player turned away by bannedlist.txt / permittedlist.txt. The id is whatever the
-# server compared against the lists: "Steam_7656…" / "Xbox_…" on current builds, a bare
-# SteamID64 on older Steam-only ones — so it is exactly what belongs in the list files.
+# server compared against the lists: "V_7656…" (Steam) / "X_…" / "S_…" / "N_…" since 1.0,
+# "Steam_7656…" / "Xbox_…" before that, a bare SteamID64 on old Steam-only builds — so it
+# is exactly what belongs in the list files.
 RE_REFUSED = re.compile(_TS + r"Player (?P<name>.+?) : (?P<id>\S+) is blacklisted or not in whitelist")
 
 
@@ -251,8 +252,10 @@ class ValheimLogParser:
         m = RE_PLATFORM_ID.search(line)
         if m:
             platform = m.group("platform")
-            if platform.startswith("Steam_"):
-                self.s.id_to_steam[m.group("pf")] = platform[len("Steam_"):]
+            for prefix in ("V_", "Steam_"):      # Steam: "V_" since Valheim 1.0, "Steam_" before
+                if platform.startswith(prefix):
+                    self.s.id_to_steam[m.group("pf")] = platform[len(prefix):]
+                    break
             return
 
         m = RE_CONNECT_STEAM.search(line) or RE_CONNECT_PLAYFAB.search(line)
