@@ -6,7 +6,7 @@ on the game server, so Steam achievements keep working. Two modes:
 | Mode | Needs | Events |
 |---|---|---|
 | **Count mode** (`a2s` or `steamapi`) | Only the server's IP — polls the Steam query port (game port + 1), or Steam's master server via the Web API when that port is firewalled | player joined / left (count only), server online / offline |
-| **Log mode** (`lowms`, `nexus`, `ftp`, `sftp`, `file`, `http`) | Read access to `valheim_console.log` — on LOW.MS via the public API (`lowms`) | named **login**, **logout**, **death**, respawn |
+| **Log mode** (`lowms`, `nexus`, `ftp`, `sftp`, `file`, `http`) | Read access to `valheim_console.log` — on LOW.MS via the public API (`lowms`) | named **login**, **logout**, **death**, respawn, **refused joins** |
 
 Log mode is the one you want: names and deaths. On LOW.MS use the `lowms`
 source: the public API now serves the console with a plain API key (no FTP/SFTP
@@ -16,6 +16,76 @@ servers, because relayed players never register with Steam.
 
 Python 3.9+, no third-party packages for the core monitor. Optional extras: SFTP
 (`paramiko`) and the Discord admin bot (`discord.py`, see `requirements.txt`).
+
+On top of the Discord posts it can also:
+- **Alert you when someone is refused** by your ban or permitted list, and let you
+  **Permit** or **Ban** them with a button in Discord (self-hosted servers). See
+  [Join-attempt alerts & Discord admin bot](#join-attempt-alerts--discord-admin-bot).
+- Keep **play stats** in SQLite and publish a leaderboard page.
+- Show players' **Steam achievements** on that page.
+- Run **unattended updates and nightly backups** on LOW.MS.
+
+**Running the Valheim server on your own Linux machine?** Start with the
+[self-hosted quick start](#self-hosted-linux-server-quick-start).
+
+## Self-hosted Linux server (quick start)
+
+This is the setup for a dedicated server you run yourself, e.g. installed with the
+[Pi My Life Up guide](https://pimylifeup.com/valheim-dedicated-server-linux/):
+- a `valheim` user
+- the server in `/home/valheim/valheimserver`, run by the systemd unit `valheimserver.service`
+- `-savedir /home/valheim/valheim_save_data`
+
+The monitor runs in Docker on the same machine. It tails the server's log file and,
+if you enable the admin bot, edits the ban and permitted lists in the save dir.
+
+1. **Have the server write its log to a file.** Add `-logFile` to the `ExecStart` line
+   in `/etc/systemd/system/valheimserver.service`:
+   ```
+   ExecStart=/home/valheim/valheimserver/valheim_server.x86_64 … -savedir /home/valheim/valheim_save_data -logFile /home/valheim/logs/valheim_console.log
+   ```
+   Then create the folder and restart the server:
+   ```bash
+   sudo -u valheim mkdir -p /home/valheim/logs
+   sudo systemctl daemon-reload && sudo systemctl restart valheimserver
+   ```
+   To check what your server actually uses: `systemctl cat valheimserver | grep ExecStart`.
+   If your `-savedir` or log path differs, change the two paths in `docker-compose.yml`.
+2. **Get the code and configure it:**
+   ```bash
+   git clone https://github.com/alainator/valheim-discord-monitor.git
+   cd valheim-discord-monitor
+   cp config.selfhosted.example.json config.json
+   cp .env.example .env && chmod 600 .env
+   ```
+   - In `config.json`, set `server_name`.
+   - In `.env`, set `DISCORD_WEBHOOK_URL` (channel → Edit Channel → Integrations →
+     Webhooks → New Webhook → Copy Webhook URL) and `TZ`.
+   - If you don't want the admin bot yet, set `admin_bot.enabled` to `false`.
+     Otherwise follow [Setting up the bot](#setting-up-the-bot).
+
+   Keep secrets in `.env` rather than `config.json`. Both files are git-ignored, but a
+   `grep` or a pasted snippet of `config.json` can easily leak a token.
+3. **Start it:**
+   ```bash
+   docker compose up -d --build
+   docker compose logs -f
+   ```
+   A healthy start logs `Monitoring file source for <your server>; posting [...]`,
+   plus `; admin bot on` and `admin_bot: connected as …` if the bot is enabled.
+
+**Updating:** `git pull && docker compose up -d --build`.
+
+**After editing `config.json` or `.env`:** `docker compose up -d --force-recreate`. The
+monitor reads its settings only at start-up.
+
+**Looking inside `/home/valheim`:** that folder is private to the `valheim` user. Use
+`sudo`, and wrap wildcards in `sudo sh -c '…'`. Otherwise your own shell expands the
+`*` before `sudo` runs and reports "No such file":
+```bash
+sudo sh -c 'ls -la /home/valheim/valheim_save_data/*list.txt'
+```
+The container runs as root, so it can read and edit those files anyway.
 
 ## Count mode (quick start)
 
@@ -228,25 +298,100 @@ effect, `sudo systemctl restart valheimserver`.
 
 ### Setting up the bot
 
-1. <https://discord.com/developers/applications> → **New Application** → **Bot**
-   → **Reset Token** and copy it (goes in `DISCORD_BOT_TOKEN` or `admin_bot.token`).
-   It needs **no privileged intents**.
-2. **OAuth2 → URL Generator**: scopes `bot` + `applications.commands`, bot
-   permissions **View Channel**, **Send Messages**, **Embed Links**. Open the URL and add
-   the bot to your Discord server.
-3. Create a private channel (e.g. `#valheim-admin`) that the bot can see.
-4. Turn on Discord's **Developer Mode** (User Settings → Advanced), then
-   right-click to **Copy ID** for: your server (`guild_id`), the channel
-   (`channel_id`), and yourself (`admin_user_ids`), or an admin role (`admin_role_ids`).
-5. Fill in the `admin_bot` block (see `config.selfhosted.example.json`) with
-   `save_dir` pointing at the folder with the list files (inside Docker:
-   `/valheim_save_data`, per `docker-compose.yml`).
-6. `pip install -r requirements.txt` (the Docker image already has it) and restart
-   the monitor. The log shows `admin_bot: connected as …`. Setting `guild_id` makes the
-   slash commands appear immediately; without it they can take up to an hour.
+This takes about five minutes in Discord's developer portal.
 
-A player who keeps retrying only triggers one notice per `repeat_cooldown_seconds`
+**1. Create the bot.**
+1. Go to <https://discord.com/developers/applications> → **New Application** → give it a name.
+2. Open **Bot** → **Reset Token** → **Copy**.
+3. Put the token in `.env` as `DISCORD_BOT_TOKEN=<token>`: no quotes, no spaces.
+   - It must be the token from the **Bot** page: about 70 characters with two dots. The
+     **Client Secret** on the OAuth2 page (32 characters, no dots) won't work.
+   - Every **Reset Token** click invalidates the previous token.
+   - Treat the token like a password; anyone who has it controls the bot.
+4. Leave the **Privileged Gateway Intents** off; the bot doesn't need them.
+5. Optional: switch off **Public Bot** so nobody else can invite it. If Discord complains,
+   first set **Installation** → **Install Link** to **None**.
+
+**2. Invite it.**
+1. Open **OAuth2** → **URL Generator**.
+2. Under scopes, tick **`bot`** and **`applications.commands`**.
+3. Under bot permissions, tick **View Channels**, **Send Messages** and **Embed Links**.
+4. Open the generated URL, pick your Discord server, and click **Authorize**.
+
+**3. Make a private admin channel.** For example `#valheim-admin`, with Private Channel on.
+Then channel settings → **Permissions** → add the bot with View Channel, Send Messages
+and Embed Links.
+
+**4. Copy the IDs.** Turn on User Settings → Advanced → **Developer Mode**, then right-click
+and **Copy ID** on each of these:
+
+| Right-click | Goes in |
+|---|---|
+| Your server icon | `guild_id` |
+| The admin channel | `channel_id` |
+| Yourself | `admin_user_ids` |
+| An admin role, if you want a whole role to have access | `admin_role_ids` |
+
+**5. Configure.** Fill in the `admin_bot` block of `config.json` as in
+`config.selfhosted.example.json`:
+- Keep the IDs as quoted strings.
+- `save_dir` is the folder with the list files *as the monitor sees it*. In Docker that's
+  `/valheim_save_data`, which `docker-compose.yml` maps to `/home/valheim/valheim_save_data`.
+- Check the file is valid JSON: `python3 -m json.tool config.json > /dev/null && echo OK`.
+
+**6. Start.** Run `docker compose up -d --build --force-recreate`, or
+`pip install -r requirements.txt` and restart the monitor if you don't use Docker.
+- The log shows `admin_bot: connected as …` and the bot turns online in Discord.
+- With `guild_id` set, `/valheim` commands appear immediately; without it, they can take up
+  to an hour.
+
+A player who keeps retrying triggers only one notice per `repeat_cooldown_seconds`
 (10 min).
+
+### Testing it
+
+1. **Can the bot read the lists?** In Discord, run `/valheim lists`. You should get a private
+   reply showing `permittedlist.txt`, `bannedlist.txt` and `adminlist.txt`.
+2. **Fake a refused join.** Append a made-up log line; the ID is fake, so no real player is
+   affected:
+   ```bash
+   echo "$(date '+%m/%d/%Y %H:%M:%S'): Player Test Viking : V_76561190000000001 is blacklisted or not in whitelist." \
+     | sudo tee -a /home/valheim/logs/valheim_console.log
+   ```
+   Within one poll interval (15 s), a "🚫 Join attempt refused" notice with Permit / Ban /
+   Ignore buttons appears in the admin channel.
+3. **Try the buttons.** Click **Permit** or **Ban**. The notice updates with the result
+   and who clicked, then check the file:
+   ```bash
+   sudo cat /home/valheim/valheim_save_data/permittedlist.txt
+   ```
+   Undo it with `/valheim unpermit player_id:V_76561190000000001` (or `/valheim unban …`).
+   Use a different fake ID for each test, because of the 10-minute cooldown.
+4. **For real.** Have someone who isn't on the list try to join, click **Permit**, and have
+   them try again.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Bot offline; no `admin_bot` line in the log, and the `Monitoring …` line doesn't end in `; admin bot on` | The monitor didn't see `admin_bot.enabled: true`: a config edit made after the container started, or the old code | `git pull`, then `docker compose up -d --build --force-recreate` |
+| `Expecting property name enclosed in double quotes` (or other JSON errors) | Usually a comma after the last item in a block, e.g. `},` right before the final `}` | Remove that comma; check with `python3 -m json.tool config.json` |
+| `admin_bot stopped: Improper token has been passed.` | The token Discord got is wrong: an old token after a reset, the Client Secret instead of the bot token, or placeholder text left in `.env` | See the length check below |
+| `discord.py isn't installed` | The image wasn't rebuilt | `docker compose up -d --build` |
+| `admin_bot disabled: …` | A required setting is missing; the message names it | Add it to the `admin_bot` block |
+| `/valheim` commands don't show up | `guild_id` isn't set (global commands take up to an hour), or the bot was invited without `applications.commands` | Set `guild_id`, or re-invite the bot with both scopes |
+| "Only the server admins can do that." | Your Discord user ID isn't in `admin_user_ids`, and you have none of the `admin_role_ids` roles | Add your ID and recreate the container |
+| "Couldn't edit the list files" | `save_dir` doesn't point at the mounted save dir | Check the volume in `docker-compose.yml` and `save_dir` in `config.json` |
+| `PyNaCl is not installed, voice will NOT be supported` | Harmless | Nothing: the bot doesn't use voice |
+
+To check which token the container actually has without printing it:
+```bash
+docker compose exec valheim-discord-monitor sh -c 'printf "%s" "$DISCORD_BOT_TOKEN" | awk "{print length(\$0), \"chars,\", gsub(/\\./,\".\"), \"dots\"}"'
+```
+A bot token is about 70 characters with 2 dots. `0 chars` means `.env` wasn't loaded.
+`.env` must sit next to `docker-compose.yml`, and the container must be recreated after
+changing it. If `DISCORD_BOT_TOKEN` is empty, the monitor falls back to `admin_bot.token` in
+`config.json`.
 
 ## Player stats & public web page
 
@@ -389,33 +534,11 @@ Setup:
 
 ## Running it permanently
 
-**Docker Compose (self-hosted Linux server)**
-
-The included `docker-compose.yml` is for a server set up like the
-[Pi My Life Up guide](https://pimylifeup.com/valheim-dedicated-server-linux/): a `valheim`
-user, server in `/home/valheim/valheimserver`, `-savedir /home/valheim/valheim_save_data`.
-The monitor reads the console log from `/home/valheim/logs` and, for the admin bot,
-edits the list files in the save dir.
-
-1. The guide's systemd unit sends the console to the journal only. To get it into a file
-   the monitor can tail, add to `[Service]` in `/etc/systemd/system/valheimserver.service`:
-   ```ini
-   StandardOutput=append:/home/valheim/logs/valheim_console.log
-   StandardError=inherit
-   ```
-   then `sudo -u valheim mkdir -p /home/valheim/logs && sudo systemctl daemon-reload && sudo systemctl restart valheimserver`.
-   (`append:` needs systemd 240+. The file grows over time; truncating it is safe because the monitor notices and starts over.)
-2. Configure and start:
-   ```bash
-   cp config.selfhosted.example.json config.json    # fill in webhook, bot token, ids
-   docker compose up -d --build
-   docker compose logs -f
-   ```
-   Put secrets in a `.env` file next to the compose file (`DISCORD_WEBHOOK_URL=…`,
-   `DISCORD_BOT_TOKEN=…`) instead of `config.json` if you like. Both are git-ignored.
-   Set `TZ=America/Los_Angeles` (etc.) there too so times line up with the server.
-
-After `git pull`, run `docker compose up -d --build` again.
+**Docker Compose**: see the [self-hosted quick start](#self-hosted-linux-server-quick-start).
+`docker-compose.yml` bind-mounts the repo, so `config.json`, `monitor_state.json` and the
+stats database live next to the code and survive rebuilds. If `docker compose` rejects
+`env_file` / `required`, your Compose is older than 2.24; delete the `env_file:` block and
+pass secrets another way.
 
 **Plain Docker**
 ```bash
@@ -469,7 +592,7 @@ or run it in a terminal.
 | `maintenance.panel_login` | — | Panel email/password for updates when the source has no session (e.g. `lowms`); or `NEXUS_EMAIL` / `NEXUS_PASSWORD`. |
 | `maintenance.dry_run` | false | Log the plan without doing anything. |
 | `admin_bot.enabled` | false | Post refused join attempts to a private channel with Permit / Ban buttons. |
-| `admin_bot.token` | — | Discord bot token; or `DISCORD_BOT_TOKEN` env var. |
+| `admin_bot.token` | — | Discord bot token. Prefer the `DISCORD_BOT_TOKEN` env var (`.env`), which takes precedence. |
 | `admin_bot.guild_id` / `channel_id` | — | Your Discord server, and the admin channel for notices. |
 | `admin_bot.admin_user_ids` / `admin_role_ids` | — | Who may press the buttons and use `/valheim`. |
 | `admin_bot.save_dir` | — | Folder holding `permittedlist.txt` / `bannedlist.txt` (must be writable). |
@@ -484,6 +607,10 @@ or run it in a terminal.
 - On a PlayFab/crossplay server a disconnect (clean or timeout) shows up as the
   `Destroying abandoned … owner <id>` line; the monitor emits one logout per player.
 - If the server restarts, the log is truncated and the monitor resets automatically.
+- Player IDs: since Valheim 1.0 the lists use `V_<SteamID64>` for Steam and `X_` / `S_` /
+  `N_` for Xbox, PlayStation and Nintendo. Older lists may still contain
+  `Steam_…` / `Xbox_…` / `PlayStation_…` / `Nintendo_…` entries. The admin bot leaves
+  those untouched.
 
 ## License
 

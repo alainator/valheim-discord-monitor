@@ -9,14 +9,12 @@
     "enabled": true
   },
   "discord": {
-    "webhook_url": "https://discord.com/api/webhooks/XXXX/YYYY  (or DISCORD_WEBHOOK_URL env)",
     "username": "Valheim",
     "embeds": true,
     "show_player_count": true
   },
   "admin_bot": {
     "enabled": true,
-    "token": "YOUR-BOT-TOKEN  (or DISCORD_BOT_TOKEN env)",
     "guild_id": "123456789012345678",
     "channel_id": "123456789012345678",
     "admin_user_ids": ["123456789012345678"],

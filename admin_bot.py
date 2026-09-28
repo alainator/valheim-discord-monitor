@@ -152,7 +152,7 @@ class AdminBot:
 
     def __init__(self, cfg: dict, server_name: str):
         import discord  # noqa: F401  (fail at start-up, not on the first event)
-        self.token = os.environ.get("DISCORD_BOT_TOKEN") or cfg.get("token", "")
+        self.token = (os.environ.get("DISCORD_BOT_TOKEN") or cfg.get("token") or "").strip().strip('"\'')
         if not self.token or self.token.startswith("YOUR"):
             raise ValueError("admin_bot needs a bot token (admin_bot.token or DISCORD_BOT_TOKEN)")
         self.channel_id = int(cfg["channel_id"])
@@ -192,7 +192,11 @@ class AdminBot:
             # Not client.run(): that makes its own loop, and notify_refused needs this one.
             self.loop.run_until_complete(main())
         except Exception as e:  # noqa: BLE001
-            log.error("admin_bot stopped: %s", e)
+            hint = ""
+            if "Improper token" in str(e):
+                hint = (" — use the token from the developer portal's Bot page (~70 chars, two dots), "
+                        "not the OAuth2 Client Secret; a Reset Token invalidates the old one")
+            log.error("admin_bot stopped: %s%s", e, hint)
 
     # -- called from the monitor thread ---------------------------------------
     def notify_refused(self, name: str, pid: str, ts: Optional[int] = None) -> None:
