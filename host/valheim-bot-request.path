@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for requests from the Valheim Discord monitor
+
+[Path]
+PathExists=/home/valheim/bot/request
+Unit=valheim-bot-request.service
+
+[Install]
+WantedBy=multi-user.target

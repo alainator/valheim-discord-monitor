@@ -372,7 +372,7 @@ class Discord:
               "server_restart": 0xE0A13C, "maintenance_start": 0x5865F2, "maintenance_done": 0x57F287,
               "maintenance_failed": 0xED4245, "maintenance_pending": 0xE0A13C, "join_refused": 0xE67E22,
               "raid": 0xED4245, "version_mismatch": 0xE0A13C, "logout_summary": 0x95A5A6, "welcome": 0x57F287,
-              "milestone": 0xF1C40F, "weekly_recap": 0x5865F2}
+              "milestone": 0xF1C40F, "weekly_recap": 0x5865F2, "update": 0x5865F2}
     EMOJI = {"login": "🟢", "logout": "🔴", "death": "💀", "respawn": "🔥", "server_up": "🛡️",
              "player_joined": "🟢", "player_left": "🔴", "server_online": "🟢", "server_offline": "🔴",
              "server_restart": "🔻", "maintenance_start": "🛠️", "maintenance_done": "✅",
@@ -393,6 +393,7 @@ class Discord:
         "logout_summary": "**{player}** left {server} after {duration}{deaths_text}.",
         "welcome": "**{player}** arrived in {server} for the first time. Welcome, viking!",
         "milestone": "**{player}** {detail}",
+        "update": "{detail}",
         # Someone on the ban list, or not on the permitted list, tried to connect.
         "join_refused": "**{player}** tried to join {server} but isn't allowed in.",
         # Count-only events (a2s source): no names available.
@@ -426,13 +427,14 @@ class Discord:
         emoji = self.EMOJI.get(ev.kind, "")
         footer = f"{ev.extra['count']} player(s) online" if self.show_count and "count" in ev.extra else None
         if self.use_embeds:
-            embed = {"description": f"{emoji} {text}", "color": self.COLORS.get(ev.kind, 0),
+            embed = {"description": f"{emoji} {text}".strip(), "color": self.COLORS.get(ev.kind, 0),
                      "timestamp": datetime.now(timezone.utc).isoformat()}
             if footer:
                 embed["footer"] = {"text": footer}
             payload = {"username": self.username, "embeds": [embed]}
         else:
-            payload = {"username": self.username, "content": f"{emoji} {text}" + (f"  ({footer})" if footer else "")}
+            payload = {"username": self.username,
+                       "content": f"{emoji} {text}".strip() + (f"  ({footer})" if footer else "")}
         self.send(payload)
 
     def post_embed(self, kind: str, embed: dict, event_filter: set) -> None:
@@ -1218,7 +1220,8 @@ def main():
     else:
         tailer = OffsetTailer(source, cfg.get("state_file", "monitor_state.json"), start_at_end=not args.from_start)
     parser = ValheimLogParser()
-    extra_events = {"raid", "version_mismatch", "session_summary", "welcome", "milestone", "weekly_recap"}
+    extra_events = {"raid", "version_mismatch", "session_summary", "welcome", "milestone", "weekly_recap",
+                    "update"}
     log_events = {"login", "logout", "death", "respawn", "server_up",
                   "server_restart", "server_online", "server_offline", "join_refused"} | extra_events
     default_log_events = {"login", "logout", "death", "server_restart", "server_online", "server_offline"}
@@ -1282,8 +1285,22 @@ def main():
         backups.copy_in_background()          # catch up on anything made while we were down
     last_backup_check = 0.0
     mismatch_posted: dict = {}
+
+    def post_update(text: str) -> None:
+        discord.post(Event("update", None, {"detail": text}), server_name, events)
+
+    # Host-side auto-updater (self-hosted): read its log, share the player count, and let
+    # the bot ask it to check or restart. See host/README.md.
+    upd = upd_tailer = None
+    upd_cfg = cfg.get("updater") or {}
+    if upd_cfg.get("log") or upd_cfg.get("bot_dir"):
+        import updater
+        upd = updater.UpdateWatcher(upd_cfg)
+        if upd.bot_dir and not os.path.isdir(upd.bot_dir):
+            log.warning("updater.bot_dir %s doesn't exist (mount it); status.json and requests are off", upd.bot_dir)
+            upd.bot_dir = ""
     if admin:
-        admin.attach(live=live, backups=backups)
+        admin.attach(live=live, backups=backups, updater=upd, announce=post_update)
 
     def announce(ev: "Event") -> None:
         """Post one event, upgraded where the extras apply: a first-ever login becomes a
@@ -1296,7 +1313,11 @@ def main():
                 record_event(store, ev)
             except Exception as e:
                 log.warning("DB write failed for %s: %s", ev.kind, e)
+        prev_version = live.version
         summary = live.observe(ev)
+        if ev.kind == "server_version" and prev_version and ev.extra.get("version") != prev_version:
+            post_update(f"✅ Valheim updated: **{prev_version}** → **{ev.extra.get('version')}**. "
+                        f"Players need the same version to join.")
         if maint and maint.suppressing(ev.kind):
             return
         if ev.kind == "logout" and summary and "session_summary" in events:
@@ -1380,11 +1401,28 @@ def main():
                         booted = True
             backoff = interval
             now = time.time()
+            count = parser.s.server_count
+            if count is None and (parser.s.online or booted):
+                count = len(parser.s.online)
+            offline = parser.s.down or now - last_line_at > stale_after
             if admin:
-                count = parser.s.server_count
-                if count is None and (parser.s.online or booted):
-                    count = len(parser.s.online)
-                admin.set_status(parser.s.down or now - last_line_at > stale_after, count)
+                admin.set_status(offline, count)
+            if upd:
+                upd.write_status(count, offline)
+                if upd.log_path and upd_tailer is None and os.path.exists(upd.log_path):
+                    upd_tailer = OffsetTailer(LocalFileSource(upd.log_path),
+                                              upd_cfg.get("state_file", "updater_state.json"))
+                if upd_tailer:
+                    try:
+                        for uline in upd_tailer.poll():
+                            for target, text in upd.handle(uline):
+                                log.info("UPDATER %s: %s", target, text)
+                                if target == "public":
+                                    post_update(text)
+                                elif admin:
+                                    admin.post_admin(text)
+                    except OSError as e:
+                        log.debug("updater log not readable: %s", e)
             if store and changed and parser.last_ts is not None:
                 try:
                     store.record_clock_offset(parser.last_ts, now)
