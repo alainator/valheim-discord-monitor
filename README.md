@@ -14,7 +14,8 @@ exists there, and the older `nexus` source had to sign in to the panel as you). 
 works — note the Steam-based sources report a stale count on crossplay
 servers, because relayed players never register with Steam.
 
-Python 3.9+, no third-party packages (SFTP is the one optional extra).
+Python 3.9+, no third-party packages for the core monitor. Optional extras: SFTP
+(`paramiko`) and the Discord admin bot (`discord.py`, see `requirements.txt`).
 
 ## Count mode (quick start)
 
@@ -94,7 +95,7 @@ lines through a small state machine, and posts an embed to a Discord webhook.
    python valheim_discord_monitor.py --config config.json
    ```
    Secrets can be given as environment variables instead of in the file:
-   `DISCORD_WEBHOOK_URL`, `VALHEIM_LOG_USER`, `VALHEIM_LOG_PASSWORD`, `NEXUS_TOKEN`.
+   `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`, `VALHEIM_LOG_USER`, `VALHEIM_LOG_PASSWORD`, `NEXUS_TOKEN`.
 
 By default the monitor starts at the **end** of the log (only new events post).
 Use `--from-start` once if you want it to replay the existing file.
@@ -181,6 +182,70 @@ file you sync locally.
 #### `sftp` / `http`
 SFTP needs `pip install paramiko`. `http` polls any URL that returns the raw
 log text (supports `Range` requests if the server does).
+
+## Join-attempt alerts & Discord admin bot
+
+If the server uses `bannedlist.txt` or `permittedlist.txt`, Valheim turns away anyone
+banned or not permitted and logs:
+
+```
+Player Stranger : Steam_76561198000000000 is blacklisted or not in whitelist.
+```
+
+Log mode turns that line into a **`join_refused`** event. Nothing is logged when
+neither list is in use (nobody gets refused), so you only hear about it when the
+lists are doing their job. There are two ways to receive it:
+
+- **Webhook only.** Add `"join_refused"` to `events` and a line like "**Stranger**
+  tried to join My Server but isn't allowed in." goes to your normal channel. The
+  platform ID isn't included, because that channel is usually public.
+- **Admin bot (recommended).** A small Discord bot posts each refusal to a
+  **private admin channel** with the player's name, platform ID, Steam profile
+  link and why they were refused, plus three buttons:
+
+  | Button | Does |
+  |---|---|
+  | **Permit** | Removes the ID from `bannedlist.txt` and, if you use a permitted list, adds it to `permittedlist.txt` |
+  | **Ban** | Adds the ID to `bannedlist.txt` and removes it from `permittedlist.txt` |
+  | **Ignore** | Closes the notice |
+
+  Only the Discord users and roles you list can press them. There are also slash
+  commands for IDs you already know: `/valheim permit`, `/valheim ban`,
+  `/valheim unban`, `/valheim unpermit`, `/valheim lists`.
+
+  **Permit** never *starts* a permitted list. With an empty `permittedlist.txt`
+  the server is open to everyone who isn't banned, and adding the first ID would lock
+  everyone else out, so in that case Permit only unbans.
+
+The bot edits the list files directly, so it has to run **on the same machine as
+the server** (self-hosted, `file` source) with write access to the save dir. It
+writes the ID exactly as the server printed it (`Steam_…` / `Xbox_…` on current
+builds, a bare SteamID64 on older ones), and matches `Steam_7656…` and bare
+`7656…` as the same player. Community docs say list edits apply without a restart
+(the next join attempt is checked against the file). If a change doesn't seem to take
+effect, `sudo systemctl restart valheimserver`.
+
+### Setting up the bot
+
+1. <https://discord.com/developers/applications> → **New Application** → **Bot**
+   → **Reset Token** and copy it (goes in `DISCORD_BOT_TOKEN` or `admin_bot.token`).
+   It needs **no privileged intents**.
+2. **OAuth2 → URL Generator**: scopes `bot` + `applications.commands`, bot
+   permissions **View Channel**, **Send Messages**, **Embed Links**. Open the URL and add
+   the bot to your Discord server.
+3. Create a private channel (e.g. `#valheim-admin`) that the bot can see.
+4. Turn on Discord's **Developer Mode** (User Settings → Advanced), then
+   right-click to **Copy ID** for: your server (`guild_id`), the channel
+   (`channel_id`), and yourself (`admin_user_ids`), or an admin role (`admin_role_ids`).
+5. Fill in the `admin_bot` block (see `config.selfhosted.example.json`) with
+   `save_dir` pointing at the folder with the list files (inside Docker:
+   `/valheim_save_data`, per `docker-compose.yml`).
+6. `pip install -r requirements.txt` (the Docker image already has it) and restart
+   the monitor. The log shows `admin_bot: connected as …`. Setting `guild_id` makes the
+   slash commands appear immediately; without it they can take up to an hour.
+
+A player who keeps retrying only triggers one notice per `repeat_cooldown_seconds`
+(10 min).
 
 ## Player stats & public web page
 
@@ -323,11 +388,39 @@ Setup:
 
 ## Running it permanently
 
-**Docker**
+**Docker Compose (self-hosted Linux server)**
+
+The included `docker-compose.yml` is for a server set up like the
+[Pi My Life Up guide](https://pimylifeup.com/valheim-dedicated-server-linux/): a `valheim`
+user, server in `/home/valheim/valheimserver`, `-savedir /home/valheim/valheim_save_data`.
+The monitor reads the console log from `/home/valheim/logs` and, for the admin bot,
+edits the list files in the save dir.
+
+1. The guide's systemd unit sends the console to the journal only. To get it into a file
+   the monitor can tail, add to `[Service]` in `/etc/systemd/system/valheimserver.service`:
+   ```ini
+   StandardOutput=append:/home/valheim/logs/valheim_console.log
+   StandardError=inherit
+   ```
+   then `sudo -u valheim mkdir -p /home/valheim/logs && sudo systemctl daemon-reload && sudo systemctl restart valheimserver`.
+   (`append:` needs systemd 240+. The file grows over time; truncating it is safe because the monitor notices and starts over.)
+2. Configure and start:
+   ```bash
+   cp config.selfhosted.example.json config.json    # fill in webhook, bot token, ids
+   docker compose up -d --build
+   docker compose logs -f
+   ```
+   Put secrets in a `.env` file next to the compose file (`DISCORD_WEBHOOK_URL=…`,
+   `DISCORD_BOT_TOKEN=…`) instead of `config.json` if you like. Both are git-ignored.
+   Set `TZ=America/Los_Angeles` (etc.) there too so times line up with the server.
+
+After `git pull`, run `docker compose up -d --build` again.
+
+**Plain Docker**
 ```bash
+docker build -t valheim-discord-monitor .
 docker run -d --name valheim-monitor --restart unless-stopped \
-  -v "$PWD":/app -w /app python:3.12-alpine \
-  python valheim_discord_monitor.py --config config.json
+  -v "$PWD":/app -v /home/valheim/logs:/logs:ro valheim-discord-monitor
 ```
 
 **systemd** (`/etc/systemd/system/valheim-monitor.service`)
@@ -353,7 +446,7 @@ or run it in a terminal.
 
 | Config key | Default | Meaning |
 |---|---|---|
-| `events` | mode default | Log mode: `login`, `logout`, `death`, `respawn`, `server_up`. Count mode: `player_joined`, `player_left`, `server_online`, `server_offline`. |
+| `events` | mode default | Log mode: `login`, `logout`, `death`, `respawn`, `server_up`, `join_refused`. Count mode: `player_joined`, `player_left`, `server_online`, `server_offline`. |
 | `poll_interval_seconds` | 15 | How often to poll. |
 | `source.offline_after` | 3 | Count mode: failed queries in a row before "offline". |
 | `source.api_key` | — | `steamapi` only; or `STEAM_API_KEY` env var. |
@@ -374,6 +467,12 @@ or run it in a terminal.
 | `maintenance.update.retry_cooldown_seconds` | 3600 | Wait this long after a failed update before retrying. |
 | `maintenance.panel_login` | — | Panel email/password for updates when the source has no session (e.g. `lowms`); or `NEXUS_EMAIL` / `NEXUS_PASSWORD`. |
 | `maintenance.dry_run` | false | Log the plan without doing anything. |
+| `admin_bot.enabled` | false | Post refused join attempts to a private channel with Permit / Ban buttons. |
+| `admin_bot.token` | — | Discord bot token; or `DISCORD_BOT_TOKEN` env var. |
+| `admin_bot.guild_id` / `channel_id` | — | Your Discord server, and the admin channel for notices. |
+| `admin_bot.admin_user_ids` / `admin_role_ids` | — | Who may press the buttons and use `/valheim`. |
+| `admin_bot.save_dir` | — | Folder holding `permittedlist.txt` / `bannedlist.txt` (must be writable). |
+| `admin_bot.repeat_cooldown_seconds` | 600 | One notice per player per this many seconds. |
 | `discord.embeds` | true | Coloured embed vs plain text. |
 | `discord.show_player_count` | true | Footer with the current online count. |
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |

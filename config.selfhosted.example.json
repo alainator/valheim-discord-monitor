@@ -1,0 +1,40 @@
+{
+  "server_name": "My Valheim Server",
+  "poll_interval_seconds": 15,
+  "state_file": "monitor_state.json",
+  "offline_grace_seconds": 300,
+  "events": ["login", "logout", "death", "respawn", "server_restart", "server_online", "server_offline"],
+  "database": {
+    "path": "valheim_stats.db",
+    "enabled": true
+  },
+  "discord": {
+    "webhook_url": "https://discord.com/api/webhooks/XXXX/YYYY  (or DISCORD_WEBHOOK_URL env)",
+    "username": "Valheim",
+    "embeds": true,
+    "show_player_count": true
+  },
+  "admin_bot": {
+    "enabled": true,
+    "token": "YOUR-BOT-TOKEN  (or DISCORD_BOT_TOKEN env)",
+    "guild_id": "123456789012345678",
+    "channel_id": "123456789012345678",
+    "admin_user_ids": ["123456789012345678"],
+    "admin_role_ids": [],
+    "save_dir": "/valheim_save_data",
+    "repeat_cooldown_seconds": 600
+  },
+  "steam": {
+    "enabled": false,
+    "api_key": "",
+    "refresh_seconds": 1800,
+    "top_n": 25
+  },
+  "maintenance": {
+    "enabled": false
+  },
+  "source": {
+    "type": "file",
+    "path": "/logs/valheim_console.log"
+  }
+}

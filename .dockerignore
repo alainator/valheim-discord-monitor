@@ -1,0 +1,10 @@
+.git
+config.json
+.env
+*.db
+*.db-wal
+*.db-shm
+monitor_state.json
+maintenance_state.json
+__pycache__
+tests
