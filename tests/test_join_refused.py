@@ -31,6 +31,18 @@ class ParserTest(unittest.TestCase):
         login = next(e for e in evs if e.kind == "login")
         self.assertEqual(login.extra.get("steam_id"), "76561190000000002")
 
+    def test_valheim_1_0_crossplay_refusal(self):
+        evs = run([
+            "09/28/2026 07:44:34: PlayFab listen socket child connected to remote player BADBAD0000000001",
+            "09/28/2026 07:44:34: PlayFab socket with remote ID playfab/BADBAD0000000001 received local Platform ID V_76561190000000001",
+            "09/28/2026 07:44:35: Player Griefer : V_76561190000000001 is blacklisted or not in whitelist.",
+            "09/28/2026 07:50:00: PlayFab listen socket child connected to remote player GOOD000000000002",
+            "09/28/2026 07:50:00: PlayFab socket with remote ID playfab/GOOD000000000002 received local Platform ID V_76561190000000002",
+            "09/28/2026 07:50:20: Got character ZDOID from Friend : 1122334455:1",
+        ])
+        self.assertEqual(next(e for e in evs if e.kind == "join_refused").extra["host_id"], "V_76561190000000001")
+        self.assertEqual(next(e for e in evs if e.kind == "login").extra.get("steam_id"), "76561190000000002")
+
     def test_steam_only_bare_id(self):
         evs = run([
             "02/21/2021 23:50:01: Got connection SteamID 76561198035590204",
@@ -89,7 +101,22 @@ class ListsTest(unittest.TestCase):
         self.assertEqual(self.lists.refusal_reason("Steam_1"), "on the ban list")
         self.assertEqual(self.lists.refusal_reason("Steam_3"), "not on the permitted list")
 
+    def test_valheim_1_0_ids(self):
+        # Header and ids as a real 1.0 server writes them.
+        self.write("permitted", "// List permitted players ID ONE per line\nV_76561197961206734\n"
+                                "PlayStation_5136375155283799651\n")
+        self.assertTrue(self.lists.contains("permitted", "Steam_76561197961206734"))
+        self.assertEqual(self.lists.permit("V_76561197961206734"), [])
+        self.assertEqual(self.lists.permit("V_76561198000000001"), ["added to permittedlist.txt"])
+        self.assertEqual(self.lists.ban("V_76561197961206734"),
+                         ["added to bannedlist.txt", "removed from permittedlist.txt"])
+        self.assertEqual(self.lists.ids("permitted"),
+                         ["PlayStation_5136375155283799651", "V_76561198000000001"])
+        self.assertEqual(self.lists.refusal_reason("S_123"), "not on the permitted list")
+
     def test_steam_profile(self):
+        self.assertEqual(steam_profile("V_76561198000000000"),
+                         "https://steamcommunity.com/profiles/76561198000000000")
         self.assertEqual(steam_profile("Steam_76561198000000000"),
                          "https://steamcommunity.com/profiles/76561198000000000")
         self.assertIsNone(steam_profile("Xbox_2535400000000000"))

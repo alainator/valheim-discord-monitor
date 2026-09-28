@@ -35,6 +35,7 @@ from typing import Optional
 log = logging.getLogger("valheim-monitor.bot")
 
 LIST_FILES = {"permitted": "permittedlist.txt", "banned": "bannedlist.txt", "admin": "adminlist.txt"}
+STEAM_PREFIXES = ("V_", "Steam_")      # Steam ids: "V_" since Valheim 1.0, "Steam_" before
 BTN_PREFIX = "vdm"          # custom_id = "vdm:<action>:<id>", so buttons survive a bot restart
 
 
@@ -67,14 +68,11 @@ class ServerLists:
 
     @staticmethod
     def _variants(pid: str) -> set[str]:
-        """An id as the server may print or store it: Steam_7656… and bare 7656… match."""
+        """An id as the server may print or store it: V_7656…, Steam_7656… and a bare
+        7656… are the same Steam player."""
         pid = pid.strip()
-        out = {pid}
-        if pid.startswith("Steam_"):
-            out.add(pid[len("Steam_"):])
-        elif pid.isdigit():
-            out.add("Steam_" + pid)
-        return out
+        sid = steam64(pid)
+        return {pid} | ({sid} | {p + sid for p in STEAM_PREFIXES} if sid else set())
 
     def contains(self, which: str, pid: str) -> bool:
         return bool(self._variants(pid) & set(self.ids(which)))
@@ -131,9 +129,18 @@ class ServerLists:
         return done
 
 
+def steam64(pid: str) -> Optional[str]:
+    """The SteamID64 inside a Steam platform id (V_…, Steam_… or bare), else None."""
+    for p in STEAM_PREFIXES:
+        if pid.startswith(p):
+            pid = pid[len(p):]
+            break
+    return pid if pid.isdigit() and pid.startswith("7656") else None
+
+
 def steam_profile(pid: str) -> Optional[str]:
-    bare = pid[len("Steam_"):] if pid.startswith("Steam_") else pid
-    return f"https://steamcommunity.com/profiles/{bare}" if bare.isdigit() and bare.startswith("7656") else None
+    sid = steam64(pid)
+    return f"https://steamcommunity.com/profiles/{sid}" if sid else None
 
 
 # ---------------------------------------------------------------------------
@@ -309,12 +316,12 @@ class AdminBot:
             await it.response.send_message(f"`{pid}`: " + (", ".join(changes) or "no change needed"), ephemeral=True)
 
         @group.command(name="permit", description="Let a player in (unban; add to the permitted list if one is used)")
-        @app_commands.describe(player_id="Platform ID, e.g. Steam_76561198000000000")
+        @app_commands.describe(player_id="Platform ID, e.g. V_76561198000000000")
         async def permit(it: discord.Interaction, player_id: str):
             await run(it, bot.lists.permit, player_id, "permit")
 
         @group.command(name="ban", description="Ban a player (and remove them from the permitted list)")
-        @app_commands.describe(player_id="Platform ID, e.g. Steam_76561198000000000")
+        @app_commands.describe(player_id="Platform ID, e.g. V_76561198000000000")
         async def ban(it: discord.Interaction, player_id: str):
             await run(it, bot.lists.ban, player_id, "ban")
 
