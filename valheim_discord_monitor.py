@@ -92,12 +92,42 @@ RE_SHUTDOWN = re.compile(_TS + r"(?:Game - )?OnApplicationQuit|ZNet Shutdown|ZNe
 # server compared against the lists: "V_7656…" (Steam) / "X_…" / "S_…" / "N_…" since 1.0,
 # "Steam_7656…" / "Xbox_…" before that, a bare SteamID64 on old Steam-only builds — so it
 # is exactly what belongs in the list files.
+# Server-side happenings with no player name attached.
+RE_RAID = re.compile(_TS + r"Random event set:\s*(?P<event>\S+)")
+RE_NETVER = re.compile(_TS + r"Network version check, their:(?P<their>\d+), mine:(?P<mine>\d+)")
+RE_SAVED = re.compile(_TS + r"World save \(\d+/\d+\) done")
+RE_BACKUP = re.compile(_TS + r"Backup created in (?P<name>\S+)")
+RE_VERSION = re.compile(_TS + r"Valheim version: ?(?P<version>\S+)")
+RE_PORTALS = re.compile(_TS + r"\[ Connected (?P<n>\d+) portals \]")
 RE_REFUSED = re.compile(_TS + r"Player (?P<name>.+?) : (?P<id>\S+) is blacklisted or not in whitelist")
+
+
+# Random events ("raids") by their internal name. Unknown ones fall back to a tidied name.
+RAIDS = {
+    "army_eikthyr": "Eikthyr's army (boars and necks)",
+    "army_theelder": "The Elder's army (greydwarves)",
+    "army_bonemass": "Bonemass's army (draugr and skeletons)",
+    "army_moder": "Moder's army (drakes)",
+    "army_goblin": "Yagluth's army (fulings)",
+    "army_seekers": "The Queen's army (seekers)",
+    "army_gjall": "Gjall",
+    "army_charred": "Fader's army (the Charred)",
+    "foresttrolls": "Trolls",
+    "skeletons": "Skeletons",
+    "blobs": "Blobs",
+    "wolves": "Wolves",
+    "surtlings": "Surtlings",
+    "bats": "Bats",
+}
+
+
+def raid_name(event: str) -> str:
+    return RAIDS.get(event) or event.replace("army_", "").replace("_", " ").strip().capitalize()
 
 
 @dataclass
 class Event:
-    kind: str                   # login | logout | death | respawn | server_up | count | join_refused
+    kind: str                   # login | logout | death | respawn | count | join_refused | raid | ...
     player: Optional[str] = None
     extra: dict = field(default_factory=dict)
 
@@ -200,6 +230,32 @@ class ValheimLogParser:
             # still think is online (a stuck player whose disconnect we never saw).
             if self.s.server_count == 0 and self.s.online:
                 yield from self._flush()
+            return
+
+        m = RE_RAID.search(line)
+        if m:
+            yield Event("raid", None, {"event": m.group("event"), "raid": raid_name(m.group("event"))})
+            return
+        m = RE_NETVER.search(line)
+        if m:
+            their, mine = int(m.group("their")), int(m.group("mine"))
+            if their != mine:
+                yield Event("version_mismatch", None, {"their": their, "mine": mine, "newer": their > mine})
+            return
+        if RE_SAVED.search(line):
+            yield Event("world_saved", None, {})
+            return
+        m = RE_BACKUP.search(line)
+        if m:
+            yield Event("backup_saved", None, {"name": m.group("name")})
+            return
+        m = RE_VERSION.search(line)
+        if m:
+            yield Event("server_version", None, {"version": m.group("version")})
+            return
+        m = RE_PORTALS.search(line)
+        if m:
+            yield Event("portals", None, {"portals": int(m.group("n"))})
             return
 
         m = RE_REFUSED.search(line)
@@ -314,11 +370,14 @@ class Discord:
     COLORS = {"login": 0x57F287, "logout": 0x95A5A6, "death": 0xED4245, "respawn": 0xFEE75C, "server_up": 0x5865F2,
               "player_joined": 0x57F287, "player_left": 0x95A5A6, "server_online": 0x57F287, "server_offline": 0xED4245,
               "server_restart": 0xE0A13C, "maintenance_start": 0x5865F2, "maintenance_done": 0x57F287,
-              "maintenance_failed": 0xED4245, "maintenance_pending": 0xE0A13C, "join_refused": 0xE67E22}
+              "maintenance_failed": 0xED4245, "maintenance_pending": 0xE0A13C, "join_refused": 0xE67E22,
+              "raid": 0xED4245, "version_mismatch": 0xE0A13C, "logout_summary": 0x95A5A6, "welcome": 0x57F287,
+              "milestone": 0xF1C40F, "weekly_recap": 0x5865F2}
     EMOJI = {"login": "🟢", "logout": "🔴", "death": "💀", "respawn": "🔥", "server_up": "🛡️",
              "player_joined": "🟢", "player_left": "🔴", "server_online": "🟢", "server_offline": "🔴",
              "server_restart": "🔻", "maintenance_start": "🛠️", "maintenance_done": "✅",
-             "maintenance_failed": "⚠️", "maintenance_pending": "🕑", "join_refused": "🚫"}
+             "maintenance_failed": "⚠️", "maintenance_pending": "🕑", "join_refused": "🚫",
+             "raid": "⚔️", "version_mismatch": "⚠️", "logout_summary": "🔴", "welcome": "🎉", "milestone": "🏆"}
     DEFAULT_MESSAGES = {
         "login": "**{player}** has arrived in {server}.",
         "logout": "**{player}** has left {server}.",
@@ -328,6 +387,12 @@ class Discord:
         "server_restart": "**{server}** is restarting — all players have been disconnected.",
         "server_online": "**{server}** is back online!",
         "server_offline": "**{server}** is offline — it went down and hasn't come back.",
+        # Extras (need the matching kind in `events`).
+        "raid": "**Raid in {server}!** {raid} is attacking.",
+        "version_mismatch": "{detail}",
+        "logout_summary": "**{player}** left {server} after {duration}{deaths_text}.",
+        "welcome": "**{player}** arrived in {server} for the first time. Welcome, viking!",
+        "milestone": "**{player}** {detail}",
         # Someone on the ban list, or not on the permitted list, tried to connect.
         "join_refused": "**{player}** tried to join {server} but isn't allowed in.",
         # Count-only events (a2s source): no names available.
@@ -369,6 +434,13 @@ class Discord:
         else:
             payload = {"username": self.username, "content": f"{emoji} {text}" + (f"  ({footer})" if footer else "")}
         self.send(payload)
+
+    def post_embed(self, kind: str, embed: dict, event_filter: set) -> None:
+        """Post a ready-made embed (the weekly recap)."""
+        if kind not in event_filter:
+            return
+        embed = {"color": self.COLORS.get(kind, 0), "timestamp": datetime.now(timezone.utc).isoformat(), **embed}
+        self.send({"username": self.username, "embeds": [embed]})
 
     def send(self, payload: dict) -> None:
         # Character names are chosen by players: never let one ping @everyone, a role or a user.
@@ -939,6 +1011,24 @@ def build_maintenance(cfg: dict, source, discord: "Discord", server_name: str):
     return maintenance.Maintenance(m, maintenance.PublicAPI(key, server_id, base), panel, notify)
 
 
+def prime_live_state(live, source) -> None:
+    """The monitor starts at the end of the log, so learn the server's version and portal
+    count from what's already there (local files only; cheap)."""
+    if not isinstance(source, LocalFileSource):
+        return
+    try:
+        with open(source.path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = RE_VERSION.search(line)
+                if m:
+                    live.version = m.group("version")
+                m = RE_PORTALS.search(line)
+                if m:
+                    live.portals = int(m.group("n"))
+    except OSError as e:
+        log.debug("Couldn't pre-read the log: %s", e)
+
+
 def record_event(store, ev: "Event") -> None:
     """Write one parsed event into the stats database."""
     ts = ev.extra.get("ts")
@@ -955,6 +1045,8 @@ def record_event(store, ev: "Event") -> None:
         (store.logout_stale if ev.extra.get("stale") else store.logout)(ev.player, ts)
     elif ev.kind == "death":
         store.death(ev.player, ts)
+    elif ev.kind == "raid":
+        store.server_event("raid", ev.extra.get("raid"), ts)
     elif ev.kind == "count" and ev.extra.get("count") is not None:
         store.concurrency(int(ev.extra["count"]), ts)
 
@@ -1126,8 +1218,9 @@ def main():
     else:
         tailer = OffsetTailer(source, cfg.get("state_file", "monitor_state.json"), start_at_end=not args.from_start)
     parser = ValheimLogParser()
+    extra_events = {"raid", "version_mismatch", "session_summary", "welcome", "milestone", "weekly_recap"}
     log_events = {"login", "logout", "death", "respawn", "server_up",
-                  "server_restart", "server_online", "server_offline", "join_refused"}
+                  "server_restart", "server_online", "server_offline", "join_refused"} | extra_events
     default_log_events = {"login", "logout", "death", "server_restart", "server_online", "server_offline"}
     events = set(cfg.get("events") or ()) & log_events or default_log_events
 
@@ -1166,6 +1259,77 @@ def main():
         from admin_bot import build_admin_bot
         admin = build_admin_bot(cfg, server_name)
 
+    import extras
+    import stats_db
+    live = extras.LiveState()
+    prime_live_state(live, source)
+    needs_db = events & {"welcome", "milestone", "weekly_recap"}
+    if needs_db and not store:
+        log.warning("%s need the stats database (database.path); they're off", ", ".join(sorted(needs_db)))
+    recap = extras.WeeklyRecap(cfg.get("weekly_recap") or {}) if store and "weekly_recap" in events else None
+    backups = None
+    if (cfg.get("backups") or {}).get("dest_dir"):
+        backups = extras.BackupCopier(cfg["backups"])
+        if not os.path.isdir(backups.dest):
+            # Don't create it: inside Docker that would quietly fill the container instead
+            # of the disk you meant. The folder must exist (be mounted) already.
+            log.warning("backups.dest_dir %s doesn't exist (mount it in docker-compose.yml); "
+                        "backup copies are off", backups.dest)
+            backups = None
+        elif not os.path.isdir(backups.src):
+            log.warning("backups.source_dir %s not found; world backups won't be copied", backups.src)
+    if backups:
+        backups.copy_in_background()          # catch up on anything made while we were down
+    last_backup_check = 0.0
+    mismatch_posted: dict = {}
+    if admin:
+        admin.attach(live=live, backups=backups)
+
+    def announce(ev: "Event") -> None:
+        """Post one event, upgraded where the extras apply: a first-ever login becomes a
+        welcome, a logout becomes a session summary, and milestones follow."""
+        first_visit = False
+        if ev.kind == "login" and store and "welcome" in events:
+            first_visit = stats_db.player_totals(store.conn, ev.player)["sessions"] == 0
+        if store:
+            try:
+                record_event(store, ev)
+            except Exception as e:
+                log.warning("DB write failed for %s: %s", ev.kind, e)
+        summary = live.observe(ev)
+        if maint and maint.suppressing(ev.kind):
+            return
+        if ev.kind == "logout" and summary and "session_summary" in events:
+            discord.post(Event("logout_summary", ev.player, {**ev.extra, **summary}), server_name, {"logout_summary"})
+        elif first_visit:
+            discord.post(Event("welcome", ev.player, dict(ev.extra)), server_name, {"welcome"})
+        elif ev.kind == "version_mismatch":
+            key = (ev.extra["their"], ev.extra["mine"])
+            if time.time() - mismatch_posted.get(key, 0) < 3600:
+                return
+            mismatch_posted[key] = time.time()
+            detail = (f"Someone tried to join **{server_name}** with a **newer** version of Valheim "
+                      f"(network {ev.extra['their']}, server {ev.extra['mine']}): the server needs an update."
+                      if ev.extra["newer"] else
+                      f"Someone tried to join **{server_name}** with an **older** version of Valheim "
+                      f"(network {ev.extra['their']}, server {ev.extra['mine']}): they need to update their game.")
+            discord.post(Event("version_mismatch", None, {**ev.extra, "detail": detail}), server_name, events)
+        else:
+            discord.post(ev, server_name, events)
+        if store and "milestone" in events and ev.kind in ("logout", "death") and not ev.extra.get("stale"):
+            totals = stats_db.player_totals(store.conn, ev.player)
+            detail = None
+            if ev.kind == "logout" and summary:
+                h = extras.hours_crossed(totals["seconds"] - summary["duration_seconds"], totals["seconds"])
+                if h:
+                    detail = f"has now spent **{h} hours** in {server_name}!"
+            elif ev.kind == "death":
+                n = extras.deaths_reached(totals["deaths"])
+                if n:
+                    detail = f"has died **{n} times** in {server_name}. Odin is keeping count."
+            if detail:
+                discord.post(Event("milestone", ev.player, {"detail": detail}), server_name, events)
+
     maint = build_maintenance(cfg, source, discord, server_name)
     if maint:
         log.info("Maintenance on: checks every %.0f min when empty; backup window %s %s; updates %s%s",
@@ -1199,18 +1363,14 @@ def main():
                 for ev in parser.feed(line):
                     if ev.kind != "count":
                         log.info("EVENT %-8s %s %s", ev.kind, ev.player or "", ev.extra)
-                    if store:
-                        try:
-                            record_event(store, ev)
-                            changed = True
-                        except Exception as e:
-                            log.warning("DB write failed for %s: %s", ev.kind, e)
+                    changed = changed or bool(store)
                     if ev.kind == "join_refused" and admin:
                         admin.notify_refused(ev.player, ev.extra["host_id"], ev.extra.get("ts"))
+                    if ev.kind == "backup_saved" and backups:
+                        backups.copy_in_background()
                     if maint:
                         maint.observe(ev, len(parser.s.online))
-                    if not (maint and maint.suppressing(ev.kind)):
-                        discord.post(ev, server_name, events)
+                    announce(ev)
                     # Track down/up so we can tell a lingering outage from a quick restart.
                     if ev.kind == "server_restart":
                         down_since, offline_posted = time.time(), False
@@ -1248,6 +1408,24 @@ def main():
             if steam_done.is_set():
                 steam_done.clear()
                 render_site("(steam refresh)")
+            if recap:
+                try:
+                    week = recap.due(store)
+                    if week:
+                        off = int(store.get_meta("log_clock_offset") or 0)
+                        embed = extras.WeeklyRecap.build(store.conn, int(now) - off, server_name)
+                        if embed:
+                            discord.post_embed("weekly_recap", embed, events)
+                        store.set_meta("weekly_recap_week", week)
+                except Exception as e:
+                    log.warning("Weekly recap failed: %s", e)
+            if backups and now - last_backup_check >= 600:
+                last_backup_check = now
+                msg = backups.stale_alert(not (parser.s.down or now - last_line_at > stale_after))
+                if msg:
+                    log.warning(msg)
+                    if admin:
+                        admin.post_admin("⚠️ " + msg)
             if maint:
                 try:
                     maint.tick()

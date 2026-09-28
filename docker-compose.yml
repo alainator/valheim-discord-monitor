@@ -25,6 +25,9 @@ services:
       # so the Discord admin bot's Permit / Ban buttons can edit them. Drop this line
       # (or add :ro) if you don't enable admin_bot.
       - /home/valheim/valheim_save_data:/valheim_save_data
+      # Optional: a folder on another disk for copies of Valheim's world backups
+      # (the "backups" block in config.json). Uncomment and pick a path.
+      # - /mnt/backups/valheim:/backups
     environment:
       # Match the server's clock so times in logs and on the stats page line up.
       TZ: ${TZ:-UTC}

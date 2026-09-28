@@ -3,7 +3,20 @@
   "poll_interval_seconds": 15,
   "state_file": "monitor_state.json",
   "offline_grace_seconds": 300,
-  "events": ["login", "logout", "death", "respawn", "server_restart", "server_online", "server_offline"],
+  "events": [
+    "login",
+    "logout",
+    "death",
+    "server_restart",
+    "server_online",
+    "server_offline",
+    "raid",
+    "version_mismatch",
+    "session_summary",
+    "welcome",
+    "milestone",
+    "weekly_recap"
+  ],
   "database": {
     "path": "valheim_stats.db",
     "enabled": true
@@ -17,7 +30,9 @@
     "enabled": true,
     "guild_id": "123456789012345678",
     "channel_id": "123456789012345678",
-    "admin_user_ids": ["123456789012345678"],
+    "admin_user_ids": [
+      "123456789012345678"
+    ],
     "admin_role_ids": [],
     "save_dir": "/valheim_save_data",
     "repeat_cooldown_seconds": 600,
@@ -26,6 +41,9 @@
       "online": "🟢 Valheim: {count} online",
       "empty": "🟢 Valheim: empty",
       "offline": "🔴 Valheim: offline"
+    },
+    "status_board": {
+      "channel_id": "123456789012345678"
     }
   },
   "steam": {
@@ -36,6 +54,16 @@
   },
   "maintenance": {
     "enabled": false
+  },
+  "backups": {
+    "source_dir": "/valheim_save_data/worlds_local",
+    "dest_dir": "/backups",
+    "keep": 30,
+    "alert_after_hours": 48
+  },
+  "weekly_recap": {
+    "day": "sunday",
+    "hour": 18
   },
   "source": {
     "type": "file",

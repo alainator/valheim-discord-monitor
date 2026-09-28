@@ -43,7 +43,9 @@
     "token": "YOUR-BOT-TOKEN-OR-USE-DISCORD_BOT_TOKEN-ENV",
     "guild_id": "YOUR-DISCORD-SERVER-ID",
     "channel_id": "YOUR-PRIVATE-ADMIN-CHANNEL-ID",
-    "admin_user_ids": ["YOUR-DISCORD-USER-ID"],
+    "admin_user_ids": [
+      "YOUR-DISCORD-USER-ID"
+    ],
     "admin_role_ids": [],
     "save_dir": "/home/valheim/valheim_save_data",
     "repeat_cooldown_seconds": 600,
@@ -52,6 +54,9 @@
       "online": "🟢 Valheim: {count} online",
       "empty": "🟢 Valheim: empty",
       "offline": "🔴 Valheim: offline"
+    },
+    "status_board": {
+      "channel_id": "YOUR-STATUS-BOARD-TEXT-CHANNEL-ID"
     }
   },
   "steam": {
@@ -85,6 +90,16 @@
       "email": "you@example.com  (or NEXUS_EMAIL env)",
       "password": "your-panel-password  (or NEXUS_PASSWORD env)"
     }
+  },
+  "backups": {
+    "source_dir": "/valheim_save_data/worlds_local",
+    "dest_dir": "/backups",
+    "keep": 30,
+    "alert_after_hours": 48
+  },
+  "weekly_recap": {
+    "day": "sunday",
+    "hour": 18
   },
   "source": {
     "type": "a2s",
@@ -149,6 +164,12 @@
   "_log_mode_events": [
     "login",
     "logout",
-    "death"
+    "death",
+    "raid",
+    "version_mismatch",
+    "session_summary",
+    "welcome",
+    "milestone",
+    "weekly_recap"
   ]
 }

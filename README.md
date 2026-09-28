@@ -23,6 +23,8 @@ On top of the Discord posts it can also:
   [Join-attempt alerts & Discord admin bot](#join-attempt-alerts--discord-admin-bot).
 - Keep a **voice channel's name showing who's on** ("🟢 Valheim: 3 online"). See
   [Status voice channel](#status-voice-channel).
+- **Raid alerts, session summaries, welcomes, milestones, a weekly recap, a live status
+  board and off-disk world backups.** See [Extras](#extras-raids-summaries-milestones-recap-board-backups).
 - Keep **play stats** in SQLite and publish a leaderboard page.
 - Show players' **Steam achievements** on that page.
 - Run **unattended updates and nightly backups** on LOW.MS.
@@ -35,6 +37,7 @@ On top of the Discord posts it can also:
   [Count mode](#count-mode-quick-start) · [Log mode](#log-mode)
 - Admin bot: [Join-attempt alerts & admin bot](#join-attempt-alerts--discord-admin-bot) ·
   [Status voice channel](#status-voice-channel) · [Troubleshooting](#troubleshooting)
+- [Extras: raids, summaries, milestones, recap, board, backups](#extras-raids-summaries-milestones-recap-board-backups)
 - Extras: [Stats page](#player-stats--public-web-page) ·
   [Steam achievements](#steam-achievements) ·
   [Updates & backups (LOW.MS)](#unattended-updates--nightly-backups-lowms)
@@ -309,7 +312,8 @@ lists are doing their job. There are two ways to receive it:
 
   Only the Discord users and roles you list can press them. There are also slash
   commands for IDs you already know: `/valheim permit`, `/valheim ban`,
-  `/valheim unban`, `/valheim unpermit`, `/valheim lists`.
+  `/valheim unban`, `/valheim unpermit`, `/valheim lists`. (`/valheim online` is open
+  to everyone; see [Extras](#extras-raids-summaries-milestones-recap-board-backups).)
 
   **Permit** never *starts* a permitted list. With an empty `permittedlist.txt`
   the server is open to everyone who isn't banned, and adding the first ID would lock
@@ -317,10 +321,11 @@ lists are doing their job. There are two ways to receive it:
 
 The bot edits the list files directly, so it has to run **on the same machine as
 the server** (self-hosted, `file` source) with write access to the save dir. It
-writes the ID exactly as the server printed it. Since Valheim 1.0 that's `V_…` for Steam
-(`X_`, `S_`, `N_` for Xbox, PlayStation, Nintendo); before that it was `Steam_…` /
-`Xbox_…`, and old Steam-only builds used a bare SteamID64. `V_7656…`, `Steam_7656…` and a
-bare `7656…` are matched as the same player. Community docs say list edits apply without a restart
+writes Steam IDs **in the style your list files already use**. Valheim 1.0's lists say
+`V_7656…`, while the same server's log says `Steam_7656…`, so a Permit writes `V_7656…`
+to match. Other platforms are written as the server printed them (`X_`, `S_`, `N_`, or
+`Xbox_…` etc. on older builds). `V_7656…`, `Steam_7656…` and a bare `7656…` are matched as
+the same player. Community docs say list edits apply without a restart
 (the next join attempt is checked against the file). If a change doesn't seem to take
 effect, `sudo systemctl restart valheimserver`.
 
@@ -448,6 +453,9 @@ How current it is:
 | "Only the server admins can do that." | Your Discord user ID isn't in `admin_user_ids`, and you have none of the `admin_role_ids` roles | Add your ID and recreate the container |
 | Status channel never changes; log says `no permission to rename the status channel` | The bot lacks **Manage Channels** on that channel | Add it in the channel's permissions (the bot can't rename a channel it can't manage) |
 | Status channel lags behind | Discord's limit of 2 renames per 10 minutes | Expected: it catches up within 5 minutes |
+| Status board never appears; log says `no permission to post in the status board channel` | Missing channel permissions | Give the bot View Channel, Send Messages, Embed Links and Read Message History there |
+| `backups.dest_dir … doesn't exist` | The backup folder isn't mounted | Add the volume in `docker-compose.yml` and create the folder on the host |
+| Raids, summaries etc. don't post | Their names aren't in `events` | Add them (see [Extras](#extras-raids-summaries-milestones-recap-board-backups)) and recreate the container |
 | "Couldn't edit the list files" | `save_dir` doesn't point at the mounted save dir | Check the volume in `docker-compose.yml` and `save_dir` in `config.json` |
 | `PyNaCl is not installed, voice will NOT be supported` | Harmless | Nothing: the bot doesn't use voice |
 
@@ -459,6 +467,94 @@ A bot token is about 70 characters with 2 dots. `0 chars` means `.env` wasn't lo
 `.env` must sit next to `docker-compose.yml`, and the container must be recreated after
 changing it. If `DISCORD_BOT_TOKEN` is empty, the monitor falls back to `admin_bot.token` in
 `config.json`.
+
+## Extras: raids, summaries, milestones, recap, board, backups
+
+All of these come from lines vanilla Valheim already writes to its log; no mods. Most are
+switched on by adding their name to `events` in `config.json`:
+
+```json
+"events": ["login", "logout", "death", "server_restart", "server_online", "server_offline",
+           "raid", "version_mismatch", "session_summary", "welcome", "milestone", "weekly_recap"]
+```
+
+| Event | Posts | From the log line |
+|---|---|---|
+| `raid` | ⚔️ "**Raid in Alheim!** Moder's army (drakes) is attacking." | `Random event set:army_moder` |
+| `version_mismatch` | ⚠️ "Someone tried to join with a **newer** version of Valheim: the server needs an update." (or *older*: they need to update). At most once an hour. | `Network version check, their:41, mine:40` |
+| `session_summary` | Replaces the plain leave message: "**Ingrid** left Alheim after 2h 14m and died 3 times." | the player's join and leave |
+| `welcome` | Replaces the join message on someone's **first ever** visit: "🎉 **Ingrid** arrived for the first time. Welcome, viking!" | stats database |
+| `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths | stats database |
+| `weekly_recap` | 📜 A weekly embed: top players by time, most deaths, raids, new vikings, total hours, peak online | stats database |
+
+`welcome`, `milestone` and `weekly_recap` need the stats database (`database.path`).
+
+**Session summaries and milestones only count sessions the monitor saw start.** Someone who
+was already online when the monitor started gets a plain leave message.
+
+**Weekly recap timing:**
+```json
+"weekly_recap": { "day": "sunday", "hour": 18 }
+```
+- It posts once per week, at or after that hour in the container's time zone (`TZ` in `.env`).
+- A restart doesn't post it twice. A missed day is skipped rather than posted late.
+- Quiet weeks with nobody playing post nothing.
+
+### Status board
+
+The admin bot keeps **one message** in a channel up to date:
+- a title: 🟢 *N online* / 🟢 *empty* / 🔴 *offline*;
+- who's on, with "joined 25 minutes ago";
+- when the server came up, its version, portal count, and the last world save, backup and raid.
+
+Times use Discord's own relative timestamps, so they stay current by themselves. The bot
+only edits the message when something changes.
+
+1. Make a text channel (e.g. `#server-status`), ideally read-only for everyone.
+2. Give the bot **View Channel**, **Send Messages**, **Embed Links** and **Read Message
+   History** there.
+3. Add to the `admin_bot` block:
+   ```json
+   "status_board": { "channel_id": "123456789012345678" }
+   ```
+4. Recreate the container. The bot posts the message once and remembers it in
+   `status_board.json`. Delete the message and it posts a fresh one.
+
+It works alongside the [status voice channel](#status-voice-channel): the channel name is
+the glanceable version, and the board has the details.
+
+**Commands:**
+- **`/valheim online`** (anyone): who's on right now, and since when.
+- **`/valheim backups`** (admins): the newest copied world backups, with sizes and ages.
+
+### World backup copies
+
+Valheim already backs up your world by itself (`Backup created in Alheim_backup_auto-…` in
+the log, files in `worlds_local/`). The monitor can copy those backups to **another
+disk**, so a failure of the server's disk doesn't take the backups with it:
+
+1. Mount a folder on the other disk in `docker-compose.yml`, e.g.
+   `- /mnt/backups/valheim:/backups`. The folder must exist; the monitor won't create it.
+2. Add:
+   ```json
+   "backups": {
+     "source_dir": "/valheim_save_data/worlds_local",
+     "dest_dir": "/backups",
+     "keep": 30,
+     "alert_after_hours": 48
+   }
+   ```
+
+What happens:
+- **When:** after every `Backup created` line, and once at start-up to catch up. Valheim
+  writes a backup once and never touches it again, so a copy is never half-written.
+- **What:** the newest `keep` backups, each a `.db` + `.fwl` pair. Older copies are
+  deleted. The live world file is never copied.
+- **Alert:** if Valheim hasn't made a backup in `alert_after_hours` while the server is up,
+  the bot posts a warning to the admin channel, once.
+
+How often Valheim makes backups, and how many it keeps, is set with the server's
+`-backups`, `-backupshort` and `-backuplong` launch options.
 
 ## Player stats & public web page
 
@@ -637,7 +733,7 @@ or run it in a terminal.
 
 | Config key | Default | Meaning |
 |---|---|---|
-| `events` | mode default | Log mode: `login`, `logout`, `death`, `respawn`, `server_up`, `join_refused`. Count mode: `player_joined`, `player_left`, `server_online`, `server_offline`. |
+| `events` | mode default | Log mode: `login`, `logout`, `death`, `respawn`, `server_up`, `join_refused`, and the [extras](#extras-raids-summaries-milestones-recap-board-backups) `raid`, `version_mismatch`, `session_summary`, `welcome`, `milestone`, `weekly_recap`. Count mode: `player_joined`, `player_left`, `server_online`, `server_offline`. |
 | `poll_interval_seconds` | 15 | How often to poll. |
 | `source.offline_after` | 3 | Count mode: failed queries in a row before "offline". |
 | `source.api_key` | — | `steamapi` only; or `STEAM_API_KEY` env var. |
@@ -668,6 +764,12 @@ or run it in a terminal.
 | `admin_bot.status_channel.online` / `empty` / `offline` | see above | Name templates; `{count}`, `{server}`. |
 | `admin_bot.status_channel.min_interval_seconds` | 300 | Minimum time between renames (can't go below 300 because of Discord's limit). |
 | `admin_bot.status_channel.stale_after_seconds` | 900 | Show offline if the log has been silent this long. |
+| `admin_bot.status_board.channel_id` | — | Text channel for the live status board message. |
+| `admin_bot.status_board.state_file` | `status_board.json` | Where the board's message id is remembered. |
+| `backups.source_dir` / `dest_dir` | — | Valheim's `worlds_local` folder, and where to copy its backups (must exist). |
+| `backups.keep` | 30 | Backup copies to keep. |
+| `backups.alert_after_hours` | 48 | Warn the admin channel if Valheim makes no backup for this long. |
+| `weekly_recap.day` / `hour` | sunday / 18 | When to post the weekly recap (container time zone). |
 | `discord.embeds` | true | Coloured embed vs plain text. |
 | `discord.show_player_count` | true | Footer with the current online count. |
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |
@@ -727,7 +829,8 @@ python valheim_discord_monitor.py --config config.example.json --replay sample_c
 ```
 
 - **Tests** (`tests/`) cover the log parser, the list-file editing, the status channel's
-  naming and rate limiting, and the audit fixes. They run offline, with no Discord or
+  naming and rate limiting, the extras (live state, board, milestones, recap, backups),
+  and the audit fixes. They run offline, with no Discord or
   Valheim needed.
 - **CI:** `.github/workflows/tests.yml` runs the tests on Python 3.9 and 3.12, does the
   replay, and builds the Docker image, on every push to `main` and every pull request.
@@ -743,6 +846,9 @@ Added here:
 - **Admin bot:** refused-join alerts with Permit / Ban / Ignore buttons, `/valheim`
   commands, and support for Valheim 1.0's `V_…` player IDs.
 - **Status voice channel** showing who's online.
+- **Extras:** raid alerts, version-mismatch alerts, session summaries, first-visit
+  welcomes, milestones, a weekly recap, a live status board, `/valheim online`, and world
+  backup copies to another disk.
 - **Docker setup:** `Dockerfile`, `docker-compose.yml`, `.env.example` and a self-hosted
   example config.
 - **Docs:** the self-hosted quick start, bot setup and troubleshooting, and these tips.
