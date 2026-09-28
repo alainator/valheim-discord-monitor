@@ -3,8 +3,11 @@
 # -savedir /home/valheim/valheim_save_data) and writes its console to
 # /home/valheim/logs/valheim_console.log.
 #
-#   cp config.selfhosted.example.json config.json   # then fill in the webhook, bot token, ids
+#   cp config.selfhosted.example.json config.json   # server name, admin_bot ids
+#   cp .env.example .env && chmod 600 .env          # webhook URL, bot token, TZ
 #   docker compose up -d --build
+#
+# After editing config.json or .env: docker compose up -d --force-recreate
 #   docker compose logs -f
 services:
   valheim-discord-monitor:
@@ -25,8 +28,8 @@ services:
     environment:
       # Match the server's clock so times in logs and on the stats page line up.
       TZ: ${TZ:-UTC}
-    # Secrets can live in .env instead of config.json: DISCORD_WEBHOOK_URL,
-    # DISCORD_BOT_TOKEN, STEAM_API_KEY, ...
+    # Secrets live in .env (see .env.example): DISCORD_WEBHOOK_URL, DISCORD_BOT_TOKEN, ...
+    # Needs Compose 2.24+ for `required: false`; on older versions drop this block.
     env_file:
       - path: .env
         required: false
