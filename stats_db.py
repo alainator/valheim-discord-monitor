@@ -127,10 +127,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
 class Store:
     """Event sink: turns login/logout/death/count events into rows."""
 
-    def __init__(self, path: str, source: str = "nexus"):
+    def __init__(self, path: str, source: str = "nexus", reconcile: bool = False):
         self.conn = connect(path)
         self.source = source
-        self.reconcile_open_sessions()
+        # Only the long-running monitor may close leftover sessions: a one-off tool
+        # (--refresh-steam, steam.py, --backfill) run next to it would otherwise cut
+        # short the sessions of everyone the monitor is tracking as online.
+        if reconcile:
+            self.reconcile_open_sessions()
 
     # -- meta --------------------------------------------------------------
     def _set_meta(self, key: str, value) -> None:
@@ -163,7 +167,7 @@ class Store:
         if prev is None or ts > int(prev):
             self._set_meta("last_event_at", ts)
 
-    def reconcile_open_sessions(self) -> None:
+    def reconcile_open_sessions(self) -> int:
         """On startup, close any sessions left open by a previous run so they don't
         grow forever. They are closed at their last_seen_at (the newest log line we
         had recorded for them), which bounds the play time to reality."""

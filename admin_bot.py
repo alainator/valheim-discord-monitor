@@ -28,6 +28,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+import tempfile
 import threading
 import time
 from typing import Optional
@@ -36,6 +38,8 @@ log = logging.getLogger("valheim-monitor.bot")
 
 LIST_FILES = {"permitted": "permittedlist.txt", "banned": "bannedlist.txt", "admin": "adminlist.txt"}
 STEAM_PREFIXES = ("V_", "Steam_")      # Steam ids: "V_" since Valheim 1.0, "Steam_" before
+# A platform id: "V_7656…", "Steam_7656…", "Xbox_…", "PlayStation_…", or a bare SteamID64.
+VALID_ID = re.compile(r"^(?:[A-Za-z]+_[A-Za-z0-9]+|\d{5,20})$")
 BTN_PREFIX = "vdm"          # custom_id = "vdm:<action>:<id>", so buttons survive a bot restart
 
 
@@ -46,8 +50,8 @@ class ServerLists:
     """Reads and edits Valheim's permittedlist / bannedlist / adminlist.txt.
 
     One id per line; lines starting with // are comments (the server writes one as a
-    header) and are preserved. Files are rewritten in place, not replaced, so they keep
-    the owner and mode the server gave them."""
+    header) and are preserved. Writes go to a temp file that is then swapped in, so the
+    server never reads a half-written list; it keeps the file's owner and mode."""
 
     def __init__(self, save_dir: str):
         self.save_dir = save_dir
@@ -98,8 +102,30 @@ class ServerLists:
             return True
 
     def _write(self, which: str, lines: list[str]) -> None:
-        with open(self.path(which), "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(lines) + "\n")
+        path = self.path(which)
+        try:
+            st = os.stat(path)
+            mode, uid, gid = st.st_mode & 0o777, st.st_uid, st.st_gid
+        except FileNotFoundError:
+            # New file: give it the save dir's owner (the server's user), not root's.
+            st = os.stat(self.save_dir)
+            mode, uid, gid = 0o644, st.st_uid, st.st_gid
+        fd, tmp = tempfile.mkstemp(prefix=f".{LIST_FILES[which]}.", dir=self.save_dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                f.write("\n".join(lines) + "\n")
+            os.chmod(tmp, mode)
+            try:
+                os.chown(tmp, uid, gid)
+            except PermissionError:
+                pass                      # not root: the file stays ours, which is fine
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            raise
 
     def refusal_reason(self, pid: str) -> str:
         if self.contains("banned", pid):
@@ -176,8 +202,11 @@ class AdminBot:
     def start(self) -> None:
         t = threading.Thread(target=self._run, name="discord-admin-bot", daemon=True)
         t.start()
-        if not self.ready.wait(60):
-            log.warning("admin_bot: not connected to Discord after 60s; will keep trying in the background")
+        deadline = time.time() + 60
+        while t.is_alive() and not self.ready.wait(1):
+            if time.time() > deadline:
+                log.warning("admin_bot: not connected to Discord after 60s; will keep trying in the background")
+                return
 
     def _run(self) -> None:
         self.loop = asyncio.new_event_loop()
@@ -204,10 +233,11 @@ class AdminBot:
         if now - self.last_notice.get(pid, 0) < self.cooldown:
             log.info("admin_bot: %s (%s) refused again; notice already posted recently", name, pid)
             return
-        self.last_notice[pid] = now
         if not (self.loop and self.client and self.ready.is_set()):
             log.warning("admin_bot: not connected; dropped join notice for %s (%s)", name, pid)
             return
+        self.last_notice = {k: t for k, t in self.last_notice.items() if now - t < self.cooldown}
+        self.last_notice[pid] = now
         fut = asyncio.run_coroutine_threadsafe(self._post_refused(name, pid), self.loop)
         fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
 
@@ -311,8 +341,14 @@ class AdminBot:
         async def run(it: discord.Interaction, fn, pid: str, verb: str):
             if not await guard(it):
                 return
+            pid = pid.strip()
+            if not VALID_ID.match(pid):
+                await it.response.send_message(
+                    f"`{discord.utils.escape_markdown(pid)[:60]}` doesn't look like a player ID. "
+                    "Use the form in the list files, e.g. `V_76561198000000000`.", ephemeral=True)
+                return
             try:
-                changes = fn(pid.strip())
+                changes = fn(pid)
             except OSError as e:
                 await it.response.send_message(f"Couldn't edit the list files: {e}", ephemeral=True)
                 return

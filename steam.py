@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -59,10 +60,6 @@ def _get(path: str, params: dict, timeout: float = 20.0):
 
 class KeyRejected(Exception):
     """The Steam Web API key itself was refused (revoked, rotated, or wrong)."""
-
-
-def _is_auth_error(e) -> bool:
-    return isinstance(e, urllib.error.HTTPError) and e.code in (401, 403)
 
 
 def check_key(key: str) -> None:
@@ -164,6 +161,12 @@ def update_all(store, key: str, limit: int = 25, schema_ttl: int = SCHEMA_TTL) -
     for sid in steam_ids:
         prof = summaries.get(sid, {})
         unlocked, total, unlocks, err = fetch_achievements(key, sid)
+        if err and (err.startswith("error:") or err == "http_429" or err.startswith("http_5")):
+            # A network blip or Steam outage: keep the counts we already have.
+            store.save_profile(sid, error=err)
+            updated += 1
+            time.sleep(0.4)
+            continue
         last_at, last_name = None, None
         if unlocks:
             a, last_at = max(unlocks, key=lambda x: x[1])

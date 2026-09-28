@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt
+      - run: python -m py_compile *.py
+      - run: python -m unittest discover -s tests -v
+      - name: Parser dry run on the sample log
+        run: python valheim_discord_monitor.py --config config.example.json --replay sample_console.log
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t valheim-discord-monitor .
+      - run: docker run --rm valheim-discord-monitor python -c "import discord, admin_bot, valheim_discord_monitor; print('image ok')"
