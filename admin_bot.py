@@ -649,11 +649,14 @@ class AdminBot:
                 "minute or two, and if an update is found, in the public channel too.", ephemeral=True)
 
         @group.command(name="restart", description="Restart the server (installs any waiting update), with a warning")
-        @app_commands.describe(minutes="Warning time before the restart (0 = now). It happens early if everyone leaves.",
+        @app_commands.describe(minutes="Minutes of warning, 0-60 (0 = now). It happens early if everyone leaves.",
                                reason="Shown to players, e.g. 'installing the update'")
-        async def restart(it: discord.Interaction, minutes: app_commands.Range[int, 0, 60] = 5, reason: str = ""):
+        async def restart(it: discord.Interaction, minutes: int = 5, reason: str = ""):
+            # Plain `int`, not app_commands.Range: with postponed annotations discord.py
+            # resolves the type at module level, where app_commands isn't imported.
             if not await guard(it):
                 return
+            minutes = max(0, min(int(minutes), 60))
             if bot._countdown and not bot._countdown.done():
                 await it.response.send_message("A restart is already counting down. `/valheim restart-cancel` stops it.",
                                                 ephemeral=True)
