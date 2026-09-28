@@ -20,7 +20,13 @@
     "admin_user_ids": ["123456789012345678"],
     "admin_role_ids": [],
     "save_dir": "/valheim_save_data",
-    "repeat_cooldown_seconds": 600
+    "repeat_cooldown_seconds": 600,
+    "status_channel": {
+      "channel_id": "123456789012345678",
+      "online": "🟢 Valheim: {count} online",
+      "empty": "🟢 Valheim: empty",
+      "offline": "🔴 Valheim: offline"
+    }
   },
   "steam": {
     "enabled": false,

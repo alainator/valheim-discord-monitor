@@ -16,6 +16,10 @@ admin channel with buttons, and edits the server's list files when an admin clic
 The same actions are available as slash commands (/valheim permit|unpermit|ban|
 unban|lists), for ids you already know.
 
+Optionally it also keeps a (locked) voice channel's name showing the server's status,
+e.g. "🟢 Valheim: 3 online" / "🟢 Valheim: empty" / "🔴 Valheim: offline"
+(`admin_bot.status_channel`).
+
 It needs write access to the server's save dir (where the list files live), so it
 suits the self-hosted `file` source, where the monitor runs next to the server.
 Webhooks are one-way, so this is a real bot: `pip install discord.py`, a bot token,
@@ -170,6 +174,53 @@ def steam_profile(pid: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Status channel: a voice channel whose name shows who's on
+# ---------------------------------------------------------------------------
+class StatusChannel:
+    """Decides what the status channel should be called and when it may be renamed.
+
+    Discord lets a bot rename a channel only twice per 10 minutes, so renames are spaced
+    at least `min_interval_seconds` apart and only the latest wanted name is applied:
+    a burst of joins and leaves costs one rename, not ten."""
+
+    DEFAULTS = {"online": "🟢 Valheim: {count} online", "empty": "🟢 Valheim: empty",
+                "offline": "🔴 Valheim: offline"}
+
+    def __init__(self, cfg: dict, server_name: str, clock=time.time):
+        self.channel_id = int(cfg["channel_id"])
+        self.templates = {k: cfg.get(k, v) for k, v in self.DEFAULTS.items()}
+        self.min_interval = max(float(cfg.get("min_interval_seconds", 300)), 300.0)
+        self.server_name = server_name
+        self.clock = clock
+        self.wanted: Optional[str] = None
+        self.current: Optional[str] = None
+        self.last_rename = 0.0
+
+    def set_state(self, offline: bool, count: Optional[int]) -> None:
+        """Called from the monitor thread. count=None while not offline means "don't know
+        yet" (e.g. just started): keep whatever the channel says."""
+        if offline:
+            key = "offline"
+        elif count is None:
+            return
+        else:
+            key = "online" if count > 0 else "empty"
+        name = self.templates[key].format_map({"count": count or 0, "server": self.server_name})
+        self.wanted = name.strip()[:100] or None
+
+    def due(self) -> Optional[str]:
+        """The name to rename to now, or None (nothing to change, or too soon)."""
+        if not self.wanted or self.wanted == self.current:
+            return None
+        if self.clock() - self.last_rename < self.min_interval:
+            return None
+        return self.wanted
+
+    def renamed(self, name: str) -> None:
+        self.current, self.last_rename = name, self.clock()
+
+
+# ---------------------------------------------------------------------------
 # The bot
 # ---------------------------------------------------------------------------
 class AdminBot:
@@ -193,6 +244,11 @@ class AdminBot:
                         self.lists.save_dir)
         self.server_name = server_name
         self.cooldown = float(cfg.get("repeat_cooldown_seconds", 600))
+        sc = cfg.get("status_channel") or {}
+        self.status = StatusChannel(sc, server_name) if str(sc.get("channel_id", "")).isdigit() else None
+        if sc.get("channel_id") and not self.status:
+            log.warning("admin_bot: status_channel.channel_id isn't a channel ID; status channel off")
+        self._status_task = None
         self.last_notice: dict[str, float] = {}
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.ready = threading.Event()
@@ -241,6 +297,11 @@ class AdminBot:
         fut = asyncio.run_coroutine_threadsafe(self._post_refused(name, pid), self.loop)
         fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
 
+    def set_status(self, offline: bool, count: Optional[int]) -> None:
+        """Thread-safe: record the server's state; the bot renames the channel when allowed."""
+        if self.status:
+            self.status.set_state(offline, count)
+
     # -- discord side ----------------------------------------------------------
     def _is_admin(self, user) -> bool:
         if user.id in self.admin_users:
@@ -256,6 +317,34 @@ class AdminBot:
             view.add_item(discord.ui.Button(label=label, style=style, disabled=disabled,
                                             custom_id=f"{BTN_PREFIX}:{action}:{pid}"[:100]))
         return view
+
+    async def _status_loop(self) -> None:
+        import discord
+        st = self.status
+        try:
+            channel = self.client.get_channel(st.channel_id) or await self.client.fetch_channel(st.channel_id)
+            st.current = channel.name
+            log.info("admin_bot: status channel is '%s'; renames at most every %.0f min",
+                     channel.name, st.min_interval / 60)
+        except discord.HTTPException as e:
+            log.warning("admin_bot: can't see status channel %s (%s); status disabled", st.channel_id, e)
+            return
+        while True:
+            await asyncio.sleep(5)
+            name = st.due()
+            if not name:
+                continue
+            try:
+                await channel.edit(name=name, reason="Valheim server status")
+                st.renamed(name)
+                log.info("admin_bot: status channel -> %s", name)
+            except discord.Forbidden:
+                log.warning("admin_bot: no permission to rename the status channel "
+                            "(give the bot Manage Channels on it); retrying in 10 min")
+                st.last_rename = st.clock() + 600 - st.min_interval
+            except discord.HTTPException as e:
+                log.warning("admin_bot: status channel rename failed: %s", e)
+                st.last_rename = st.clock()
 
     async def _post_refused(self, name: str, pid: str) -> None:
         import discord
@@ -297,6 +386,8 @@ class AdminBot:
             async def on_ready(self):
                 log.info("admin_bot: connected as %s; posting join notices to channel %s", self.user, bot.channel_id)
                 bot.ready.set()
+                if bot.status and bot._status_task is None:     # on_ready repeats after reconnects
+                    bot._status_task = asyncio.ensure_future(bot._status_loop())
 
             async def on_interaction(self, it: discord.Interaction):
                 cid = (it.data or {}).get("custom_id", "") if it.type == discord.InteractionType.component else ""
