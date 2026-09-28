@@ -73,6 +73,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS ix_concurrency_at ON concurrency(at);
 
+        -- raids and other server happenings, for the weekly recap
+        CREATE TABLE IF NOT EXISTS server_events (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            at     INTEGER NOT NULL,
+            kind   TEXT    NOT NULL,
+            detail TEXT
+        );
+        CREATE INDEX IF NOT EXISTS ix_server_events_at ON server_events(at);
+
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT
@@ -302,6 +311,10 @@ class Store:
             self.conn.execute("INSERT INTO concurrency(at, count) VALUES (?,?)", (ts, count))
         self.heartbeat(ts)
 
+    def server_event(self, kind: str, detail: str, ts: int) -> None:
+        self.conn.execute("INSERT INTO server_events(at, kind, detail) VALUES (?,?,?)", (ts, kind, detail))
+        self.conn.commit()
+
     def close(self) -> None:
         self.conn.commit()
         self.conn.close()
@@ -410,3 +423,33 @@ def recent_unlocks(conn, limit: int = 12):
         LEFT JOIN steam_schema sc ON sc.apiname = u.apiname
         WHERE u.unlocktime > 0
         ORDER BY u.unlocktime DESC LIMIT ?""", (limit,))
+
+
+def player_totals(conn, player: str) -> dict:
+    """All-time play time (s), sessions and deaths for one character."""
+    t = _one(conn, "SELECT COALESCE(SUM(duration_seconds),0) AS seconds, COUNT(*) AS sessions "
+                   "FROM play_sessions WHERE player=?", (player,))
+    t["deaths"] = _one(conn, "SELECT COUNT(*) AS c FROM deaths WHERE player=?", (player,)).get("c", 0)
+    return t
+
+
+def period_summary(conn, since: int, until: int, limit: int = 5) -> dict:
+    """Activity between two log-clock timestamps: play time clipped to the window."""
+    clip = ("MAX(0, MIN(COALESCE(logout_at, last_seen_at), :until) - MAX(login_at, :since))")
+    where = "COALESCE(logout_at, last_seen_at) > :since AND login_at < :until"
+    p = {"since": since, "until": until, "limit": limit}
+    players = _rows(conn, f"SELECT player, SUM({clip}) AS seconds, COUNT(*) AS sessions "
+                          f"FROM play_sessions WHERE {where} GROUP BY player "
+                          f"HAVING seconds > 0 ORDER BY seconds DESC", p)
+    deaths = _rows(conn, "SELECT player, COUNT(*) AS deaths FROM deaths WHERE died_at >= :since "
+                         "AND died_at < :until GROUP BY player ORDER BY deaths DESC LIMIT :limit", p)
+    new = _rows(conn, "SELECT player FROM play_sessions GROUP BY player "
+                      "HAVING MIN(login_at) >= :since AND MIN(login_at) < :until", p)
+    raids = _rows(conn, "SELECT detail, COUNT(*) AS n FROM server_events WHERE kind='raid' AND at >= :since "
+                        "AND at < :until GROUP BY detail ORDER BY n DESC", p)
+    peak = _one(conn, "SELECT MAX(count) AS peak FROM concurrency WHERE at >= :since AND at < :until", p)
+    return {"players": players, "top_players": players[:limit], "deaths": deaths,
+            "total_seconds": sum(r["seconds"] or 0 for r in players),
+            "total_deaths": sum(r["deaths"] for r in _rows(conn, "SELECT COUNT(*) AS deaths FROM deaths "
+                                                                "WHERE died_at >= :since AND died_at < :until", p)),
+            "new_players": [r["player"] for r in new], "raids": raids, "peak": peak.get("peak") or 0}

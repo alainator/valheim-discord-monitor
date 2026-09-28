@@ -18,7 +18,9 @@ unban|lists), for ids you already know.
 
 Optionally it also keeps a (locked) voice channel's name showing the server's status,
 e.g. "🟢 Valheim: 3 online" / "🟢 Valheim: empty" / "🔴 Valheim: offline"
-(`admin_bot.status_channel`).
+(`admin_bot.status_channel`), and a live status-board message listing who's on, the
+version, last save/backup and last raid (`admin_bot.status_board`). Anyone can use
+/valheim online; /valheim backups is for admins.
 
 It needs write access to the server's save dir (where the list files live), so it
 suits the self-hosted `file` source, where the monitor runs next to the server.
@@ -30,6 +32,7 @@ Only the users / roles in `admin_user_ids` / `admin_role_ids` can press the butt
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -85,7 +88,22 @@ class ServerLists:
     def contains(self, which: str, pid: str) -> bool:
         return bool(self._variants(pid) & set(self.ids(which)))
 
+    def styled(self, pid: str) -> str:
+        """Write a Steam id the way the list files already do. The log may say
+        "Steam_7656…" while a Valheim 1.0 server's lists say "V_7656…"; copy the files."""
+        sid = steam64(pid.strip())
+        if not sid:
+            return pid.strip()
+        counts = {"V_": 0, "Steam_": 0, "": 0}
+        for which in LIST_FILES:
+            for x in self.ids(which):
+                if steam64(x):
+                    counts[next((p for p in STEAM_PREFIXES if x.startswith(p)), "")] += 1
+        prefix = max(counts, key=counts.get) if any(counts.values()) else None
+        return pid.strip() if prefix is None else prefix + sid
+
     def add(self, which: str, pid: str) -> bool:
+        pid = self.styled(pid)
         with self.lock:
             if self.contains(which, pid):
                 return False
@@ -249,6 +267,14 @@ class AdminBot:
         if sc.get("channel_id") and not self.status:
             log.warning("admin_bot: status_channel.channel_id isn't a channel ID; status channel off")
         self._status_task = None
+        bc = cfg.get("status_board") or {}
+        self.board_channel = int(bc["channel_id"]) if str(bc.get("channel_id", "")).isdigit() else None
+        if bc.get("channel_id") and not self.board_channel:
+            log.warning("admin_bot: status_board.channel_id isn't a channel ID; status board off")
+        self.board_state = bc.get("state_file", "status_board.json")
+        self._board_task = None
+        self.live = None                     # extras.LiveState, from attach()
+        self.backups = None                  # extras.BackupCopier, from attach()
         self.last_notice: dict[str, float] = {}
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.ready = threading.Event()
@@ -296,6 +322,21 @@ class AdminBot:
         self.last_notice[pid] = now
         fut = asyncio.run_coroutine_threadsafe(self._post_refused(name, pid), self.loop)
         fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
+
+    def attach(self, live=None, backups=None) -> None:
+        """Hand the bot the monitor's live state and backup copier (for the board and
+        /valheim online, /valheim backups)."""
+        self.live, self.backups = live, backups
+
+    def post_admin(self, text: str) -> None:
+        """Thread-safe: a plain message to the admin channel."""
+        if not (self.loop and self.client and self.ready.is_set()):
+            return
+
+        async def send():
+            ch = self.client.get_channel(self.channel_id) or await self.client.fetch_channel(self.channel_id)
+            await ch.send(text[:2000])
+        asyncio.run_coroutine_threadsafe(send(), self.loop)
 
     def set_status(self, offline: bool, count: Optional[int]) -> None:
         """Thread-safe: record the server's state; the bot renames the channel when allowed."""
@@ -346,6 +387,49 @@ class AdminBot:
                 log.warning("admin_bot: status channel rename failed: %s", e)
                 st.last_rename = st.clock()
 
+    async def _board_loop(self) -> None:
+        """Keep one message in the board channel showing the server's state. Its id is
+        remembered in `board_state`, so a restart edits the same message, not a new one."""
+        import discord
+        import extras
+        try:
+            channel = self.client.get_channel(self.board_channel) or await self.client.fetch_channel(self.board_channel)
+        except discord.HTTPException as e:
+            log.warning("admin_bot: can't see status board channel %s (%s); board off", self.board_channel, e)
+            return
+        msg = None
+        try:
+            with open(self.board_state) as f:
+                msg = await channel.fetch_message(int(json.load(f)["message_id"]))
+        except (OSError, ValueError, KeyError, discord.HTTPException):
+            msg = None
+        last = None
+        while True:
+            if self.live is not None:
+                board = extras.render_board(self.live.snapshot(), self.server_name)
+                sig = json.dumps(board, sort_keys=True)
+                if sig != last:
+                    embed = discord.Embed.from_dict({**board, "footer": {"text": "Updates automatically"}})
+                    embed.timestamp = discord.utils.utcnow()
+                    try:
+                        if msg is None:
+                            msg = await channel.send(embed=embed)
+                            with open(self.board_state, "w") as f:
+                                json.dump({"channel_id": self.board_channel, "message_id": msg.id}, f)
+                        else:
+                            await msg.edit(embed=embed)
+                        last = sig
+                    except discord.NotFound:          # someone deleted it: post a new one
+                        msg = None
+                        continue
+                    except discord.Forbidden:
+                        log.warning("admin_bot: no permission to post in the status board channel "
+                                    "(needs View Channel, Send Messages, Embed Links, Read Message History)")
+                        await asyncio.sleep(600)
+                    except discord.HTTPException as e:
+                        log.warning("admin_bot: status board update failed: %s", e)
+            await asyncio.sleep(10)
+
     async def _post_refused(self, name: str, pid: str) -> None:
         import discord
         channel = self.client.get_channel(self.channel_id) or await self.client.fetch_channel(self.channel_id)
@@ -388,6 +472,8 @@ class AdminBot:
                 bot.ready.set()
                 if bot.status and bot._status_task is None:     # on_ready repeats after reconnects
                     bot._status_task = asyncio.ensure_future(bot._status_loop())
+                if bot.board_channel and bot._board_task is None:
+                    bot._board_task = asyncio.ensure_future(bot._board_loop())
 
             async def on_interaction(self, it: discord.Interaction):
                 cid = (it.data or {}).get("custom_id", "") if it.type == discord.InteractionType.component else ""
@@ -465,6 +551,37 @@ class AdminBot:
         async def unpermit(it: discord.Interaction, player_id: str):
             await run(it, lambda p: ["removed from permittedlist.txt"] if bot.lists.remove("permitted", p) else [],
                       player_id, "unpermit")
+
+        @group.command(name="online", description="Who's on the Valheim server right now")
+        async def online(it: discord.Interaction):
+            import extras
+            if bot.live is None:
+                await it.response.send_message("The monitor isn't tracking the server yet.", ephemeral=True)
+                return
+            snap = bot.live.snapshot()
+            if snap["down"]:
+                text = f"🔴 **{bot.server_name}** is offline."
+            elif snap["count"] == 0:
+                text = f"🟢 **{bot.server_name}** is up, and nobody is playing."
+            else:
+                text = f"🟢 **{snap['count']} online** in {bot.server_name}:\n" + "\n".join(extras.player_lines(snap))
+            await it.response.send_message(text[:2000])
+
+        @group.command(name="backups", description="List the copied world backups")
+        async def backups(it: discord.Interaction):
+            if not await guard(it):
+                return
+            if bot.backups is None:
+                await it.response.send_message("Backup copying isn't set up (the `backups` block in config.json).",
+                                                ephemeral=True)
+                return
+            rows = bot.backups.listing(10)
+            if not rows:
+                text = f"No backups in `{bot.backups.dest}` yet."
+            else:
+                text = f"Newest backups in `{bot.backups.dest}`:\n" + "\n".join(
+                    f"• `{stem}` · {size / 1e6:.0f} MB · <t:{int(mtime)}:R>" for mtime, size, stem in rows)
+            await it.response.send_message(text[:2000], ephemeral=True)
 
         @group.command(name="lists", description="Show the permitted, banned and admin lists")
         async def lists(it: discord.Interaction):

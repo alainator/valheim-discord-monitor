@@ -114,6 +114,20 @@ class ListsTest(unittest.TestCase):
                          ["PlayStation_5136375155283799651", "V_76561198000000001"])
         self.assertEqual(self.lists.refusal_reason("S_123"), "not on the permitted list")
 
+    def test_new_ids_follow_the_lists_style(self):
+        # The log says Steam_…, but this server's lists use V_…: write V_.
+        self.write("permitted", "// header\nV_76561197961206734\nPlayStation_5136375155283799651\n")
+        self.assertEqual(self.lists.permit("Steam_76561198000000002"), ["added to permittedlist.txt"])
+        self.assertEqual(self.lists.ids("permitted")[-1], "V_76561198000000002")
+        self.lists.ban("Steam_76561198000000003")
+        self.assertEqual(self.lists.ids("banned"), ["V_76561198000000003"])
+        # Non-Steam ids are written as given.
+        self.lists.ban("Xbox_2535400000000000")
+        self.assertEqual(self.lists.ids("banned")[-1], "Xbox_2535400000000000")
+
+    def test_no_steam_entries_yet_keeps_the_printed_form(self):
+        self.assertEqual(self.lists.styled("Steam_76561198000000002"), "Steam_76561198000000002")
+
     def test_steam_profile(self):
         self.assertEqual(steam_profile("V_76561198000000000"),
                          "https://steamcommunity.com/profiles/76561198000000000")

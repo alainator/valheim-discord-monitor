@@ -23,3 +23,6 @@ valheim_stats.db*
 
 # Unattended maintenance bookkeeping
 maintenance_state.json
+
+# Status board message id (admin bot)
+status_board.json
