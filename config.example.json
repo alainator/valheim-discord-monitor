@@ -46,7 +46,13 @@
     "admin_user_ids": ["YOUR-DISCORD-USER-ID"],
     "admin_role_ids": [],
     "save_dir": "/home/valheim/valheim_save_data",
-    "repeat_cooldown_seconds": 600
+    "repeat_cooldown_seconds": 600,
+    "status_channel": {
+      "channel_id": "YOUR-STATUS-VOICE-CHANNEL-ID",
+      "online": "🟢 Valheim: {count} online",
+      "empty": "🟢 Valheim: empty",
+      "offline": "🔴 Valheim: offline"
+    }
   },
   "steam": {
     "enabled": true,

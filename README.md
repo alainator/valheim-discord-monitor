@@ -21,6 +21,8 @@ On top of the Discord posts it can also:
 - **Alert you when someone is refused** by your ban or permitted list, and let you
   **Permit** or **Ban** them with a button in Discord (self-hosted servers). See
   [Join-attempt alerts & Discord admin bot](#join-attempt-alerts--discord-admin-bot).
+- Keep a **voice channel's name showing who's on** ("🟢 Valheim: 3 online"). See
+  [Status voice channel](#status-voice-channel).
 - Keep **play stats** in SQLite and publish a leaderboard page.
 - Show players' **Steam achievements** on that page.
 - Run **unattended updates and nightly backups** on LOW.MS.
@@ -348,6 +350,43 @@ and **Copy ID** on each of these:
 A player who keeps retrying triggers only one notice per `repeat_cooldown_seconds`
 (10 min).
 
+### Status voice channel
+
+The bot can also keep a voice channel's **name** showing the server's state, so everyone
+sees it at the top of the channel list without opening anything:
+
+| Server | Channel name (default) |
+|---|---|
+| People playing | `🟢 Valheim: 3 online` |
+| Up, nobody on | `🟢 Valheim: empty` |
+| Down or restarting | `🔴 Valheim: offline` |
+
+Setup:
+1. Create a voice channel. Nobody needs to join it: in its permissions, deny **Connect**
+   for @everyone so it's just a label.
+2. In the same permissions screen, add the bot with **View Channel** and **Manage Channels**.
+3. Copy the channel's ID and add a `status_channel` block inside `admin_bot`:
+   ```json
+   "status_channel": {
+     "channel_id": "123456789012345678",
+     "online": "🟢 Valheim: {count} online",
+     "empty": "🟢 Valheim: empty",
+     "offline": "🔴 Valheim: offline"
+   }
+   ```
+   Only `channel_id` is required. The three names are templates: `{count}` is the number
+   online and `{server}` is `server_name`, e.g. `"⚔️ {server}: {count}/10"`.
+4. `docker compose up -d --force-recreate`. The log shows `admin_bot: status channel is '…'`.
+
+How current it is:
+- **Rate limit:** Discord lets a bot rename a channel only **twice per 10 minutes**, so the
+  bot renames at most once every 5 minutes. A burst of joins and leaves in between costs
+  one rename with the latest count. It's usually current, and at worst about 5 minutes behind.
+- **Right after the monitor starts:** the name stays as it was until the count is known
+  (the next join, or the server's 10-minute "Connections" log line).
+- **When it shows offline:** as soon as the server logs a shutdown, or if the log has been
+  silent for `stale_after_seconds` (15 min), which catches a crash.
+
 ### Testing it
 
 1. **Can the bot read the lists?** In Discord, run `/valheim lists`. You should get a private
@@ -381,6 +420,8 @@ A player who keeps retrying triggers only one notice per `repeat_cooldown_second
 | `admin_bot disabled: …` | A required setting is missing; the message names it | Add it to the `admin_bot` block |
 | `/valheim` commands don't show up | `guild_id` isn't set (global commands take up to an hour), or the bot was invited without `applications.commands` | Set `guild_id`, or re-invite the bot with both scopes |
 | "Only the server admins can do that." | Your Discord user ID isn't in `admin_user_ids`, and you have none of the `admin_role_ids` roles | Add your ID and recreate the container |
+| Status channel never changes; log says `no permission to rename the status channel` | The bot lacks **Manage Channels** on that channel | Add it in the channel's permissions (the bot can't rename a channel it can't manage) |
+| Status channel lags behind | Discord's limit of 2 renames per 10 minutes | Expected: it catches up within 5 minutes |
 | "Couldn't edit the list files" | `save_dir` doesn't point at the mounted save dir | Check the volume in `docker-compose.yml` and `save_dir` in `config.json` |
 | `PyNaCl is not installed, voice will NOT be supported` | Harmless | Nothing: the bot doesn't use voice |
 
@@ -597,6 +638,10 @@ or run it in a terminal.
 | `admin_bot.admin_user_ids` / `admin_role_ids` | — | Who may press the buttons and use `/valheim`. |
 | `admin_bot.save_dir` | — | Folder holding `permittedlist.txt` / `bannedlist.txt` (must be writable). |
 | `admin_bot.repeat_cooldown_seconds` | 600 | One notice per player per this many seconds. |
+| `admin_bot.status_channel.channel_id` | — | Voice channel whose name shows the server status. |
+| `admin_bot.status_channel.online` / `empty` / `offline` | see above | Name templates; `{count}`, `{server}`. |
+| `admin_bot.status_channel.min_interval_seconds` | 300 | Minimum time between renames (can't go below 300 because of Discord's limit). |
+| `admin_bot.status_channel.stale_after_seconds` | 900 | Show offline if the log has been silent this long. |
 | `discord.embeds` | true | Coloured embed vs plain text. |
 | `discord.show_player_count` | true | Footer with the current online count. |
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |

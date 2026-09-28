@@ -1183,11 +1183,18 @@ def main():
              "; admin bot on" if admin else "")
     render_site("(startup)")
 
+    # Valheim logs "Connections N" every 10 minutes, so a log silent for longer than this
+    # means the server is down (crashed, or stopped without a shutdown line).
+    stale_after = float(((cfg.get("admin_bot") or {}).get("status_channel") or {}).get("stale_after_seconds", 900))
+    last_line_at = time.time()
+    booted = False                         # saw a boot: until a count line, the server is empty
+
     backoff = interval
     while True:
         try:
             changed = False
             for line in tailer.poll():
+                last_line_at = time.time()
                 log.debug("LOG: %s", line)
                 for ev in parser.feed(line):
                     if ev.kind != "count":
@@ -1209,8 +1216,15 @@ def main():
                         down_since, offline_posted = time.time(), False
                     elif ev.kind in ("server_online", "login"):
                         down_since = None
+                    if ev.kind == "server_online":
+                        booted = True
             backoff = interval
             now = time.time()
+            if admin:
+                count = parser.s.server_count
+                if count is None and (parser.s.online or booted):
+                    count = len(parser.s.online)
+                admin.set_status(parser.s.down or now - last_line_at > stale_after, count)
             if store and changed and parser.last_ts is not None:
                 try:
                     store.record_clock_offset(parser.last_ts, now)
