@@ -234,6 +234,13 @@ class StatusChannel:
             return None
         return self.wanted
 
+    def waiting(self) -> Optional[tuple]:
+        """(name, when) if a rename is wanted but held back by the rate limit."""
+        if not self.wanted or self.wanted == self.current:
+            return None
+        when = self.last_rename + self.min_interval
+        return (self.wanted, when) if self.clock() < when else None
+
     def renamed(self, name: str) -> None:
         self.current, self.last_rename = name, self.clock()
 
@@ -369,15 +376,28 @@ class AdminBot:
         try:
             channel = self.client.get_channel(st.channel_id) or await self.client.fetch_channel(st.channel_id)
             st.current = channel.name
-            log.info("admin_bot: status channel is '%s'; renames at most every %.0f min",
-                     channel.name, st.min_interval / 60)
         except discord.HTTPException as e:
             log.warning("admin_bot: can't see status channel %s (%s); status disabled", st.channel_id, e)
             return
+        if channel.type in (discord.ChannelType.text, discord.ChannelType.news, discord.ChannelType.forum):
+            # A text channel would get renamed to "🟢-valheim-3-online". The status *board*
+            # (status_board) is the text-channel feature.
+            log.warning("admin_bot: status_channel %s (#%s) is a text channel. It must be a voice channel; "
+                        "for a status message in a text channel, use status_board. Status channel off.",
+                        st.channel_id, channel.name)
+            return
+        log.info("admin_bot: status channel is '%s'; it's renamed when the server's state changes, "
+                 "at most every %.0f min", channel.name, st.min_interval / 60)
+        told = None
         while True:
             await asyncio.sleep(5)
             name = st.due()
             if not name:
+                wait = st.waiting()
+                if wait and wait[0] != told:
+                    told = wait[0]
+                    log.info("admin_bot: status channel: renaming to '%s' at %s (Discord allows 2 renames "
+                             "per 10 minutes)", wait[0], time.strftime("%H:%M:%S", time.localtime(wait[1])))
                 continue
             try:
                 await channel.edit(name=name, reason="Valheim server status")
@@ -407,6 +427,8 @@ class AdminBot:
                 msg = await channel.fetch_message(int(json.load(f)["message_id"]))
         except (OSError, ValueError, KeyError, discord.HTTPException):
             msg = None
+        if msg is not None:
+            log.info("admin_bot: status board: updating its message in #%s", getattr(channel, "name", channel))
         last = None
         while True:
             if self.live is not None:
@@ -418,6 +440,7 @@ class AdminBot:
                     try:
                         if msg is None:
                             msg = await channel.send(embed=embed)
+                            log.info("admin_bot: status board posted in #%s", getattr(channel, "name", channel))
                             with open(self.board_state, "w") as f:
                                 json.dump({"channel_id": self.board_channel, "message_id": msg.id}, f)
                         else:
