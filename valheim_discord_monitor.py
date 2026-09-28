@@ -34,7 +34,9 @@ import json
 import logging
 import os
 import re
+import signal
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -135,7 +137,10 @@ class ValheimLogParser:
         if ts is not None:
             self.last_ts = ts
         for ev in self._feed(line):
-            ev.extra.setdefault("ts", self.last_ts if self.last_ts is not None else int(time.time()))
+            # Log times are the server's wall clock; don't mix in a real-UTC time.time()
+            # before the first timestamped line (record_event skips events without "ts").
+            if self.last_ts is not None:
+                ev.extra.setdefault("ts", self.last_ts)
             yield ev
 
     def _logout(self, name: str) -> Event:
@@ -300,6 +305,11 @@ class _SafeDict(dict):
         return ""
 
 
+def _escape_md(text: Optional[str]) -> Optional[str]:
+    """Escape Discord markdown so a name like "*Bob*" can't break the message formatting."""
+    return re.sub(r"([\\*_~`|>])", r"\\\1", text) if text else text
+
+
 class Discord:
     COLORS = {"login": 0x57F287, "logout": 0x95A5A6, "death": 0xED4245, "respawn": 0xFEE75C, "server_up": 0x5865F2,
               "player_joined": 0x57F287, "player_left": 0x95A5A6, "server_online": 0x57F287, "server_offline": 0xED4245,
@@ -345,7 +355,7 @@ class Discord:
         # line, so don't post them individually.
         if ev.kind == "logout" and ev.extra.get("stale"):
             return
-        fields = _SafeDict({**ev.extra, "player": ev.player,
+        fields = _SafeDict({**ev.extra, "player": _escape_md(ev.player),
                             "server": server_name or ev.extra.get("server", "the server")})
         text = self.messages[ev.kind].format_map(fields)
         emoji = self.EMOJI.get(ev.kind, "")
@@ -361,6 +371,8 @@ class Discord:
         self.send(payload)
 
     def send(self, payload: dict) -> None:
+        # Character names are chosen by players: never let one ping @everyone, a role or a user.
+        payload.setdefault("allowed_mentions", {"parse": []})
         body = json.dumps(payload).encode()
         req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json",
                                                                   "User-Agent": "valheim-discord-monitor/1.0"})
@@ -400,6 +412,10 @@ class LocalFileSource:
         with open(self.path, "rb") as f:
             f.seek(offset)
             return f.read()
+
+    def head(self, n: int) -> bytes:
+        with open(self.path, "rb") as f:
+            return f.read(n)
 
 
 class FTPSource:
@@ -739,11 +755,19 @@ class SteamWebAPISource(A2SSource):
 # Tailers
 # ---------------------------------------------------------------------------
 class OffsetTailer:
-    """Tails a byte-offset source, persisting the offset so restarts don't re-post."""
+    """Tails a byte-offset source, persisting the offset so restarts don't re-post.
+
+    A server restart rewrites the log from scratch. Usually that shows up as the file
+    shrinking, but if the monitor was down meanwhile the new log can already be longer
+    than the old offset. Sources that can read the file's first bytes (local files) keep
+    a fingerprint of them, so a replaced log is still noticed and read from the start."""
+
+    HEAD = 256
 
     def __init__(self, source, state_path: str, start_at_end: bool = True):
         self.source, self.state_path = source, state_path
         self.buffer = b""
+        self.head = ""
         self.offset = self._load()
         if self.offset is None:
             self.offset = self.source.size() if start_at_end else 0
@@ -752,19 +776,29 @@ class OffsetTailer:
     def _load(self) -> Optional[int]:
         try:
             with open(self.state_path) as f:
-                return int(json.load(f)["offset"])
+                state = json.load(f)
+            self.head = state.get("head", "")
+            return int(state["offset"])
         except Exception:
             return None
 
     def _save(self):
+        if hasattr(self.source, "head") and len(bytes.fromhex(self.head)) < min(self.offset, self.HEAD):
+            self.head = self.source.head(min(self.offset, self.HEAD)).hex()
         with open(self.state_path, "w") as f:
-            json.dump({"offset": self.offset, "saved": time.time()}, f)
+            json.dump({"offset": self.offset, "head": self.head, "saved": time.time()}, f)
+
+    def _replaced(self) -> bool:
+        if not (self.head and hasattr(self.source, "head")):
+            return False
+        known = bytes.fromhex(self.head)
+        return self.source.head(len(known)) != known
 
     def poll(self) -> Iterator[str]:
         size = self.source.size()
-        if size < self.offset:
-            log.info("Log rotated/truncated (size %d < offset %d); restarting from 0", size, self.offset)
-            self.offset, self.buffer = 0, b""
+        if size < self.offset or (self.offset and self._replaced()):
+            log.info("Log rotated/replaced (size %d, offset %d); restarting from 0", size, self.offset)
+            self.offset, self.buffer, self.head = 0, b"", ""
         if size == self.offset:
             return
         data = self.source.read_from(self.offset)
@@ -959,6 +993,9 @@ def main():
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 
+    # `docker stop` sends SIGTERM, which a PID-1 Python ignores by default (so Docker waits
+    # 10 s and kills it). Treat it like Ctrl+C: stop cleanly and close the database.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config)
@@ -973,9 +1010,9 @@ def main():
     db_enabled = bool(db_cfg.get("path")) and db_cfg.get("enabled", True)
     site_cfg = cfg.get("stats_site") or {}
 
-    def open_store():
+    def open_store(reconcile: bool = False):
         from stats_db import Store
-        return Store(db_cfg["path"], source=cfg.get("source", {}).get("type", "log"))
+        return Store(db_cfg["path"], source=cfg.get("source", {}).get("type", "log"), reconcile=reconcile)
 
     def render_site(reason=""):
         out = site_cfg.get("output")
@@ -1094,7 +1131,7 @@ def main():
     default_log_events = {"login", "logout", "death", "server_restart", "server_online", "server_offline"}
     events = set(cfg.get("events") or ()) & log_events or default_log_events
 
-    store = open_store() if db_enabled else None
+    store = open_store(reconcile=True) if db_enabled else None
     render_interval = float(site_cfg.get("render_interval_seconds", 60))
     last_render = 0.0
 
@@ -1105,13 +1142,20 @@ def main():
     steam_interval = float(steam_cfg.get("refresh_seconds", 1800))
     steam_limit = int(steam_cfg.get("top_n", 25))
     last_steam = 0.0
+    steam_thread: Optional[threading.Thread] = None
+    steam_done = threading.Event()        # set by the thread when new data wants a re-render
 
     def refresh_steam():
+        # Runs on its own thread with its own connection: a full refresh is ~25 slow API
+        # calls (minutes if Steam is down), which must not hold up log tailing.
         try:
             import steam
-            n = steam.update_all(store, steam_key, limit=steam_limit)
-            if n:
-                render_site("(steam refresh)")
+            st = open_store()
+            try:
+                if steam.update_all(st, steam_key, limit=steam_limit):
+                    steam_done.set()
+            finally:
+                st.close()
         except Exception as e:
             log.warning("Steam refresh failed: %s", e)
 
@@ -1182,9 +1226,14 @@ def main():
             if changed and store and site_cfg.get("output") and now - last_render >= render_interval:
                 render_site()
                 last_render = now
-            if steam_enabled and now - last_steam >= steam_interval:
-                refresh_steam()
+            if steam_enabled and now - last_steam >= steam_interval \
+                    and not (steam_thread and steam_thread.is_alive()):
+                steam_thread = threading.Thread(target=refresh_steam, name="steam-refresh", daemon=True)
+                steam_thread.start()
                 last_steam = now
+            if steam_done.is_set():
+                steam_done.clear()
+                render_site("(steam refresh)")
             if maint:
                 try:
                     maint.tick()
@@ -1204,4 +1253,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:          # Ctrl+C or docker stop while sleeping between polls
+        log.info("Stopping")

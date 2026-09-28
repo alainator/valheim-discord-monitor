@@ -91,7 +91,7 @@ class TokenCache:
         self.server_id, self.email, self.password = server_id, email, password
         self.selectors = {**DEFAULT_SELECTORS, **(selectors or {})}
         self.headless, self.login_timeout = headless, login_timeout
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)   # token + browser session cookies
         self.cache_path = cache_path or STATE_DIR / "nexus_token.json"
         self.profile_dir = STATE_DIR / "browser-profile"
         self._token: Optional[str] = None
@@ -110,9 +110,12 @@ class TokenCache:
             pass
 
     def _save(self):
-        self.cache_path.write_text(json.dumps({"token": self._token, "exp": self._exp, "saved": time.time()}))
+        # Created 0600 from the start (not chmod'ed afterwards): it holds a bearer token.
+        fd = os.open(self.cache_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps({"token": self._token, "exp": self._exp, "saved": time.time()}))
         try:
-            os.chmod(self.cache_path, 0o600)
+            os.chmod(self.cache_path, 0o600)   # an older cache file may have looser permissions
         except OSError:
             pass
 
@@ -137,7 +140,9 @@ class TokenCache:
         try:
             from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
         except ImportError:
-            sys.exit("nexus login needs Playwright:  pip install playwright && python -m playwright install --with-deps chromium")
+            # Not sys.exit: this can run inside the monitor's loop, and must not kill it.
+            raise RuntimeError("nexus login needs Playwright:  pip install playwright && "
+                               "python -m playwright install --with-deps chromium") from None
 
         captured: dict = {}
         with sync_playwright() as p:

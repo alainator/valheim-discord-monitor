@@ -279,9 +279,16 @@ class Maintenance:
         a, b = self.window
         return a <= t < b if a <= b else (t >= a or t < b)
 
+    def window_date(self) -> str:
+        """The date the most recent backup window opened: "tonight" for a window that
+        crosses midnight (23:00-03:00) stays the same night after 00:00."""
+        now = self.local_now()
+        d = now.date() if now.time() >= self.window[0] else now.date() - _dt.timedelta(days=1)
+        return d.isoformat()
+
     def backup_due(self) -> bool:
         return (self.backup_enabled and self.in_window()
-                and self.state.get("last_backup_date") != self.local_now().date().isoformat())
+                and self.state.get("last_backup_date") != self.window_date())
 
     # -- hooks from the monitor's main loop ------------------------------
     def observe(self, ev, tracked_online: int) -> None:
@@ -368,7 +375,7 @@ class Maintenance:
         if self.dry_run:
             log.info("DRY RUN: would run %s now", " + ".join(plan))
             if do_backup:  # don't repeat the dry-run backup every 15 min
-                self.state["last_backup_date"] = self.local_now().date().isoformat()
+                self.state["last_backup_date"] = self.window_date()
                 self._save()
             return "dry-run: " + "+".join(plan)
         self.active, self.boot_seen = True, False
@@ -392,10 +399,13 @@ class Maintenance:
             try:
                 job = getter(jid)
             except ApiError as e:
-                if e.status == 429:
+                if e.status == 429 or e.status >= 500:
                     self.sleep(30)
                     continue
                 raise
+            except OSError as e:          # URLError, timeouts: a blip must not abandon a running job
+                log.warning("%s job %s: status check failed (%s); retrying", kind, jid, e)
+                continue
             status = job.get("status")
         if status != "COMPLETED":
             raise RuntimeError(f"{kind} job {status}: {job.get('error') or 'no detail'}")
@@ -456,7 +466,7 @@ class Maintenance:
                         stopped = True  # set first: a stop that fails half-way must still get a start
                         self._power("stop")
                     b = self._backup()
-                    self.state["last_backup_date"] = self.local_now().date().isoformat()
+                    self.state["last_backup_date"] = self.window_date()
                     self.state["last_backup_at"] = int(self.clock())
                     self._save()
                     size = b.get("sizeBytes")
@@ -465,7 +475,7 @@ class Maintenance:
                     log.warning("Backup failed: %s", e)
                     problems.append(f"backup failed: {e}")
                     # Don't retry every 15 minutes tonight; one alert per night is enough.
-                    self.state["last_backup_date"] = self.local_now().date().isoformat()
+                    self.state["last_backup_date"] = self.window_date()
                     self._save()
             if update:
                 try:

@@ -146,7 +146,6 @@ def render_html(db_path: str, cfg: dict) -> str:
     tz_label = (cfg.get("stats_site") or {}).get("timezone_label", "server time")
     top_n = int((cfg.get("stats_site") or {}).get("top_n", 10))
     now_real = int(time.time())          # true epoch — for Steam data, which uses real epochs
-    now = now_real                       # game-server clock — for everything parsed from the log
 
     conn = stats_db.connect(db_path)
     try:
