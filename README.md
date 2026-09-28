@@ -30,6 +30,18 @@ On top of the Discord posts it can also:
 **Running the Valheim server on your own Linux machine?** Start with the
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
+**Contents:**
+- Getting started: [Self-hosted quick start](#self-hosted-linux-server-quick-start) ·
+  [Count mode](#count-mode-quick-start) · [Log mode](#log-mode)
+- Admin bot: [Join-attempt alerts & admin bot](#join-attempt-alerts--discord-admin-bot) ·
+  [Status voice channel](#status-voice-channel) · [Troubleshooting](#troubleshooting)
+- Extras: [Stats page](#player-stats--public-web-page) ·
+  [Steam achievements](#steam-achievements) ·
+  [Updates & backups (LOW.MS)](#unattended-updates--nightly-backups-lowms)
+- Reference: [Running it permanently](#running-it-permanently) · [Options](#options) ·
+  [Server admin tips](#server-admin-tips) · [Development](#development) ·
+  [About this fork](#about-this-fork)
+
 ## Self-hosted Linux server (quick start)
 
 This is the setup for a dedicated server you run yourself, e.g. installed with the
@@ -146,9 +158,14 @@ Vanilla Valheim already prints everything needed to `valheim_console.log`
 | Death   | `Got character ZDOID from Bjorn : 0:0` |
 | Respawn | next non-zero ZDOID for that name |
 | Logout  | `Destroying abandoned non persistent zdo … owner 1234567890` (owner id matches the player), or `Closing socket …` on direct-Steam servers, or `Player disconnected … now 0 player(s)` |
+| Refused join | `Player Stranger : V_7656… is blacklisted or not in whitelist.` (see [admin bot](#join-attempt-alerts--discord-admin-bot)) |
+| Restart / online | `OnApplicationQuit` / `ZNet Shutdown` … then `Game server connected` |
 
-The monitor tails the log (by byte offset, so restarts never re-post), runs the
-lines through a small state machine, and posts an embed to a Discord webhook.
+The monitor tails the log by byte offset, so its own restarts never re-post. It runs the
+lines through a small state machine and posts an embed to a Discord webhook. When the game
+server restarts and starts a fresh log, the monitor notices and reads the new log from the
+top. For local files that works even if the new log is already longer than the old one,
+e.g. when the monitor was down during the restart.
 
 ### Setup
 
@@ -166,8 +183,17 @@ lines through a small state machine, and posts an embed to a Discord webhook.
    ```bash
    python valheim_discord_monitor.py --config config.json
    ```
-   Secrets can be given as environment variables instead of in the file:
-   `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`, `VALHEIM_LOG_USER`, `VALHEIM_LOG_PASSWORD`, `NEXUS_TOKEN`.
+   Secrets can be given as environment variables instead of in the file. With Docker
+   Compose, put them in `.env`:
+
+   | Variable | Replaces |
+   |---|---|
+   | `DISCORD_WEBHOOK_URL` | `discord.webhook_url` |
+   | `DISCORD_BOT_TOKEN` | `admin_bot.token` |
+   | `STEAM_API_KEY` | `steam.api_key` / `source.api_key` (steamapi) |
+   | `LOWMS_API_KEY` | `source.api_key` (lowms) / `maintenance.api_key` |
+   | `NEXUS_EMAIL`, `NEXUS_PASSWORD`, `NEXUS_TOKEN` | the `nexus` source / panel login |
+   | `VALHEIM_LOG_USER`, `VALHEIM_LOG_PASSWORD` | `source.user` / `source.password` (ftp, sftp) |
 
 By default the monitor starts at the **end** of the log (only new events post).
 Use `--from-start` once if you want it to replay the existing file.
@@ -185,8 +211,8 @@ python valheim_discord_monitor.py --config config.json --discover
 This walks the FTP tree and prints every `*.log` / `*console*` file with its size.
 Set `"tls": true` if the host requires FTPS.
 
-LOW.MS's Nexus panel does not currently offer FTP/SFTP (confirmed with their
-support, Sept 2026) — use count mode there.
+LOW.MS's Nexus panel does not offer FTP/SFTP (confirmed with their support,
+Sept 2026). Use the `lowms` source there.
 
 #### `lowms` (LOW.MS public API — recommended on LOW.MS)
 The documented [LOW.MS public API](https://api.prod.nexus.low.ms/v1/docs) reads the
@@ -445,7 +471,7 @@ players, peak players online at once). Enable it with `database` and
 
 ```json
 "database": { "path": "valheim_stats.db", "enabled": true },
-"stats_site": { "output": "/var/www/valheimstats/index.html", "render_interval_seconds": 60 }
+"stats_site": { "output": "site/index.html", "render_interval_seconds": 60 }
 ```
 
 - `play_sessions` — one row per session: `player`, `login_at`, `logout_at`,
@@ -458,7 +484,7 @@ Useful commands:
 ```bash
 python3 valheim_discord_monitor.py --config config.json --backfill server.log   # seed history from a log file
 python3 valheim_discord_monitor.py --config config.json --render-site           # write the page once
-python3 stats_site.py --db valheim_stats.db --out /var/www/valheimstats/index.html --config config.json
+python3 stats_site.py --db valheim_stats.db --out site/index.html --config config.json
 ```
 
 The page is static HTML — no scripts, no inputs, no auth needed — so it is safe to
@@ -651,11 +677,82 @@ or run it in a terminal.
 - Names come from the character, not the Steam account.
 - On a PlayFab/crossplay server a disconnect (clean or timeout) shows up as the
   `Destroying abandoned … owner <id>` line; the monitor emits one logout per player.
-- If the server restarts, the log is truncated and the monitor resets automatically.
+- If the server restarts, it starts a fresh log and the monitor starts over with it
+  automatically.
+- `docker stop` / `docker compose down` stop the monitor straight away (it handles SIGTERM).
+- Player names in Discord messages can't ping anyone: mentions are disabled on every post,
+  and markdown in names is escaped.
 - Player IDs: since Valheim 1.0 the lists use `V_<SteamID64>` for Steam and `X_` / `S_` /
   `N_` for Xbox, PlayStation and Nintendo. Older lists may still contain
   `Steam_…` / `Xbox_…` / `PlayStation_…` / `Nintendo_…` entries. The admin bot leaves
   those untouched.
+
+## Server admin tips
+
+Things that come up running a vanilla dedicated server, learned setting this one up.
+
+**The list files** live in the save dir (`-savedir`, e.g. `/home/valheim/valheim_save_data`):
+- `adminlist.txt`: players who can use admin console commands.
+- `bannedlist.txt`: players who can't join.
+- `permittedlist.txt`: if it has any entries, *only* these players can join.
+
+Put one ID per line in the `V_<SteamID64>` form (Valheim 1.0+). To find your SteamID64:
+Steam → your name → **Account details**, or the number at the end of your profile URL.
+After editing `adminlist.txt`, restart the server. The admin bot's `/valheim lists` shows
+all three files.
+
+**Looking at them** needs `sudo`, because the folder belongs to the `valheim` user. Wrap
+wildcards so root expands them:
+`sudo sh -c 'ls -la /home/valheim/valheim_save_data/*list.txt'`.
+
+**The in-game console** (for `kick`, `ban`, `unban`):
+1. Add `-console` to Valheim's launch options in Steam (Properties → General → Launch
+   Options).
+2. Press **F5**. On keyboards whose F-keys default to media keys, that's **Fn + F5**, or
+   toggle Fn-lock (often **Fn + Esc**).
+3. Commands need your ID in `adminlist.txt`. Refer to players by their **platform ID**
+   (`kick V_7656…`), not their character name. Your players' IDs are in
+   `permittedlist.txt`. The admin bot's notices show the IDs of refused players.
+
+**Idle players:** vanilla Valheim logs nothing per player between joining and leaving, so
+idleness can't be detected from the log, and there's no remote kick. Auto-kicking AFK
+players needs a server-side mod.
+
+## Development
+
+```bash
+pip install -r requirements.txt                   # discord.py, only needed for the admin bot
+python -m unittest discover -s tests -v           # unit tests
+python valheim_discord_monitor.py --config config.example.json --replay sample_console.log   # parser dry run
+```
+
+- **Tests** (`tests/`) cover the log parser, the list-file editing, the status channel's
+  naming and rate limiting, and the audit fixes. They run offline, with no Discord or
+  Valheim needed.
+- **CI:** `.github/workflows/tests.yml` runs the tests on Python 3.9 and 3.12, does the
+  replay, and builds the Docker image, on every push to `main` and every pull request.
+- **Sample log:** `sample_console.log` is a short example log with crossplay joins, a
+  death, a timeout, a disconnect and a refused join. Add lines there when teaching the
+  parser something new.
+
+## About this fork
+
+This is a fork of
+[justin7jones/valheim-discord-monitor](https://github.com/justin7jones/valheim-discord-monitor).
+Added here:
+- **Admin bot:** refused-join alerts with Permit / Ban / Ignore buttons, `/valheim`
+  commands, and support for Valheim 1.0's `V_…` player IDs.
+- **Status voice channel** showing who's online.
+- **Docker setup:** `Dockerfile`, `docker-compose.yml`, `.env.example` and a self-hosted
+  example config.
+- **Docs:** the self-hosted quick start, bot setup and troubleshooting, and these tips.
+- **Fixes from a code audit:**
+  - player names can't ping `@everyone`;
+  - a restarted server's new log is always read from the top;
+  - `docker stop` is clean;
+  - one-off commands no longer cut short live stats sessions;
+  - Steam and LOW.MS maintenance fixes.
+- **Tests and CI.**
 
 ## License
 
