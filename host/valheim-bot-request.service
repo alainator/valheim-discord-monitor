@@ -1,0 +1,8 @@
+[Unit]
+Description=Handle a request from the Valheim Discord monitor
+
+[Service]
+Type=oneshot
+User=valheim
+Group=valheim
+ExecStart=/home/valheim/valheim-bot-request.sh

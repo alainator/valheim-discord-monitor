@@ -26,3 +26,4 @@ maintenance_state.json
 
 # Status board message id (admin bot)
 status_board.json
+updater_state.json

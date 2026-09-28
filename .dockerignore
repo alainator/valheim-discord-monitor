@@ -9,3 +9,4 @@ maintenance_state.json
 __pycache__
 tests
 status_board.json
+updater_state.json

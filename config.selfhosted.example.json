@@ -15,7 +15,8 @@
     "session_summary",
     "welcome",
     "milestone",
-    "weekly_recap"
+    "weekly_recap",
+    "update"
   ],
   "database": {
     "path": "valheim_stats.db",
@@ -64,6 +65,10 @@
   "weekly_recap": {
     "day": "sunday",
     "hour": 18
+  },
+  "updater": {
+    "log": "/valheim_home/update_check.log",
+    "bot_dir": "/bot"
   },
   "source": {
     "type": "file",

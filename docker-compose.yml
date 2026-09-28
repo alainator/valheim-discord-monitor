@@ -28,6 +28,10 @@ services:
       # Optional: a folder on another disk for copies of Valheim's world backups
       # (the "backups" block in config.json). Uncomment and pick a path.
       # - /mnt/backups/valheim:/backups
+      # Optional: the host auto-updater link (host/README.md). The home folder is read-only,
+      # for update_check.log; bot/ is where status.json and restart/check requests go.
+      # - /home/valheim:/valheim_home:ro
+      # - /home/valheim/bot:/bot
     environment:
       # Match the server's clock so times in logs and on the stats page line up.
       TZ: ${TZ:-UTC}

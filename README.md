@@ -37,7 +37,8 @@ On top of the Discord posts it can also:
   [Count mode](#count-mode-quick-start) · [Log mode](#log-mode)
 - Admin bot: [Join-attempt alerts & admin bot](#join-attempt-alerts--discord-admin-bot) ·
   [Status voice channel](#status-voice-channel) · [Troubleshooting](#troubleshooting)
-- [Extras: raids, summaries, milestones, recap, board, backups](#extras-raids-summaries-milestones-recap-board-backups)
+- [Extras: raids, summaries, milestones, recap, board, backups](#extras-raids-summaries-milestones-recap-board-backups) ·
+  [Auto-updates & restarts from Discord](#auto-updates-and-restarts-from-discord)
 - Extras: [Stats page](#player-stats--public-web-page) ·
   [Steam achievements](#steam-achievements) ·
   [Updates & backups (LOW.MS)](#unattended-updates--nightly-backups-lowms)
@@ -455,6 +456,7 @@ How current it is:
 | Status channel lags behind | Discord's limit of 2 renames per 10 minutes | Expected: it catches up within 5 minutes |
 | Status board never appears; log says `no permission to post in the status board channel` | Missing channel permissions | Give the bot View Channel, Send Messages, Embed Links and Read Message History there |
 | `backups.dest_dir … doesn't exist` | The backup folder isn't mounted | Add the volume in `docker-compose.yml` and create the folder on the host |
+| `The restart request wasn't picked up` | The host helper isn't installed or running | `systemctl status valheim-bot-request.path`; see [host/README.md](host/README.md) |
 | Raids, summaries etc. don't post | Their names aren't in `events` | Add them (see [Extras](#extras-raids-summaries-milestones-recap-board-backups)) and recreate the container |
 | "Couldn't edit the list files" | `save_dir` doesn't point at the mounted save dir | Check the volume in `docker-compose.yml` and `save_dir` in `config.json` |
 | `PyNaCl is not installed, voice will NOT be supported` | Harmless | Nothing: the bot doesn't use voice |
@@ -486,6 +488,7 @@ switched on by adding their name to `events` in `config.json`:
 | `welcome` | Replaces the join message on someone's **first ever** visit: "🎉 **Ingrid** arrived for the first time. Welcome, viking!" | stats database |
 | `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths | stats database |
 | `weekly_recap` | 📜 A weekly embed: top players by time, most deaths, raids, new vikings, total hours, peak online | stats database |
+| `update` | ✅ "Valheim updated: l-1.0.16 → l-1.0.17" when the server comes back on a new version, plus the [auto-updater](#auto-updates-and-restarts-from-discord)'s "update available" and "installing" posts | `Valheim version:` at boot |
 
 `welcome`, `milestone` and `weekly_recap` need the stats database (`database.path`).
 
@@ -555,6 +558,26 @@ What happens:
 
 How often Valheim makes backups, and how many it keeps, is set with the server's
 `-backups`, `-backupshort` and `-backuplong` launch options.
+
+### Auto-updates and restarts from Discord
+
+For self-hosted servers with a cron-driven update script (`check_update.sh`, which
+restarts when nobody is on; the unit's `ExecStartPre` runs `steamcmd app_update`). A
+small helper on the host lets the monitor:
+
+- **post the updater's decisions:** "🆕 update available: installs once everyone has
+  left", "🔄 installing now", and checker errors to the admin channel;
+- **give the updater a reliable player count:** it writes `status.json`, because the
+  script's own guess from the console log reads 0 right after a log rotation;
+- **take admin commands:**
+  - `/valheim update-check` checks for an update now;
+  - `/valheim restart [minutes] [reason]` restarts after a warning countdown in the public
+    channel, early if everyone leaves, and installs any waiting update;
+  - `/valheim restart-cancel` stops a countdown.
+
+The container gets no host privileges. It drops a request file into a shared folder, and a
+systemd path unit on the host runs a two-command handler as the `valheim` user. **Setup,
+including the change to `check_update.sh`: [host/README.md](host/README.md).**
 
 ## Player stats & public web page
 
@@ -770,6 +793,8 @@ or run it in a terminal.
 | `backups.keep` | 30 | Backup copies to keep. |
 | `backups.alert_after_hours` | 48 | Warn the admin channel if Valheim makes no backup for this long. |
 | `weekly_recap.day` / `hour` | sunday / 18 | When to post the weekly recap (container time zone). |
+| `updater.log` | — | The host updater's log (`update_check.log`), for update posts. |
+| `updater.bot_dir` | — | Folder shared with the host: `status.json` out, `request` for restart/check. |
 | `discord.embeds` | true | Coloured embed vs plain text. |
 | `discord.show_player_count` | true | Footer with the current online count. |
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |
@@ -849,6 +874,8 @@ Added here:
 - **Extras:** raid alerts, version-mismatch alerts, session summaries, first-visit
   welcomes, milestones, a weekly recap, a live status board, `/valheim online`, and world
   backup copies to another disk.
+- **Auto-update integration:** update posts, a reliable player count for the host's
+  update script, and `/valheim restart` with a countdown (`host/`).
 - **Docker setup:** `Dockerfile`, `docker-compose.yml`, `.env.example` and a self-hosted
   example config.
 - **Docs:** the self-hosted quick start, bot setup and troubleshooting, and these tips.

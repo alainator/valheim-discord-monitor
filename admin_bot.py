@@ -275,6 +275,10 @@ class AdminBot:
         self._board_task = None
         self.live = None                     # extras.LiveState, from attach()
         self.backups = None                  # extras.BackupCopier, from attach()
+        self.updater = None                  # updater.UpdateWatcher, from attach()
+        self.announce = None                 # posts a line to the public webhook channel
+        self._countdown = None               # running /valheim restart countdown task
+        self._countdown_cancel = None
         self.last_notice: dict[str, float] = {}
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.ready = threading.Event()
@@ -323,10 +327,10 @@ class AdminBot:
         fut = asyncio.run_coroutine_threadsafe(self._post_refused(name, pid), self.loop)
         fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
 
-    def attach(self, live=None, backups=None) -> None:
-        """Hand the bot the monitor's live state and backup copier (for the board and
-        /valheim online, /valheim backups)."""
-        self.live, self.backups = live, backups
+    def attach(self, live=None, backups=None, updater=None, announce=None) -> None:
+        """Hand the bot the monitor's live state, backup copier, updater link and a way to
+        post to the public channel (for the board and the /valheim commands)."""
+        self.live, self.backups, self.updater, self.announce = live, backups, updater, announce
 
     def post_admin(self, text: str) -> None:
         """Thread-safe: a plain message to the admin channel."""
@@ -429,6 +433,57 @@ class AdminBot:
                     except discord.HTTPException as e:
                         log.warning("admin_bot: status board update failed: %s", e)
             await asyncio.sleep(10)
+
+    async def _public(self, text: str) -> None:
+        if self.announce:
+            await asyncio.get_running_loop().run_in_executor(None, self.announce, text)
+
+    def _online_count(self) -> int:
+        return self.live.snapshot()["count"] if self.live else 0
+
+    async def _request(self, action: str) -> Optional[str]:
+        """Queue a host request, and tell the admins if nothing picks it up."""
+        err = self.updater.request(action) if self.updater else "the updater link isn't set up (`updater` in config.json)"
+        if err:
+            return err
+
+        async def watch():
+            await asyncio.sleep(30)
+            if self.updater.pending():
+                self.post_admin(f"⚠️ The `{action}` request wasn't picked up after 30 s. Is the host helper "
+                                "installed and running? (`systemctl status valheim-bot-request.path`)")
+        asyncio.ensure_future(watch())
+        return None
+
+    async def _restart_countdown(self, minutes: int, reason: str, by: str) -> None:
+        """Warn the public channel, restart when the time is up or everyone has left."""
+        why = f" ({reason})" if reason else ""
+        loop = asyncio.get_running_loop()
+        end = loop.time() + minutes * 60
+        warnings = sorted({m for m in (minutes, 5, 1) if 0 < m <= minutes}, reverse=True)
+        if minutes:
+            await self._public(f"⚠️ **{self.server_name}** restarts in **{minutes} minute{'s' if minutes != 1 else ''}**"
+                               f"{why}. Find a safe spot and log out; the world is saved on shutdown.")
+        warnings = [m for m in warnings if m < minutes]
+        while True:
+            if self._countdown_cancel.is_set():
+                await self._public(f"✅ The restart of **{self.server_name}** was cancelled.")
+                return
+            left = end - loop.time()
+            if left <= 0 or self._online_count() == 0:
+                break
+            if warnings and left <= warnings[0] * 60:
+                m = warnings.pop(0)
+                await self._public(f"⚠️ **{self.server_name}** restarts in **{m} minute{'s' if m != 1 else ''}**{why}.")
+            await asyncio.sleep(5)
+        err = await self._request("restart")
+        if err:
+            self.post_admin(f"⚠️ Restart failed: {err}")
+            await self._public(f"The restart of **{self.server_name}** didn't happen; the admins have been told.")
+            return
+        log.info("admin_bot: restart requested by %s%s", by, why)
+        await self._public(f"🔄 **{self.server_name}** is restarting now{why}. "
+                           "It installs any waiting Valheim update and is back in a few minutes.")
 
     async def _post_refused(self, name: str, pid: str) -> None:
         import discord
@@ -582,6 +637,49 @@ class AdminBot:
                 text = f"Newest backups in `{bot.backups.dest}`:\n" + "\n".join(
                     f"• `{stem}` · {size / 1e6:.0f} MB · <t:{int(mtime)}:R>" for mtime, size, stem in rows)
             await it.response.send_message(text[:2000], ephemeral=True)
+
+        @group.command(name="update-check", description="Ask the server to check for a Valheim update now")
+        async def update_check(it: discord.Interaction):
+            if not await guard(it):
+                return
+            err = await bot._request("check")
+            await it.response.send_message(
+                f"Couldn't ask for a check: {err}" if err else
+                "Asked the server to check for an update. The result posts in the admin channel within a "
+                "minute or two, and if an update is found, in the public channel too.", ephemeral=True)
+
+        @group.command(name="restart", description="Restart the server (installs any waiting update), with a warning")
+        @app_commands.describe(minutes="Warning time before the restart (0 = now). It happens early if everyone leaves.",
+                               reason="Shown to players, e.g. 'installing the update'")
+        async def restart(it: discord.Interaction, minutes: app_commands.Range[int, 0, 60] = 5, reason: str = ""):
+            if not await guard(it):
+                return
+            if bot._countdown and not bot._countdown.done():
+                await it.response.send_message("A restart is already counting down. `/valheim restart-cancel` stops it.",
+                                                ephemeral=True)
+                return
+            if bot.updater is None:
+                await it.response.send_message("Restarting needs the updater link (`updater` in config.json and "
+                                                "the host helper, see host/README.md).", ephemeral=True)
+                return
+            if bot._online_count() == 0:
+                minutes = 0
+            bot._countdown_cancel = asyncio.Event()
+            bot._countdown = asyncio.ensure_future(bot._restart_countdown(minutes, reason.strip()[:100], str(it.user)))
+            await it.response.send_message(
+                "Restarting now (nobody is online)." if minutes == 0 else
+                f"Restart in {minutes} min, or sooner if everyone leaves. `/valheim restart-cancel` stops it.",
+                ephemeral=True)
+
+        @group.command(name="restart-cancel", description="Cancel a restart countdown")
+        async def restart_cancel(it: discord.Interaction):
+            if not await guard(it):
+                return
+            if bot._countdown and not bot._countdown.done():
+                bot._countdown_cancel.set()
+                await it.response.send_message("Cancelled.", ephemeral=True)
+            else:
+                await it.response.send_message("No restart is counting down.", ephemeral=True)
 
         @group.command(name="lists", description="Show the permitted, banned and admin lists")
         async def lists(it: discord.Interaction):
