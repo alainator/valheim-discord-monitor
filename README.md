@@ -565,7 +565,9 @@ the glanceable version, and the board has the details.
 ### World backup copies
 
 Valheim already backs up your world by itself (`Backup created in Alheim_backup_auto-…` in
-the log, files in `worlds_local/`). The monitor can copy those backups to **another
+the log). On Valheim 1.0 each backup is a **folder** in `worlds_local/`, e.g.
+`Alheim_backup_auto-20260928-170645/`, because worlds are saved as chunk files. Older
+servers made `.db` + `.fwl` file pairs instead. Both kinds are copied. The monitor can copy those backups to **another
 disk**, so a failure of the server's disk doesn't take the backups with it:
 
 1. Mount a folder on the other disk in `docker-compose.yml`, e.g.
@@ -583,8 +585,8 @@ disk**, so a failure of the server's disk doesn't take the backups with it:
 What happens:
 - **When:** after every `Backup created` line, and once at start-up to catch up. Valheim
   writes a backup once and never touches it again, so a copy is never half-written.
-- **What:** the newest `keep` backups, each a `.db` + `.fwl` pair. Older copies are
-  deleted. The live world file is never copied.
+- **What:** the newest `keep` backups. Older copies are deleted. The live world (the
+  `Alheim` folder, or `Alheim.db`) is never copied.
 - **Alert:** if Valheim hasn't made a backup in `alert_after_hours` while the server is up,
   the bot posts a warning to the admin channel, once.
 
