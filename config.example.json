@@ -57,6 +57,10 @@
     },
     "status_board": {
       "channel_id": "YOUR-STATUS-BOARD-TEXT-CHANNEL-ID"
+    },
+    "join": {
+      "address": "YOUR.PUBLIC.IP:2456",
+      "note": "New here? Ask in #general to be added to the server."
     }
   },
   "steam": {

@@ -58,6 +58,8 @@ class LiveState:
     portals: Optional[int] = None
     last_raid: Optional[tuple] = None                  # (name, real epoch)
     booted: bool = False                               # saw a boot, so the count starts at 0
+    join_code: Optional[str] = None                    # crossplay join code; new on every restart
+    server_ip: Optional[str] = None                    # "a.b.c.d:2456", when the server logs it
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def observe(self, ev, now: Optional[float] = None) -> Optional[dict]:
@@ -87,14 +89,18 @@ class LiveState:
                     secs = ts - start
                     return {"duration": fmt_duration(secs), "duration_seconds": secs,
                             "deaths": deaths, "deaths_text": deaths_text(deaths)}
+            elif k == "join_code":
+                self.join_code = ev.extra.get("code")
+                self.server_ip = ev.extra.get("ip") or self.server_ip
             elif k == "server_restart":
-                self.down, self.up_since = True, None
+                self.down, self.up_since, self.join_code = True, None, None
                 self.online.clear()
                 self.session_start.clear()
                 self.session_deaths.clear()
                 self.count = 0
             elif k == "server_online":
                 self.down, self.up_since, self.count, self.booted = False, now, 0, True
+                self.join_code = None                  # a restart gets a new code
                 self.online.clear()
             elif k == "server_version":
                 self.version = ev.extra.get("version")
@@ -115,6 +121,7 @@ class LiveState:
             return {"online": names, "count": max(count, len(names)), "down": self.down,
                     "up_since": self.up_since, "version": self.version, "last_save": self.last_save,
                     "last_backup": self.last_backup, "portals": self.portals, "last_raid": self.last_raid,
+                    "join_code": self.join_code, "server_ip": self.server_ip,
                     # up_since alone isn't enough: it can come from reading old log lines.
                     "known": self.count is not None or bool(names) or self.booted}
 
@@ -349,6 +356,8 @@ def render_board(snap: dict, server_name: str) -> dict:
     else:
         title, color, desc = f"🟢 {server_name}: empty", 0x57F287, "Nobody is playing right now."
     fields = []
+    if snap.get("join_code") and not snap["down"]:
+        fields.append({"name": "Join code", "value": f"`{snap['join_code']}`", "inline": True})
     if snap["up_since"] and not snap["down"]:
         fields.append({"name": "Up since", "value": _ago(snap["up_since"]), "inline": True})
     if snap["version"]:

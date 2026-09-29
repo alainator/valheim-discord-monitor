@@ -31,7 +31,7 @@ class BotCommandsTest(unittest.TestCase):
             name, commands = asyncio.run(build())
         self.assertEqual(name, "valheim")
         self.assertEqual(commands, sorted(["permit", "ban", "unban", "unpermit", "online", "backups",
-                                           "update-check", "restart", "restart-cancel", "lists"]))
+                                           "update-check", "restart", "restart-cancel", "lists", "join"]))
 
 
 if __name__ == "__main__":

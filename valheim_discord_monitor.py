@@ -82,6 +82,10 @@ RE_PLATFORM_ID = re.compile(_TS + r"PlayFab socket with remote ID playfab/(?P<pf
 RE_COUNT = re.compile(_TS + r"Player (?:joined|disconnected from|connection lost(?: server)?).*?(?:now|currently) (?P<count>\d+) player")
 RE_CONNECTIONS = re.compile(_TS + r"Connections (?P<count>\d+) ZDOS")
 RE_SERVERNAME = re.compile(r"server \"(?P<server>[^\"]*)\"")
+# Crossplay join code: on "Player joined/disconnected … that has join code 034505" lines,
+# and on the "Session "…" with join code … and IP a.b.c.d:2456" line where the server
+# prints it. The code changes every time the server restarts.
+RE_JOINCODE = re.compile(r"join code (?P<code>\d+)(?: and IP (?P<ip>\d{1,3}(?:\.\d{1,3}){3}:\d+))?")
 RE_READY = re.compile(_TS + r"Game server connected")
 RE_TIMEOUT = re.compile(_TS + r"ZRpc timeout detected")
 # Server shutting down (scheduled restart, backup, update, crash). A graceful stop
@@ -142,6 +146,7 @@ class ParserState:
     id_to_steam: dict = field(default_factory=dict)  # connection id -> SteamID64 (crossplay handshake)
     server_count: Optional[int] = None               # authoritative count from the server's own log lines
     down: bool = False                               # True after a shutdown, until the next boot
+    join_code: Optional[str] = None                  # crossplay join code of this server session
 
 
 class ValheimLogParser:
@@ -220,6 +225,12 @@ class ValheimLogParser:
                 yield Event("server_restart", None, {})
             self.s.server_count = 0
             return
+
+        # The join code rides on count lines, so note it without consuming the line.
+        m = RE_JOINCODE.search(line)
+        if m and m.group("code") != self.s.join_code:
+            self.s.join_code = m.group("code")
+            yield Event("join_code", None, {"code": self.s.join_code, "ip": m.group("ip")})
 
         # Keep the authoritative count up to date from any line that carries it.
         m = RE_COUNT.search(line) or RE_CONNECTIONS.search(line)
@@ -1023,7 +1034,7 @@ def prime_live_state(live, source) -> None:
     if not isinstance(source, LocalFileSource):
         return
     last_ts = boot = shutdown = save = backup = None
-    raid = None
+    raid = code = None
     try:
         with open(source.path, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -1035,15 +1046,17 @@ def prime_live_state(live, source) -> None:
                 elif (m := RE_PORTALS.search(line)):
                     live.portals = int(m.group("n"))
                 elif RE_READY.search(line):
-                    boot = last_ts
+                    boot, code = last_ts, None       # a new session gets a new join code
                 elif RE_SHUTDOWN.search(line):
-                    shutdown = last_ts
+                    shutdown, code = last_ts, None   # the old join code dies with the session
                 elif RE_SAVED.search(line):
                     save = last_ts
                 elif RE_BACKUP.search(line):
                     backup = last_ts
                 elif (m := RE_RAID.search(line)):
                     raid = (raid_name(m.group("event")), last_ts)
+                if (m := RE_JOINCODE.search(line)):
+                    code = (m.group("code"), m.group("ip") or (code[1] if code else None))
         mtime = os.path.getmtime(source.path)
     except OSError as e:
         log.debug("Couldn't pre-read the log: %s", e)
@@ -1057,6 +1070,8 @@ def prime_live_state(live, source) -> None:
         return ts + offset if ts is not None else None
     if boot is not None and (shutdown is None or boot >= shutdown):
         live.up_since = real(boot)
+    if code:
+        live.join_code, live.server_ip = code
     live.last_save, live.last_backup = real(save), real(backup)
     if raid and raid[1] is not None:
         live.last_raid = (raid[0], real(raid[1]))
