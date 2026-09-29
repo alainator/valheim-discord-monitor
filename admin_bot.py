@@ -298,6 +298,7 @@ class AdminBot:
         self.remind_minutes = int(lfg.get("reminder_minutes", 15))
         self.discord_events = bool(lfg.get("discord_event", False))
         self.map_enabled = bool((cfg.get("map") or {}).get("enabled", True))
+        self.map_seed = str((cfg.get("map") or {}).get("seed") or "").strip()
         self._refused: dict = {}             # platform id -> character name, for Permit follow-ups
         self._dm_sent: dict = {}             # (user, reason) -> time, so a rejoin doesn't spam DMs
         self._plan_task = None
@@ -1112,9 +1113,14 @@ class AdminBot:
             if not bot.map_enabled:
                 await it.response.send_message("The map link is turned off on this server.", ephemeral=True)
                 return
-            found = community.world_seed(bot.lists.save_dir)
+            found = (("World", bot.map_seed) if bot.map_seed
+                     else await asyncio.to_thread(community.world_seed, bot.lists.save_dir))
             if not found:
-                await it.response.send_message("Couldn't read the world seed from the save folder.", ephemeral=True)
+                log.warning("admin_bot: no world seed found under %s/worlds_local; "
+                            "set admin_bot.map.seed in config.json", bot.lists.save_dir)
+                await it.response.send_message(
+                    "Couldn't read the world seed from the save folder. An admin can set it with "
+                    "`\"map\": {\"seed\": \"…\"}` in config.json.", ephemeral=True)
                 return
             world, seed = found
             await it.response.send_message(

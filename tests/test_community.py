@@ -127,6 +127,32 @@ class SeedTest(unittest.TestCase):
         self.assertIn("seed=Xy12AbCd", community.map_url("Xy12AbCd"))
         self.assertIsNone(community.world_seed(tempfile.mkdtemp()))
 
+    def fwl2(self, path, name, seed, tag=b""):
+        def s(x):
+            b = x.encode()
+            return bytes([len(b)]) + b
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(b"\x00\x01\x02\x03\x22\x00\x00\x00" + b"\x0a" + s(name) + tag + s(seed)
+                    + b"\x00" * 1400)
+
+    def test_valheim_1_0_world_folder(self):
+        d = tempfile.mkdtemp()
+        wl = os.path.join(d, "worlds_local")
+        self.fwl2(os.path.join(wl, "Alheim_backup_auto-20260928-120000", "_main.990.fwl2"), "Alheim", "OLDSEED1")
+        self.fwl2(os.path.join(wl, "Alheim", "_main.976.fwl2"), "Alheim", "Stale0000")
+        self.fwl2(os.path.join(wl, "Alheim", "_main.977.fwl2"), "Alheim", "aB3dE6gH9j", tag=b"\x12")
+        open(os.path.join(wl, "Alheim", "_main.977.db2"), "wb").close()
+        self.assertEqual(community.world_seed(d), ("Alheim", "aB3dE6gH9j"))
+
+    def test_fwl2_without_seed_gives_none(self):
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "worlds_local", "Alheim", "_main.1.fwl2")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "wb") as f:
+            f.write(b"\x00" * 64)
+        self.assertIsNone(community.world_seed(d))
+
 
 class HealthAndScheduleTest(unittest.TestCase):
     def test_health(self):
