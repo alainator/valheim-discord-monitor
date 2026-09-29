@@ -166,7 +166,7 @@ Run these from the repo folder, after `git pull`.
    ```bash
    sudo -u valheim python3 /home/valheim/valheim-world-settings.py --file /home/valheim/world-settings.env show
    sudo systemctl restart valheimserver
-   ps -o args= -C valheim_server.x86_64 | tr ' ' '\n' | grep -A2 -E '^-(preset|modifier|setkey)$'
+   pgrep -af valheim_server.x86_64 | tr ' ' '\n' | grep -A2 -E '^-(preset|modifier|setkey)$'
    ```
    The last command should list the same modifiers as before.
 
