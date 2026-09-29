@@ -116,3 +116,73 @@ If a request isn't picked up within 30 seconds, the admin channel is told to che
 
 Keep the cron job: it still does the checking every 15 minutes. The commands just add
 "now" and "with a warning".
+
+## World settings from Discord (preset, modifiers, setkeys)
+
+The same request handler can change the world's **preset**, **modifiers** and **setkeys**.
+Admins use `/valheim settings`, `/valheim preset`, `/valheim modifier` and
+`/valheim setkey`.
+
+**How it stays safe:**
+- The service file (root-owned) is edited once, by you, to read the settings from a small
+  file owned by `valheim`: `/home/valheim/world-settings.env`.
+- The bot never writes that file. It sends a request, and `valheim-world-settings.py`
+  (running as `valheim`) writes the file after checking every value against Valheim's
+  known presets, modifiers and setkeys.
+- Anything else is refused, so a request can't add other launch options. Server name,
+  world, port, save folder and log path stay manual edits.
+- Changes take effect at the next restart. The bot offers a "Restart in 5 min" button.
+
+### One-time setup
+
+Run these from the repo folder, after `git pull`.
+
+1. **Install the updated handler and the settings writer:**
+   ```bash
+   sudo install -o valheim -g valheim -m 755 host/valheim-bot-request.sh /home/valheim/valheim-bot-request.sh
+   sudo install -o valheim -g valheim -m 755 world_settings.py /home/valheim/valheim-world-settings.py
+   ```
+2. **Move your current modifiers into the settings file.** Copy every `-preset …`,
+   `-modifier … …` and `-setkey …` from your `ExecStart` line, for example:
+   ```bash
+   systemctl cat valheimserver | grep ExecStart          # see what you have now
+   echo 'WORLD_ARGS=-modifier raids less' | sudo -u valheim tee /home/valheim/world-settings.env
+   ```
+3. **Point the service at it:**
+   ```bash
+   sudo systemctl edit --full valheimserver.service
+   ```
+   - In `[Service]`, add:
+     ```ini
+     EnvironmentFile=-/home/valheim/world-settings.env
+     ```
+   - In `ExecStart`, replace the modifiers you moved (e.g. `-modifier raids less`) with
+     `$WORLD_ARGS`, written without quotes so each option becomes its own argument:
+     ```ini
+     ExecStart=/home/valheim/valheimserver/valheim_server.x86_64 ... -crossplay $WORLD_ARGS -logFile /home/valheim/logs/valheim_console.log
+     ```
+   - Save. `systemctl edit` reloads systemd for you.
+4. **Check it** at a time nobody's playing:
+   ```bash
+   sudo -u valheim python3 /home/valheim/valheim-world-settings.py --file /home/valheim/world-settings.env show
+   sudo systemctl restart valheimserver
+   pgrep -af valheim_server.x86_64 | tr ' ' '\n' | grep -A2 -E '^-(preset|modifier|setkey)$'
+   ```
+   The last command should list the same modifiers as before.
+
+The monitor reads the settings file through the read-only `/valheim_home` mount you
+already set up for the updater. `/valheim settings` shows what's in it.
+
+### Using it
+
+| Command | Example |
+|---|---|
+| `/valheim settings` | Shows the current preset, modifiers and setkeys, and every allowed value |
+| `/valheim modifier <name> <value>` | `raids` → `more`. Set `normal` to go back to the default |
+| `/valheim preset <name>` | `hard`. `default` removes the preset |
+| `/valheim setkey <key> on\|off` | `passivemobs` → `on` |
+
+After a change the bot confirms once the file has been written, e.g. "✅ Saved: modifier
+raids → more. It takes effect at the next server restart", and offers a **Restart in 5 min
+(with warning)** button. `update_check.log` records every change
+(`World setting from Discord (…): WORLD_ARGS=…`).
