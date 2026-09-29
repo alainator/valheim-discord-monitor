@@ -19,7 +19,6 @@ import datetime as _dt
 import glob
 import os
 import re
-import struct
 import time
 from typing import Optional
 
@@ -277,47 +276,117 @@ def mark_reminded(conn, plan_id: int) -> None:
 # ---------------------------------------------------------------------------
 # World seed
 # ---------------------------------------------------------------------------
-def _read_fwl(path: str) -> Optional[tuple]:
-    """(world name, seed) from a .fwl file: a length-prefixed package of int32 version,
-    then the name and seed as .NET strings (7-bit encoded length + UTF-8)."""
+def _string_at(data: bytes, pos: int):
+    """A .NET/protobuf-style string at pos: 7-bit encoded length, then UTF-8."""
+    n, shift = 0, 0
+    while True:
+        b = data[pos]
+        pos += 1
+        n |= (b & 0x7F) << shift
+        if not b & 0x80:
+            break
+        shift += 7
+        if shift > 28:
+            raise ValueError("bad length")
+    if pos + n > len(data):
+        raise IndexError("short string")
+    return data[pos:pos + n].decode("utf-8"), pos + n
+
+
+def _looks_like_seed(seed: str) -> bool:
+    return 0 < len(seed) <= 32 and seed.isprintable() and " " not in seed
+
+
+def _decompress(data: bytes) -> bytes:
+    import gzip
+    import zlib
+    try:
+        if data[:2] == b"\x1f\x8b":
+            return gzip.decompress(data)
+        if data[:1] == b"\x78":
+            return zlib.decompress(data)
+    except (OSError, zlib.error, EOFError):
+        pass
+    return data
+
+
+def _read_fwl(path: str, world: Optional[str] = None) -> Optional[tuple]:
+    """(world name, seed) from world metadata.
+
+    - Pre-1.0 `<world>.fwl`: a length-prefixed package of int32 version, then the name
+      and seed as .NET strings (7-bit encoded length + UTF-8).
+    - 1.0 `<world>/_main.<N>.fwl2`: the layout isn't documented, so look for the world
+      name (the folder name) as a length-prefixed string and take the next
+      length-prefixed string after it (allowing a few bytes of field tags between)."""
     with open(path, "rb") as f:
-        data = f.read(4096)
+        data = _decompress(f.read(1 << 20))
 
-    def string(pos):
-        n, shift = 0, 0
-        while True:
-            b = data[pos]
-            pos += 1
-            n |= (b & 0x7F) << shift
-            if not b & 0x80:
-                break
-            shift += 7
-        return data[pos:pos + n].decode("utf-8"), pos + n
-
-    for start in (8, 4):                          # with and without the package length prefix
+    for start in (8, 4):                          # classic .fwl, with/without package length
         try:
-            name, pos = string(start)
-            seed, _ = string(pos)
-        except (IndexError, UnicodeDecodeError, struct.error):
+            name, pos = _string_at(data, start)
+            seed, _ = _string_at(data, pos)
+        except (IndexError, UnicodeDecodeError, ValueError):
             continue
-        if name and 0 < len(seed) <= 32 and seed.isprintable() and " " not in seed:
+        if name and (world is None or name == world) and _looks_like_seed(seed):
             return name, seed
+
+    if not world:
+        return None
+    needle = world.encode("utf-8")
+    idx = data.find(needle)
+    while idx != -1:
+        if idx > 0 and data[idx - 1] == len(needle):
+            after = idx + len(needle)
+            for skip in range(0, 9):              # field tag / padding bytes before the seed
+                try:
+                    seed, _ = _string_at(data, after + skip)
+                except (IndexError, UnicodeDecodeError, ValueError):
+                    continue
+                if _looks_like_seed(seed) and seed.isascii() and len(seed) >= 3:
+                    return world, seed
+        idx = data.find(needle, idx + 1)
     return None
 
 
-def world_seed(save_dir: str) -> Optional[tuple]:
-    """(world name, seed) of the live world in <save_dir>/worlds_local, not a backup."""
+def _counter(path: str) -> int:
+    m = re.search(r"_main\.(\d+)\.fwl2$", path)
+    return int(m.group(1)) if m else -1
+
+
+def world_seed(save_dir: str, world: Optional[str] = None) -> Optional[tuple]:
+    """(world name, seed) of the live world in <save_dir>/worlds_local, not a backup.
+    Handles 1.0 world folders (`<world>/_main.<N>.fwl2`, newest save first) and
+    pre-1.0 `<world>.fwl` files."""
     base = os.path.join(save_dir, "worlds_local")
-    candidates = [p for p in glob.glob(os.path.join(base, "*.fwl")) + glob.glob(os.path.join(base, "*", "*.fwl"))
-                  if "_backup_" not in p]
-    for path in sorted(candidates, key=os.path.getmtime, reverse=True):
+    found = []
+    for path in glob.glob(os.path.join(base, "*", "_main.*.fwl2")):
+        folder = os.path.basename(os.path.dirname(path))
+        if "_backup_" in folder or (world and folder != world):
+            continue
+        found.append((0, _counter(path), _mtime(path), path, folder))
+    for path in glob.glob(os.path.join(base, "*.fwl")) + glob.glob(os.path.join(base, "*", "*.fwl")):
+        if "_backup_" in path:
+            continue
+        name = os.path.splitext(os.path.basename(path))[0]
+        if world and name != world:
+            continue
+        found.append((1, 0, _mtime(path), path, name))
+    # 1.0 files first, then highest save counter, then newest.
+    for _, _, _, path, name in sorted(found, key=lambda c: (c[0], -c[1], -c[2])):
         try:
-            found = _read_fwl(path)
+            result = _read_fwl(path, name)
         except OSError:
             continue
-        if found:
-            return found
+        if result:
+            return result
     return None
+
+
+def _mtime(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
 
 
 def map_url(seed: str) -> str:

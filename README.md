@@ -561,6 +561,10 @@ These need the stats database (`database.path`), which the bot and the monitor s
 - **Map.** `/valheim map` reads the world seed from the save folder and links to a map of the
   world, visible only to the person who asked, because it shows places nobody has found
   yet. Turn it off with `"map": {"enabled": false}`.
+  - It reads Valheim 1.0 world folders (`worlds_local/<world>/_main.<N>.fwl2`, newest save)
+    and older `<world>.fwl` files, and skips `_backup_` folders.
+  - If it can't read your world file, set the seed by hand: `"map": {"seed": "aB3dE6gH9j"}`
+    (in game: F5 console → `seed`, or the seed shown when you pick the world).
 
 ```json
 "admin_bot": {
@@ -616,7 +620,7 @@ These need the stats database (`database.path`), which the bot and the monitor s
 | World setting: "the settings file didn't change within 20 s" | The host helper isn't updated, or `/valheim_home` isn't mounted | Re-run the two `install` commands in [host/README.md](host/README.md#one-time-setup); check the mount with `docker compose config` |
 | `can't change the In-Valheim role` | The bot lacks Manage Roles, or its role is below the "In Valheim" role | Give it Manage Roles and drag the bot's role above that role in Server Settings → Roles |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
-| `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local` | Check `save_dir`; the monitor looks for `*.fwl` there and one folder below |
+| `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |
 | No backups copied | `source_dir` isn't Valheim's `worlds_local`, or `dest_dir` isn't mounted | Check both, then see what the log says after `Backup created` (`Backups: copied N backup(s)`) |
 | Times in the log are off by hours | The container runs in UTC | Set `TZ=America/Los_Angeles` (etc.) in `.env` and recreate |
 
@@ -1018,6 +1022,7 @@ or run it in a terminal.
 | `admin_bot.lfg.reminder_minutes` | 15 | Ping game-night signups this long before the start. |
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
+| `admin_bot.map.seed` | "" | Use this seed instead of reading it from the world file. |
 | `health.low_disk_gb` | 10 | Warn when the save disk has less free space than this. |
 | `health.slow_save_seconds` | 5 | Warn when a world save takes longer than this. |
 | `daily_restart.time` / `window_minutes` | — / 120 | Restart once a day in this window while nobody's on (needs the host helper). |
