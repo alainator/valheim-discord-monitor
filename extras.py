@@ -55,7 +55,6 @@ class LiveState:
     version: Optional[str] = None
     last_save: Optional[float] = None
     last_backup: Optional[float] = None
-    portals: Optional[int] = None
     last_raid: Optional[tuple] = None                  # (name, real epoch)
     booted: bool = False                               # saw a boot, so the count starts at 0
     join_code: Optional[str] = None                    # crossplay join code; new on every restart
@@ -108,8 +107,6 @@ class LiveState:
                 self.last_save = now
             elif k == "backup_saved":
                 self.last_backup = now
-            elif k == "portals":
-                self.portals = ev.extra.get("portals")
             elif k == "raid":
                 self.last_raid = (ev.extra.get("raid"), now)
         return None
@@ -120,7 +117,7 @@ class LiveState:
             count = self.count if self.count is not None else len(names)
             return {"online": names, "count": max(count, len(names)), "down": self.down,
                     "up_since": self.up_since, "version": self.version, "last_save": self.last_save,
-                    "last_backup": self.last_backup, "portals": self.portals, "last_raid": self.last_raid,
+                    "last_backup": self.last_backup, "last_raid": self.last_raid,
                     "join_code": self.join_code, "server_ip": self.server_ip,
                     # up_since alone isn't enough: it can come from reading old log lines.
                     "known": self.count is not None or bool(names) or self.booted}
@@ -362,8 +359,6 @@ def render_board(snap: dict, server_name: str) -> dict:
         fields.append({"name": "Up since", "value": _ago(snap["up_since"]), "inline": True})
     if snap["version"]:
         fields.append({"name": "Version", "value": snap["version"], "inline": True})
-    if snap["portals"] is not None:
-        fields.append({"name": "Portals", "value": str(snap["portals"]), "inline": True})
     if snap["last_save"]:
         fields.append({"name": "Last world save", "value": _ago(snap["last_save"]), "inline": True})
     if snap["last_backup"]:

@@ -102,7 +102,6 @@ RE_NETVER = re.compile(_TS + r"Network version check, their:(?P<their>\d+), mine
 RE_SAVED = re.compile(_TS + r"World save \(\d+/\d+\) done")
 RE_BACKUP = re.compile(_TS + r"Backup created in (?P<name>\S+)")
 RE_VERSION = re.compile(_TS + r"Valheim version: ?(?P<version>\S+)")
-RE_PORTALS = re.compile(_TS + r"\[ Connected (?P<n>\d+) portals \]")
 RE_REFUSED = re.compile(_TS + r"Player (?P<name>.+?) : (?P<id>\S+) is blacklisted or not in whitelist")
 
 
@@ -263,10 +262,6 @@ class ValheimLogParser:
         m = RE_VERSION.search(line)
         if m:
             yield Event("server_version", None, {"version": m.group("version")})
-            return
-        m = RE_PORTALS.search(line)
-        if m:
-            yield Event("portals", None, {"portals": int(m.group("n"))})
             return
 
         m = RE_REFUSED.search(line)
@@ -1026,7 +1021,7 @@ def build_maintenance(cfg: dict, source, discord: "Discord", server_name: str):
 
 def prime_live_state(live, source) -> None:
     """The monitor starts at the end of the log, so fill the status board from what's
-    already there: version, portals, and when the server last booted, saved, backed up
+    already there: version, and when the server last booted, saved, backed up
     and was raided (local files only; one quick read at start-up).
 
     Log times are the server's wall clock. The file's modification time is the real time
@@ -1043,8 +1038,6 @@ def prime_live_state(live, source) -> None:
                     last_ts = ts
                 if (m := RE_VERSION.search(line)):
                     live.version = m.group("version")
-                elif (m := RE_PORTALS.search(line)):
-                    live.portals = int(m.group("n"))
                 elif RE_READY.search(line):
                     boot, code = last_ts, None       # a new session gets a new join code
                 elif RE_SHUTDOWN.search(line):

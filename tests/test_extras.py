@@ -29,12 +29,13 @@ class ParserExtrasTest(unittest.TestCase):
             "09/28/2026 01:20:01: Backup created in Alheim_backup_auto-20260928012001 [12.3ms]",
             "09/28/2026 01:30:00: Random event set:army_somethingnew",
         ])
-        self.assertEqual([e.kind for e in evs], ["server_version", "portals", "raid", "version_mismatch",
+        # "[ Connected 7 portals ]" is how many were linked in one pass, not a total: ignored.
+        self.assertEqual([e.kind for e in evs], ["server_version", "raid", "version_mismatch",
                                                  "world_saved", "backup_saved", "raid"])
         self.assertEqual(evs[0].extra["version"], "l-1.0.16")
-        self.assertEqual(evs[2].extra["raid"], "Moder's army (drakes)")
-        self.assertTrue(evs[3].extra["newer"])
-        self.assertEqual(evs[6].extra["raid"], "Somethingnew")
+        self.assertEqual(evs[1].extra["raid"], "Moder's army (drakes)")
+        self.assertTrue(evs[2].extra["newer"])
+        self.assertEqual(evs[5].extra["raid"], "Somethingnew")
 
 
 class LiveStateTest(unittest.TestCase):
@@ -189,7 +190,7 @@ class PrimeTest(unittest.TestCase):
             live = extras.LiveState()
             prime_live_state(live, LocalFileSource(path))
             off = 7 * 3600
-            self.assertEqual((live.version, live.portals), ("l-1.0.16", 7))
+            self.assertEqual(live.version, "l-1.0.16")
             self.assertEqual(live.up_since, log_noon - 2 * 3600 + 5 + off)
             self.assertEqual(live.last_save, log_noon - 1800 + off)
             self.assertEqual(live.last_backup, log_noon - 1799 + off)

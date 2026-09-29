@@ -533,13 +533,13 @@ was already online when the monitor started gets a plain leave message.
 The admin bot keeps **one message** in a channel up to date:
 - a title: 🟢 *N online* / 🟢 *empty* / 🔴 *offline*;
 - who's on, with "joined 25 minutes ago";
-- the current join code, when the server came up, its version, portal count, and the last
+- the current join code, when the server came up, its version, and the last
   world save, backup and raid.
 
 Times use Discord's own relative timestamps, so they stay current by themselves. The bot
 only edits the message when something changes.
 
-**At start-up** the board fills in the version, portals, and when the server last booted,
+**At start-up** the board fills in the version, and when the server last booted,
 saved, backed up and was raided, all read from the existing log. Who's online shows once
 the count is known: at the next join or leave, or the server's next count line within 10
 minutes. Until then the title is ⚪.
