@@ -33,6 +33,14 @@ def fmt_duration(seconds: float) -> str:
     return f"{seconds}s"
 
 
+def fmt_bytes(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit in ("B", "KB") or n >= 100 else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.0f} TB"
+
+
 def deaths_text(n: int) -> str:
     return "" if not n else " and died once" if n == 1 else f" and died {n} times"
 
@@ -54,6 +62,8 @@ class LiveState:
     up_since: Optional[float] = None
     version: Optional[str] = None
     last_save: Optional[float] = None
+    last_save_ms: Optional[int] = None
+    disk_free: Optional[int] = None                    # bytes free for the save dir, from each save
     last_backup: Optional[float] = None
     last_raid: Optional[tuple] = None                  # (name, real epoch)
     booted: bool = False                               # saw a boot, so the count starts at 0
@@ -105,6 +115,9 @@ class LiveState:
                 self.version = ev.extra.get("version")
             elif k == "world_saved":
                 self.last_save = now
+                self.last_save_ms = ev.extra.get("ms")
+            elif k == "disk_space":
+                self.disk_free = ev.extra.get("avail")
             elif k == "backup_saved":
                 self.last_backup = now
             elif k == "raid":
@@ -117,6 +130,7 @@ class LiveState:
             count = self.count if self.count is not None else len(names)
             return {"online": names, "count": max(count, len(names)), "down": self.down,
                     "up_since": self.up_since, "version": self.version, "last_save": self.last_save,
+                    "last_save_ms": self.last_save_ms, "disk_free": self.disk_free,
                     "last_backup": self.last_backup, "last_raid": self.last_raid,
                     "join_code": self.join_code, "server_ip": self.server_ip,
                     # up_since alone isn't enough: it can come from reading old log lines.
@@ -183,6 +197,9 @@ class WeeklyRecap:
                                                               for r in s["raids"][:5]), "inline": True})
         if s["new_players"]:
             fields.append({"name": "New vikings", "value": ", ".join(s["new_players"][:10]), "inline": False})
+        explored = exploration(s.get("locations") or [])
+        if explored:
+            fields.append({"name": "Exploration", "value": explored, "inline": False})
         summary = (f"**{len(s['players'])}** vikings played **{fmt_duration(s['total_seconds'])}** in total, "
                    f"died **{s['total_deaths']}** times"
                    + (f", and peaked at **{s['peak']}** online at once." if s["peak"] else "."))
@@ -360,10 +377,113 @@ def render_board(snap: dict, server_name: str) -> dict:
     if snap["version"]:
         fields.append({"name": "Version", "value": snap["version"], "inline": True})
     if snap["last_save"]:
-        fields.append({"name": "Last world save", "value": _ago(snap["last_save"]), "inline": True})
+        took = f" ({snap['last_save_ms'] / 1000:.1f} s)" if snap.get("last_save_ms") else ""
+        fields.append({"name": "Last world save", "value": _ago(snap["last_save"]) + took, "inline": True})
+    if snap.get("disk_free") is not None:
+        fields.append({"name": "Disk free", "value": fmt_bytes(snap["disk_free"]), "inline": True})
     if snap["last_backup"]:
         fields.append({"name": "Last backup", "value": _ago(snap["last_backup"]), "inline": True})
     if snap["last_raid"]:
         name, at = snap["last_raid"]
         fields.append({"name": "Last raid", "value": f"{name} {_ago(at)}", "inline": True})
     return {"title": title, "description": desc, "color": color, "fields": fields}
+
+
+
+# ---------------------------------------------------------------------------
+# Exploration (weekly recap)
+# ---------------------------------------------------------------------------
+# Locations worth naming, by the start of their internal name (trailing digits dropped).
+NOTABLE = (
+    ("SunkenCrypt", "sunken crypt"), ("Crypt", "burial chamber"), ("TrollCave", "troll cave"),
+    ("MountainCave", "frost cave"), ("GoblinCamp", "fuling village"),
+    ("Mistlands_DvergrTownEntrance", "infested mine"), ("CharredFortress", "charred fortress"),
+    ("Vendor_BlackForest", "Haldor the trader"), ("Hildir_camp", "Hildir's camp"),
+    ("BogWitch", "the Bog Witch"),
+    ("Eikthyrnir", "boss altar"), ("GDKing", "boss altar"), ("Bonemass", "boss altar"),
+    ("Dragonqueen", "boss altar"), ("GoblinKing", "boss altar"),
+    ("Mistlands_DvergrBossEntrance", "boss altar"), ("FaderLocation", "boss altar"),
+)
+
+
+def location_kind(loc: str) -> Optional[str]:
+    for prefix, name in NOTABLE:
+        if loc.startswith(prefix):
+            return name
+    return None
+
+
+def exploration(details: list) -> Optional[str]:
+    """'12 new areas discovered: 3 sunken crypts, 1 fuling village' from 'Loc|x,y' rows."""
+    zones, notable = set(), {}
+    for d in details:
+        loc, _, zone = d.partition("|")
+        zones.add(zone)
+        kind = location_kind(loc)
+        if kind:
+            notable[kind] = notable.get(kind, 0) + 1
+    if not zones:
+        return None
+    parts = [f"{n} {k}{'s' if n > 1 and not k.startswith(('the ', 'Haldor', 'Hildir')) else ''}"
+             for k, n in sorted(notable.items(), key=lambda kv: -kv[1])]
+    text = f"🗺️ **{len(zones)}** new area{'s' if len(zones) != 1 else ''} discovered"
+    return text + (": " + ", ".join(parts[:6]) if parts else "")
+
+
+# ---------------------------------------------------------------------------
+# Server health
+# ---------------------------------------------------------------------------
+class HealthWatch:
+    """Warns before the save disk fills up (Valheim stops saving below its own limit)
+    and when world saves get slow. Each warning repeats at most once a day."""
+
+    def __init__(self, cfg: dict, clock=time.time):
+        self.low_disk = float(cfg.get("low_disk_gb", 10)) * 1024 ** 3
+        self.slow_save_ms = float(cfg.get("slow_save_seconds", 5)) * 1000
+        self.clock = clock
+        self.last: dict = {}
+
+    def _once(self, key: str, text: str) -> Optional[str]:
+        now = self.clock()
+        if now - self.last.get(key, -1e12) < 86400:
+            return None
+        self.last[key] = now
+        return text
+
+    def observe(self, ev) -> Optional[str]:
+        if ev.kind == "disk_space":
+            avail, warn, block = ev.extra["avail"], ev.extra["warn"], ev.extra["block"]
+            if avail < max(warn, block * 2):
+                return self._once("disk_critical", f"🚨 Only **{fmt_bytes(avail)}** free on the save disk. "
+                                                   f"Valheim stops saving the world below {fmt_bytes(block)}. "
+                                                   "Free up space now.")
+            if avail < self.low_disk:
+                return self._once("disk_low", f"⚠️ The save disk is getting full: **{fmt_bytes(avail)}** free "
+                                              f"(warning below {fmt_bytes(self.low_disk)}).")
+        elif ev.kind == "world_saved" and ev.extra.get("ms") and ev.extra["ms"] > self.slow_save_ms:
+            return self._once("slow_save", f"🐢 The last world save took **{ev.extra['ms'] / 1000:.1f} s** "
+                                           f"(warning above {self.slow_save_ms / 1000:.0f} s). Players may notice "
+                                           "a freeze while saving; a restart or faster disk can help.")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Daily restart
+# ---------------------------------------------------------------------------
+class DailyRestart:
+    """Restart once a day inside a window (default 05:00-07:00, container time zone),
+    only while nobody is online. Skipped for the day if people play through the window."""
+
+    def __init__(self, cfg: dict):
+        hh, mm = (int(x) for x in str(cfg.get("time", "05:00")).split(":"))
+        self.start = _dt.time(hh, mm)
+        self.window = _dt.timedelta(minutes=int(cfg.get("window_minutes", 120)))
+        self.done_date: Optional[str] = None
+
+    def due(self, now: _dt.datetime, empty: bool) -> bool:
+        today = now.date().isoformat()
+        start = now.replace(hour=self.start.hour, minute=self.start.minute, second=0, microsecond=0)
+        if self.done_date == today or not (start <= now < start + self.window) or not empty:
+            return False
+        self.done_date = today
+        return True

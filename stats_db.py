@@ -82,6 +82,46 @@ def init_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS ix_server_events_at ON server_events(at);
 
+        -- Discord community features (community.py) -----------------------------
+        -- character <-> Discord user, claimed with /valheim link
+        CREATE TABLE IF NOT EXISTS discord_links (
+            player    TEXT PRIMARY KEY COLLATE NOCASE,
+            user_id   TEXT NOT NULL,
+            linked_at INTEGER
+        );
+        -- /valheim notify: DM when the server goes from empty to occupied
+        CREATE TABLE IF NOT EXISTS notify_first (
+            user_id TEXT PRIMARY KEY
+        );
+        -- /valheim notify follow: DM when a given character joins
+        CREATE TABLE IF NOT EXISTS follows (
+            user_id TEXT NOT NULL,
+            player  TEXT NOT NULL COLLATE NOCASE,
+            PRIMARY KEY (user_id, player)
+        );
+        -- /valheim request-access: who says they'll play as which character
+        CREATE TABLE IF NOT EXISTS access_requests (
+            player       TEXT PRIMARY KEY COLLATE NOCASE,
+            user_id      TEXT NOT NULL,
+            requested_at INTEGER
+        );
+        -- /valheim plan: game nights with RSVPs
+        CREATE TABLE IF NOT EXISTS plans (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            title      TEXT NOT NULL,
+            at         INTEGER NOT NULL,             -- real epoch
+            channel_id TEXT,
+            message_id TEXT,
+            creator_id TEXT,
+            reminded   INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS rsvps (
+            plan_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            choice  TEXT NOT NULL,                   -- going | maybe | no
+            PRIMARY KEY (plan_id, user_id)
+        );
+
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT
@@ -448,7 +488,10 @@ def period_summary(conn, since: int, until: int, limit: int = 5) -> dict:
     raids = _rows(conn, "SELECT detail, COUNT(*) AS n FROM server_events WHERE kind='raid' AND at >= :since "
                         "AND at < :until GROUP BY detail ORDER BY n DESC", p)
     peak = _one(conn, "SELECT MAX(count) AS peak FROM concurrency WHERE at >= :since AND at < :until", p)
-    return {"players": players, "top_players": players[:limit], "deaths": deaths,
+    # Locations generated this week, i.e. places someone visited for the first time.
+    locations = [r["detail"] for r in _rows(conn, "SELECT detail FROM server_events WHERE kind='location' "
+                                                  "AND at >= :since AND at < :until", p)]
+    return {"locations": locations, "players": players, "top_players": players[:limit], "deaths": deaths,
             "total_seconds": sum(r["seconds"] or 0 for r in players),
             "total_deaths": sum(r["deaths"] for r in _rows(conn, "SELECT COUNT(*) AS deaths FROM deaths "
                                                                 "WHERE died_at >= :since AND died_at < :until", p)),
