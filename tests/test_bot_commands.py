@@ -32,7 +32,9 @@ class BotCommandsTest(unittest.TestCase):
         self.assertEqual(name, "valheim")
         self.assertEqual(commands, sorted(["permit", "ban", "unban", "unpermit", "online", "backups",
                                            "update-check", "restart", "restart-cancel", "lists", "join",
-                                           "settings", "modifier", "preset", "setkey"]))
+                                           "settings", "modifier", "preset", "setkey",
+                                           "stats", "top", "notify", "link", "unlink", "request-access",
+                                           "plan", "map"]))
 
 
 if __name__ == "__main__":

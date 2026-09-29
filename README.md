@@ -29,6 +29,11 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   Valheim update is waiting or installed ([auto-updates](#auto-updates-and-restarts-from-discord)).
 - **Change world settings** (preset, modifiers, setkeys) from Discord, checked on the
   server before anything is written ([world settings](#auto-updates-and-restarts-from-discord)).
+- **Community:** `/valheim stats` and `/valheim top`, DMs when friends come online, an
+  "In Valheim" role, game-night signups with reminders, a world map link, and a smoother
+  first join ([players & community](#players--community)).
+- **Server health:** warnings before the save disk fills up or saves get slow, and an
+  optional daily restart while nobody's on ([server health](#server-health)).
 
 And without the bot:
 - **Raid alerts, version-mismatch alerts, session summaries, first-visit welcomes,
@@ -46,9 +51,11 @@ And without the bot:
   [Count mode](#count-mode-quick-start) · [Log mode](#log-mode)
 - **Admin bot:** [Join alerts & setup](#join-attempt-alerts--discord-admin-bot) ·
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
-  [Testing](#testing-it) · [Troubleshooting](#troubleshooting)
+  [Players & community](#players--community) · [Testing](#testing-it) ·
+  [Troubleshooting](#troubleshooting)
 - **Extras:** [Raids, summaries, milestones, recap](#extras-raids-summaries-milestones-recap-board-backups) ·
   [Status board](#status-board) · [Backup copies](#world-backup-copies) ·
+  [Server health](#server-health) ·
   [Auto-updates, restarts & world settings](#auto-updates-and-restarts-from-discord)
 - **Stats & LOW.MS:** [Stats page](#player-stats--public-web-page) ·
   [Steam achievements](#steam-achievements) ·
@@ -374,6 +381,13 @@ in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visib
 |---|---|---|---|
 | `/valheim join` | Anyone | Join code, address, password (spoiler) and how to connect; only the asker sees it | The bot; `admin_bot.join` for the address |
 | `/valheim online` | Anyone | Who's on right now, and since when | The bot |
+| `/valheim stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen. No name = your linked character | Stats database |
+| `/valheim top [category]` | Anyone | Leaderboard: time played, deaths, visits or longest session | Stats database |
+| `/valheim notify <when> [player]` | Anyone | DM me when the first player joins an empty server, or when a given character joins; `off` / `list` | Stats database |
+| `/valheim link <character>` / `unlink` | Anyone | Link your Discord account to your character (stats, role, mentions) | Stats database |
+| `/valheim request-access <character>` | Anyone | New player: "I'll join as …". The admins' refused-join notice then says who it is | Stats database |
+| `/valheim plan <title> <when>` | Anyone | Game night with Going / Maybe / Can't buttons and a reminder ping | Stats database |
+| `/valheim map` | Anyone | World seed and a map link (spoilers; only the asker sees it) | `save_dir` |
 | `/valheim permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
 | `/valheim ban <id>` | Admin | Ban, and remove from the permitted list | `save_dir` |
 | `/valheim unban <id>` / `unpermit <id>` | Admin | Remove from one list | `save_dir` |
@@ -507,6 +521,55 @@ won't rename a text channel: it logs a warning and skips it.
   for `stale_after_seconds` (15 min), which catches a crash.
 - **Log times are UTC** unless you set `TZ` in `.env`, e.g. `TZ=America/Los_Angeles`.
 
+### Players & community
+
+These need the stats database (`database.path`), which the bot and the monitor share.
+
+- **Stats in Discord.** `/valheim stats Ingrid` shows play time, rank, visits, longest
+  session, deaths (and deaths per hour), and first and last seen. `/valheim top` has four
+  leaderboards. Character names autocomplete.
+- **Linking.** `/valheim link Ingrid` ties a character to your Discord account, which lets
+  you:
+  - run `/valheim stats` with no name;
+  - get an @mention in your welcome and milestone posts;
+  - get the "In Valheim" role (below).
+
+  A character can only be linked to one account. Anyone can claim an unlinked character,
+  since the log can't prove who owns it; admins can `/valheim unlink` anyone's.
+- **"In Valheim" role.** Set `admin_bot.online_role_id` to a role's ID, and linked players
+  get it while they're in the game, so the member list shows who's playing. The bot needs
+  **Manage Roles**, and its own role must sit **above** that role in Server Settings → Roles.
+- **Notifications (DMs).**
+  - `/valheim notify first` DMs you when someone joins an empty server.
+  - `/valheim notify follow Ingrid` DMs you whenever Ingrid joins.
+  - `/valheim notify off` stops everything; `list` shows what you have.
+
+  At most one DM per player per 30 minutes, so a reconnect doesn't spam. The user needs DMs
+  from server members allowed.
+- **Smoother first joins.** A new player runs `/valheim request-access <character>` before
+  joining:
+  - the admin channel gets a heads-up;
+  - when that character is refused, the notice says **Requested by @them**;
+  - clicking **Permit** links the character to them and DMs "you're in, try again".
+- **Game nights.** `/valheim plan "Bonemass run" "sat 20:00"` posts a signup in the channel
+  with **✅ Going / ❔ Maybe / ❌ Can't** buttons.
+  - Times are read in the container's time zone (`TZ`), and shown to everyone in their own
+    time zone. It accepts `20:00`, `8pm`, `tomorrow 8pm`, `sat 20:00` and `in 2h`.
+  - Everyone going or maybe is pinged `lfg.reminder_minutes` (15) before it starts.
+  - With `"lfg": {"discord_event": true}` it also creates a Discord Event; the bot needs
+    **Manage Events** for that.
+- **Map.** `/valheim map` reads the world seed from the save folder and links to a map of the
+  world, visible only to the person who asked, because it shows places nobody has found
+  yet. Turn it off with `"map": {"enabled": false}`.
+
+```json
+"admin_bot": {
+  "online_role_id": "123456789012345678",
+  "lfg": { "reminder_minutes": 15, "discord_event": false },
+  "map": { "enabled": true }
+}
+```
+
 ### Testing it
 
 1. **Can the bot read the lists?** In Discord, run `/valheim lists`. You should get a private
@@ -551,6 +614,9 @@ won't rename a text channel: it logs a warning and skips it.
 | New commands missing after an update | Discord caches the command list | Press Ctrl+R in Discord. If they're still missing, check the log for `admin_bot stopped` |
 | `/valheim join` says the join code isn't known | Nobody has joined since the server's last restart, so the new code isn't in the log yet | It appears at the next join. Meanwhile, players can use the address, or ask someone in-game (pause menu) |
 | World setting: "the settings file didn't change within 20 s" | The host helper isn't updated, or `/valheim_home` isn't mounted | Re-run the two `install` commands in [host/README.md](host/README.md#one-time-setup); check the mount with `docker compose config` |
+| `can't change the In-Valheim role` | The bot lacks Manage Roles, or its role is below the "In Valheim" role | Give it Manage Roles and drag the bot's role above that role in Server Settings → Roles |
+| Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
+| `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local` | Check `save_dir`; the monitor looks for `*.fwl` there and one folder below |
 | No backups copied | `source_dir` isn't Valheim's `worlds_local`, or `dest_dir` isn't mounted | Check both, then see what the log says after `Backup created` (`Backups: copied N backup(s)`) |
 | Times in the log are off by hours | The container runs in UTC | Set `TZ=America/Los_Angeles` (etc.) in `.env` and recreate |
 
@@ -580,7 +646,7 @@ switched on by adding their name to `events` in `config.json`:
 | `session_summary` | Replaces the plain leave message: "**Ingrid** left Alheim after 2h 14m and died 3 times." | the player's join and leave |
 | `welcome` | Replaces the join message on someone's **first ever** visit: "🎉 **Ingrid** arrived for the first time. Welcome, viking!" | stats database |
 | `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths | stats database |
-| `weekly_recap` | 📜 A weekly embed: top players by time, most deaths, raids, new vikings, total hours, peak online | stats database |
+| `weekly_recap` | 📜 A weekly embed: top players by time, most deaths, raids, new vikings, total hours, peak online, and exploration ("12 new areas discovered: 3 sunken crypts, 1 fuling village") | stats database, `Placed location` lines |
 | `update` | ✅ "Valheim updated: l-1.0.16 → l-1.0.17" when the server comes back on a new version, plus the [auto-updater](#auto-updates-and-restarts-from-discord)'s "update available" and "installing" posts | `Valheim version:` at boot |
 
 `welcome`, `milestone` and `weekly_recap` need the stats database (`database.path`).
@@ -601,8 +667,8 @@ was already online when the monitor started gets a plain leave message.
 The admin bot keeps **one message** in a channel up to date:
 - a title: 🟢 *N online* / 🟢 *empty* / 🔴 *offline*;
 - who's on, with "joined 25 minutes ago";
-- the current join code, when the server came up, its version, and the last
-  world save, backup and raid.
+- the current join code, when the server came up, its version, the last world save (and how
+  long it took), free disk space, and the last backup and raid.
 
 Times use Discord's own relative timestamps, so they stay current by themselves. The bot
 only edits the message when something changes.
@@ -670,6 +736,32 @@ What happens:
 
 How often Valheim makes backups, and how many it keeps, is set with the server's
 `-backups`, `-backupshort` and `-backuplong` launch options.
+
+### Server health
+
+Every world save logs how long it took and how much disk space is left. The monitor warns
+the admin channel, at most once a day per warning:
+- **Low disk:** when free space on the save disk drops below `health.low_disk_gb` (10 GB).
+- **Critical disk:** close to the point where Valheim **stops saving the world**.
+- **Slow saves:** a save that took longer than `health.slow_save_seconds` (5 s). Players
+  feel that as a freeze.
+
+The status board shows **Disk free** and how long the last save took.
+
+```json
+"health": { "low_disk_gb": 10, "slow_save_seconds": 5 }
+```
+
+**Daily restart (optional).** With the [host helper](host/README.md) installed, the
+monitor can restart the server once a day while nobody's on, which also installs any
+waiting update:
+```json
+"daily_restart": { "time": "05:00", "window_minutes": 120 }
+```
+- It restarts at the first moment in the window when the server is empty.
+- If people play right through the window, that day is skipped.
+- Times are in the container's time zone (`TZ`).
+- The admin channel is told each time.
 
 ### Auto-updates and restarts from Discord
 
@@ -922,6 +1014,13 @@ or run it in a terminal.
 | `weekly_recap.day` / `hour` | sunday / 18 | When to post the weekly recap (container time zone). |
 | `updater.log` | — | The host updater's log (`update_check.log`), for update posts. |
 | `updater.bot_dir` | — | Folder shared with the host: `status.json` out, `request` for restart/check/settings. |
+| `admin_bot.online_role_id` | — | Role given to linked players while they're in-game. |
+| `admin_bot.lfg.reminder_minutes` | 15 | Ping game-night signups this long before the start. |
+| `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
+| `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
+| `health.low_disk_gb` | 10 | Warn when the save disk has less free space than this. |
+| `health.slow_save_seconds` | 5 | Warn when a world save takes longer than this. |
+| `daily_restart.time` / `window_minutes` | — / 120 | Restart once a day in this window while nobody's on (needs the host helper). |
 | `admin_bot.world_settings.file` | `/valheim_home/world-settings.env` | The host's world settings file, as mounted in the container (read-only). |
 | `discord.embeds` | true | Coloured embed vs plain text. |
 | `discord.show_player_count` | true | Footer with the current online count. |
@@ -1008,6 +1107,10 @@ Added here:
 - **Auto-update integration:** update posts, a reliable player count for the host's
   update script, and `/valheim restart` with a countdown (`host/`).
 - **World settings from Discord:** preset, modifiers and setkeys, validated on the host.
+- **Community:** `/valheim stats`, `top`, `notify` (DMs), `link` with an "In Valheim" role,
+  `request-access`, `plan` (game nights with RSVPs and reminders), and `map`.
+- **Server health:** low-disk and slow-save warnings, an optional daily restart, and
+  exploration in the weekly recap.
 - **Docker setup:** `Dockerfile`, `docker-compose.yml`, `.env.example` and a self-hosted
   example config.
 - **Docs:** the self-hosted quick start, bot setup and troubleshooting, and these tips.

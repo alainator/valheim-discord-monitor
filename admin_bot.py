@@ -289,6 +289,18 @@ class AdminBot:
         self.announce = None                 # posts a line to the public webhook channel
         self._countdown = None               # running /valheim restart countdown task
         self._countdown_cancel = None
+        # Community features (community.py), stored in the stats database.
+        self.db_path = None                  # from attach()
+        self._db = None                      # opened lazily on the bot's own thread
+        role = str(cfg.get("online_role_id", ""))
+        self.online_role = int(role) if role.isdigit() else None
+        lfg = cfg.get("lfg") or {}
+        self.remind_minutes = int(lfg.get("reminder_minutes", 15))
+        self.discord_events = bool(lfg.get("discord_event", False))
+        self.map_enabled = bool((cfg.get("map") or {}).get("enabled", True))
+        self._refused: dict = {}             # platform id -> character name, for Permit follow-ups
+        self._dm_sent: dict = {}             # (user, reason) -> time, so a rejoin doesn't spam DMs
+        self._plan_task = None
         self.last_notice: dict[str, float] = {}
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.ready = threading.Event()
@@ -337,10 +349,74 @@ class AdminBot:
         fut = asyncio.run_coroutine_threadsafe(self._post_refused(name, pid), self.loop)
         fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
 
-    def attach(self, live=None, backups=None, updater=None, announce=None) -> None:
-        """Hand the bot the monitor's live state, backup copier, updater link and a way to
-        post to the public channel (for the board and the /valheim commands)."""
+    def attach(self, live=None, backups=None, updater=None, announce=None, db_path=None) -> None:
+        """Hand the bot the monitor's live state, backup copier, updater link, a way to post
+        to the public channel, and the stats database (community features)."""
         self.live, self.backups, self.updater, self.announce = live, backups, updater, announce
+        self.db_path = db_path
+
+    @property
+    def db(self):
+        """The bot thread's own connection to the stats database, or None without one."""
+        if self._db is None and self.db_path:
+            import stats_db
+            self._db = stats_db.connect(self.db_path)
+        return self._db
+
+    # -- called from the monitor thread: roles and DMs --------------------------
+    def on_login(self, player: str, server_was_empty: bool) -> None:
+        if self.loop and self.ready.is_set() and self.db_path:
+            asyncio.run_coroutine_threadsafe(self._on_login(player, server_was_empty), self.loop)
+
+    def on_logout(self, player: str) -> None:
+        if self.loop and self.ready.is_set() and self.db_path and self.online_role:
+            asyncio.run_coroutine_threadsafe(self._set_role(player, False), self.loop)
+
+    async def _on_login(self, player: str, server_was_empty: bool) -> None:
+        import community
+        try:
+            if self.online_role:
+                await self._set_role(player, True)
+            now = time.time()
+            for uid, reason in community.who_to_notify(self.db, player, server_was_empty).items():
+                if now - self._dm_sent.get((uid, reason, player), 0) < 1800:
+                    continue
+                self._dm_sent[(uid, reason, player)] = now
+                text = (f"🟢 **{player}** just joined **{self.server_name}**; the server was empty until now."
+                        if reason == "first" else f"🟢 **{player}** just joined **{self.server_name}**.")
+                await self._dm(uid, text + " Stop these with `/valheim notify off`.")
+        except Exception as e:  # noqa: BLE001
+            log.warning("admin_bot: login follow-ups failed: %s", e)
+
+    async def _dm(self, user_id, text: str) -> bool:
+        try:
+            user = self.client.get_user(int(user_id)) or await self.client.fetch_user(int(user_id))
+            await user.send(text[:2000])
+            return True
+        except Exception as e:  # noqa: BLE001  (DMs closed, user left, …)
+            log.info("admin_bot: couldn't DM %s: %s", user_id, e)
+            return False
+
+    async def _set_role(self, player: str, on: bool) -> None:
+        """Give or take the "In Valheim" role from the Discord user linked to a character."""
+        import discord
+        import community
+        uid = community.linked_user(self.db, player)
+        if not uid or not self.guild_id:
+            return
+        try:
+            guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+            member = await guild.fetch_member(int(uid))
+            role = guild.get_role(self.online_role) or discord.Object(id=self.online_role)
+            if on:
+                await member.add_roles(role, reason=f"Playing Valheim as {player}")
+            else:
+                await member.remove_roles(role, reason=f"Left Valheim ({player})")
+        except discord.Forbidden:
+            log.warning("admin_bot: can't change the In-Valheim role: the bot needs Manage Roles, and its own "
+                        "role must be above that role in Server Settings -> Roles")
+        except discord.HTTPException as e:
+            log.info("admin_bot: role change for %s failed: %s", player, e)
 
     def post_admin(self, text: str) -> None:
         """Thread-safe: a plain message to the admin channel."""
@@ -619,8 +695,74 @@ class AdminBot:
                                           f"**{self.server_name}** — {reason}.")
         link = steam_profile(pid)
         embed.add_field(name="Platform ID", value=f"`{pid}`" + (f"\n[Steam profile]({link})" if link else ""))
+        self._refused[pid] = name
+        if self.db_path:
+            import community
+            asked = community.access_request(self.db, name)
+            if asked:
+                embed.add_field(name="Requested by", value=f"<@{asked}> (`/valheim request-access`). "
+                                "Permit links the character to them and lets them know.", inline=False)
         embed.timestamp = discord.utils.utcnow()
         await channel.send(embed=embed, view=self._buttons(pid))
+
+    async def _welcome_requester(self, name: Optional[str]) -> str:
+        """After a Permit: link the character to whoever asked for access as it, and DM them."""
+        if not (name and self.db_path):
+            return ""
+        import community
+        uid = community.access_request(self.db, name)
+        if not uid:
+            return ""
+        community.link_player(self.db, name, uid, force=True)
+        community.clear_access_request(self.db, name)
+        sent = await self._dm(uid, f"✅ You've been let into **{self.server_name}** as **{name}**. "
+                                   "Try joining again now; `/valheim join` has the join code.")
+        return f"; linked to <@{uid}>" + (" and told by DM" if sent else " (their DMs are closed)")
+
+    async def _on_rsvp(self, it, rest: str) -> None:
+        import community
+        plan_id, _, choice = rest.partition(":")
+        if not (self.db_path and plan_id.isdigit() and choice in ("going", "maybe", "no")):
+            await it.response.send_message("That signup isn't available any more.", ephemeral=True)
+            return
+        community.rsvp(self.db, int(plan_id), it.user.id, choice)
+        plan = community.get_plan(self.db, int(plan_id))
+        if not plan:
+            await it.response.send_message("That plan was removed.", ephemeral=True)
+            return
+        import discord
+        await it.response.edit_message(embed=discord.Embed.from_dict(community.render_plan(plan, self.server_name)),
+                                       view=self._plan_buttons(int(plan_id)))
+
+    def _plan_buttons(self, plan_id: int):
+        import discord
+        view = discord.ui.View(timeout=None)
+        for choice, label, style in (("going", "✅ Going", discord.ButtonStyle.success),
+                                     ("maybe", "❔ Maybe", discord.ButtonStyle.secondary),
+                                     ("no", "❌ Can't", discord.ButtonStyle.secondary)):
+            view.add_item(discord.ui.Button(label=label, style=style, custom_id=f"{BTN_PREFIX}:rsvp:{plan_id}:{choice}"))
+        return view
+
+    async def _plan_loop(self) -> None:
+        """Ping the people signed up for a game night shortly before it starts."""
+        import discord
+        import community
+        while True:
+            await asyncio.sleep(30)
+            try:
+                for plan in community.due_reminders(self.db, time.time(), self.remind_minutes * 60):
+                    community.mark_reminded(self.db, plan["id"])
+                    people = plan["rsvps"]["going"] + plan["rsvps"]["maybe"]
+                    channel = self.client.get_channel(int(plan["channel_id"])) or \
+                        await self.client.fetch_channel(int(plan["channel_id"]))
+                    await channel.send(
+                        f"⏰ **{plan['title']}** starts <t:{plan['at']}:R>! "
+                        + (" ".join(f"<@{u}>" for u in people) if people else "Nobody has signed up yet.")
+                        + " `/valheim join` has the join code.",
+                        allowed_mentions=discord.AllowedMentions(users=[discord.Object(id=int(u)) for u in people],
+                                                                 everyone=False, roles=False))
+            except Exception as e:  # noqa: BLE001
+                log.warning("admin_bot: plan reminders failed: %s", e)
 
     def _build_client(self):
         import discord
@@ -651,6 +793,8 @@ class AdminBot:
                     bot._status_task = asyncio.ensure_future(bot._status_loop())
                 if bot.board_channel and bot._board_task is None:
                     bot._board_task = asyncio.ensure_future(bot._board_loop())
+                if bot.db_path and bot._plan_task is None:
+                    bot._plan_task = asyncio.ensure_future(bot._plan_loop())
 
             async def on_interaction(self, it: discord.Interaction):
                 cid = (it.data or {}).get("custom_id", "") if it.type == discord.InteractionType.component else ""
@@ -661,6 +805,9 @@ class AdminBot:
 
     async def _on_button(self, it, custom_id: str) -> None:
         _, action, pid = custom_id.split(":", 2)
+        if action == "rsvp":                     # game-night signups: anyone
+            await self._on_rsvp(it, pid)
+            return
         if not self._is_admin(it.user):
             await it.response.send_message("Only the server admins can do that.", ephemeral=True)
             return
@@ -680,6 +827,8 @@ class AdminBot:
             verb = "permitted" if action == "permit" else "banned"
             outcome = f"{verb} ({', '.join(changes)})" if changes else f"{verb} (lists already said so)"
             log.info("admin_bot: %s %s by %s: %s", pid, verb, it.user, changes)
+            if action == "permit":
+                outcome += await self._welcome_requester(self._refused.get(pid))
         embed = it.message.embeds[0] if it.message and it.message.embeds else None
         if embed is not None:
             embed.add_field(name="Result", value=f"{outcome} by {it.user.mention}", inline=False)
@@ -791,6 +940,186 @@ class AdminBot:
                                      app_commands.Choice(name="off", value="off")])
         async def setkey(it: discord.Interaction, key: str, state: str):
             await bot._change_setting(it, "setkey", key, state)
+
+        import community
+
+        async def need_db(it: discord.Interaction) -> bool:
+            if not bot.db_path:
+                await it.response.send_message("This needs the stats database (`database.path` in config.json).",
+                                                ephemeral=True)
+                return False
+            return True
+
+        async def player_choices(it: discord.Interaction, current: str):
+            if not bot.db_path:
+                return []
+            return [app_commands.Choice(name=n[:100], value=n[:100]) for n in community.player_names(bot.db, current)]
+
+        @group.command(name="stats", description="Play time, deaths and more for a character (yours if linked)")
+        @app_commands.describe(player="Character name (leave empty for your linked character)")
+        async def stats(it: discord.Interaction, player: str = ""):
+            if not await need_db(it):
+                return
+            name = player.strip()
+            if not name:
+                mine = community.linked_players(bot.db, it.user.id)
+                if not mine:
+                    await it.response.send_message("Which character? Give a name, or link yours once with "
+                                                    "`/valheim link <character>`.", ephemeral=True)
+                    return
+                name = mine[0]
+            s = community.player_stats(bot.db, name)
+            if not s:
+                await it.response.send_message(f"No play time recorded for **{discord.utils.escape_markdown(name)}**.",
+                                                ephemeral=True)
+                return
+            embed = community.render_stats(s, community.log_clock_offset(bot.db),
+                                           community.linked_user(bot.db, s["player"]))
+            await it.response.send_message(embed=discord.Embed.from_dict(embed))
+        stats.autocomplete("player")(player_choices)
+
+        @group.command(name="top", description="Leaderboards: time played, deaths, visits, longest session")
+        @app_commands.choices(category=[app_commands.Choice(name=v[0], value=k) for k, v in community.TOP.items()])
+        async def top(it: discord.Interaction, category: str = "time"):
+            if not await need_db(it):
+                return
+            embed = community.render_top(category, community.top(bot.db, category, 10))
+            await it.response.send_message(embed=discord.Embed.from_dict(embed))
+
+        @group.command(name="notify", description="Get a DM when someone joins the server")
+        @app_commands.describe(when="What to be told about", player="For follow/unfollow: which character")
+        @app_commands.choices(when=[app_commands.Choice(name="First player joins an empty server", value="first"),
+                                    app_commands.Choice(name="A specific character joins (follow)", value="follow"),
+                                    app_commands.Choice(name="Stop following a character", value="unfollow"),
+                                    app_commands.Choice(name="Turn all notifications off", value="off"),
+                                    app_commands.Choice(name="Show my notifications", value="list")])
+        async def notify(it: discord.Interaction, when: str, player: str = ""):
+            if not await need_db(it):
+                return
+            uid, name = it.user.id, player.strip()
+            if when in ("follow", "unfollow"):
+                if not name:
+                    await it.response.send_message("Which character? Fill in `player`.", ephemeral=True)
+                    return
+                name = community.known_player(bot.db, name) or name
+                community.set_follow(bot.db, uid, name, when == "follow")
+                text = (f"You'll get a DM when **{name}** joins." if when == "follow"
+                        else f"No more DMs about **{name}**.")
+            elif when == "first":
+                community.set_notify_first(bot.db, uid, True)
+                text = "You'll get a DM when someone joins an empty server."
+            elif when == "off":
+                community.notify_off(bot.db, uid)
+                text = "All notifications off."
+            else:
+                mine = community.my_notifications(bot.db, uid)
+                parts = (["first player joins"] if mine["first"] else []) + [f"**{p}** joins" for p in mine["follows"]]
+                text = "You're notified when: " + ", ".join(parts) if parts else "You have no notifications on."
+            if when in ("first", "follow"):
+                text += " (Make sure you accept DMs from server members.)"
+            await it.response.send_message(text, ephemeral=True)
+        notify.autocomplete("player")(player_choices)
+
+        @group.command(name="link", description="Link your Discord account to your character")
+        @app_commands.describe(character="Your character's name, as it appears in-game")
+        async def link(it: discord.Interaction, character: str):
+            if not await need_db(it):
+                return
+            name = community.known_player(bot.db, character)
+            if not name:
+                await it.response.send_message(
+                    f"No character called **{discord.utils.escape_markdown(character)}** has played here yet. "
+                    "Join once, then link.", ephemeral=True)
+                return
+            err = community.link_player(bot.db, name, it.user.id)
+            await it.response.send_message(err or f"✅ **{name}** is now linked to you. `/valheim stats` shows "
+                                                   "your stats, and milestones will mention you.", ephemeral=True)
+        link.autocomplete("character")(player_choices)
+
+        @group.command(name="unlink", description="Unlink a character from your Discord account")
+        @app_commands.describe(character="Leave empty to unlink all of yours. Admins can unlink anyone's.")
+        async def unlink(it: discord.Interaction, character: str = ""):
+            if not await need_db(it):
+                return
+            mine = community.linked_players(bot.db, it.user.id)
+            if not character.strip():
+                for n in mine:
+                    community.unlink_player(bot.db, n)
+                await it.response.send_message(f"Unlinked {', '.join(mine)}." if mine else "Nothing was linked.",
+                                                ephemeral=True)
+                return
+            name = community.known_player(bot.db, character) or character.strip()
+            owner = community.linked_user(bot.db, name)
+            if owner and owner != str(it.user.id) and not bot._is_admin(it.user):
+                await it.response.send_message("That character is linked to someone else; only an admin can "
+                                                "unlink it.", ephemeral=True)
+                return
+            done = community.unlink_player(bot.db, name)
+            await it.response.send_message(f"Unlinked **{name}**." if done else f"**{name}** wasn't linked.",
+                                            ephemeral=True)
+        unlink.autocomplete("character")(player_choices)
+
+        @group.command(name="request-access", description="New here? Tell the admins which character you'll join as")
+        @app_commands.describe(character="The character name you'll use in Valheim")
+        async def request_access(it: discord.Interaction, character: str):
+            if not await need_db(it):
+                return
+            name = character.strip()[:40]
+            if not name:
+                await it.response.send_message("Which character name?", ephemeral=True)
+                return
+            community.request_access(bot.db, name, it.user.id)
+            bot.post_admin(f"🙋 <@{it.user.id}> asked to join as **{discord.utils.escape_markdown(name)}**. "
+                           "When that character is refused, the notice will say it's them, and **Permit** "
+                           "links the character to them and lets them know.")
+            await it.response.send_message(
+                f"Thanks! Now try joining as **{discord.utils.escape_markdown(name)}** "
+                "(`/valheim join` has the code). If you're turned away, the admins see it's you and "
+                "can let you in with one click, and you'll get a DM.", ephemeral=True)
+
+        @group.command(name="plan", description="Plan a game night: posts a signup with a reminder")
+        @app_commands.describe(title="What's happening, e.g. 'Bonemass run'",
+                               when="e.g. 20:00, 8pm, tomorrow 8pm, sat 20:00, in 2h")
+        async def plan(it: discord.Interaction, title: str, when: str):
+            if not await need_db(it):
+                return
+            import datetime as _dt
+            try:
+                at = community.parse_when(when, _dt.datetime.now().astimezone())
+            except ValueError as e:
+                await it.response.send_message(str(e), ephemeral=True)
+                return
+            plan_id = community.create_plan(bot.db, title.strip()[:100], int(at.timestamp()),
+                                            it.channel_id, it.user.id)
+            community.rsvp(bot.db, plan_id, it.user.id, "going")
+            p = community.get_plan(bot.db, plan_id)
+            await it.response.send_message(embed=discord.Embed.from_dict(community.render_plan(p, bot.server_name)),
+                                            view=bot._plan_buttons(plan_id))
+            msg = await it.original_response()
+            community.set_plan_message(bot.db, plan_id, msg.id)
+            if bot.discord_events and it.guild:
+                try:
+                    await it.guild.create_scheduled_event(
+                        name=p["title"], start_time=at, end_time=at + _dt.timedelta(hours=2),
+                        entity_type=discord.EntityType.external, location=f"Valheim: {bot.server_name}",
+                        privacy_level=discord.PrivacyLevel.guild_only,
+                        description=f"Signup: {msg.jump_url}")
+                except discord.HTTPException as e:
+                    log.info("admin_bot: couldn't create the Discord event (needs Manage Events): %s", e)
+
+        @group.command(name="map", description="The world seed and a link to a map of it (spoilers!)")
+        async def map_(it: discord.Interaction):
+            if not bot.map_enabled:
+                await it.response.send_message("The map link is turned off on this server.", ephemeral=True)
+                return
+            found = community.world_seed(bot.lists.save_dir)
+            if not found:
+                await it.response.send_message("Couldn't read the world seed from the save folder.", ephemeral=True)
+                return
+            world, seed = found
+            await it.response.send_message(
+                f"🗺️ **{world}**: seed `{seed}`\n[Open the world map]({community.map_url(seed)}): "
+                "**spoilers**, it shows the whole world, including places nobody has found yet.", ephemeral=True)
 
         @group.command(name="join", description="How to join the Valheim server: join code, address, password")
         async def join(it: discord.Interaction):

@@ -99,7 +99,11 @@ RE_SHUTDOWN = re.compile(_TS + r"(?:Game - )?OnApplicationQuit|ZNet Shutdown|ZNe
 # Server-side happenings with no player name attached.
 RE_RAID = re.compile(_TS + r"Random event set:\s*(?P<event>\S+)")
 RE_NETVER = re.compile(_TS + r"Network version check, their:(?P<their>\d+), mine:(?P<mine>\d+)")
-RE_SAVED = re.compile(_TS + r"World save \(\d+/\d+\) done")
+RE_SAVED = re.compile(_TS + r"World save \(\d+/\d+\) done(?:\. Total time \[(?P<ms>\d+)ms\])?")
+RE_DISK = re.compile(_TS + r"Available space to current user: (?P<avail>\d+)\. Saving is blocked if below: "
+                     r"(?P<block>\d+) bytes\. Warnings are given if below: (?P<warn>\d+)")
+# A location being generated in a zone, which happens the first time anyone goes there.
+RE_LOCATION = re.compile(_TS + r"Placed location (?P<loc>\S+) in zone (?P<zone>-?\d+,-?\d+)")
 RE_BACKUP = re.compile(_TS + r"Backup created in (?P<name>\S+)")
 RE_VERSION = re.compile(_TS + r"Valheim version: ?(?P<version>\S+)")
 RE_REFUSED = re.compile(_TS + r"Player (?P<name>.+?) : (?P<id>\S+) is blacklisted or not in whitelist")
@@ -252,8 +256,17 @@ class ValheimLogParser:
             if their != mine:
                 yield Event("version_mismatch", None, {"their": their, "mine": mine, "newer": their > mine})
             return
-        if RE_SAVED.search(line):
-            yield Event("world_saved", None, {})
+        m = RE_SAVED.search(line)
+        if m:
+            yield Event("world_saved", None, {"ms": int(m.group("ms")) if m.group("ms") else None})
+            return
+        m = RE_DISK.search(line)
+        if m:
+            yield Event("disk_space", None, {k: int(m.group(k)) for k in ("avail", "block", "warn")})
+            return
+        m = RE_LOCATION.search(line)
+        if m:
+            yield Event("location", None, {"loc": m.group("loc"), "zone": m.group("zone")})
             return
         m = RE_BACKUP.search(line)
         if m:
@@ -441,6 +454,12 @@ class Discord:
         else:
             payload = {"username": self.username,
                        "content": f"{emoji} {text}".strip() + (f"  ({footer})" if footer else "")}
+        uid = ev.extra.get("mention")
+        if uid and str(uid).isdigit():
+            # A linked player's Discord account: ping them, and only them. (Mentions inside
+            # an embed never notify, so the ping goes in the message text.)
+            payload["content"] = (payload.get("content", "") + f" <@{uid}>").strip()
+            payload["allowed_mentions"] = {"parse": [], "users": [str(uid)]}
         self.send(payload)
 
     def post_embed(self, kind: str, embed: dict, event_filter: set) -> None:
@@ -1088,6 +1107,8 @@ def record_event(store, ev: "Event") -> None:
         store.death(ev.player, ts)
     elif ev.kind == "raid":
         store.server_event("raid", ev.extra.get("raid"), ts)
+    elif ev.kind == "location":
+        store.server_event("location", f"{ev.extra['loc']}|{ev.extra['zone']}", ts)
     elif ev.kind == "count" and ev.extra.get("count") is not None:
         store.concurrency(int(ev.extra["count"]), ts)
 
@@ -1339,7 +1360,26 @@ def main():
             log.warning("updater.bot_dir %s doesn't exist (mount it); status.json and requests are off", upd.bot_dir)
             upd.bot_dir = ""
     if admin:
-        admin.attach(live=live, backups=backups, updater=upd, announce=post_update)
+        admin.attach(live=live, backups=backups, updater=upd, announce=post_update,
+                     db_path=db_cfg["path"] if db_enabled else None)
+
+    health = extras.HealthWatch(cfg.get("health") or {})
+    daily = extras.DailyRestart(cfg["daily_restart"]) if (cfg.get("daily_restart") or {}).get("time") else None
+    if daily and not (upd and upd.bot_dir):
+        log.warning("daily_restart needs the updater link (updater.bot_dir, host/README.md); it's off")
+        daily = None
+    if daily and store:
+        daily.done_date = store.get_meta("daily_restart_date")   # survive a monitor restart
+
+    def mention_for(player: str):
+        """The Discord user linked to a character (or who asked for access as it), if any."""
+        if not store:
+            return None
+        try:
+            import community
+            return community.linked_user(store.conn, player)
+        except Exception:  # noqa: BLE001
+            return None
 
     def announce(ev: "Event") -> None:
         """Post one event, upgraded where the extras apply: a first-ever login becomes a
@@ -1353,7 +1393,17 @@ def main():
             except Exception as e:
                 log.warning("DB write failed for %s: %s", ev.kind, e)
         prev_version = live.version
+        was_empty = live.count == 0 and not live.online
         summary = live.observe(ev)
+        if admin and ev.kind == "login":
+            admin.on_login(ev.player, was_empty)
+        elif admin and ev.kind == "logout":
+            admin.on_logout(ev.player)
+        alert = health.observe(ev)
+        if alert:
+            log.warning("HEALTH %s", alert)
+            if admin:
+                admin.post_admin(alert)
         if ev.kind == "server_version" and prev_version and ev.extra.get("version") != prev_version:
             post_update(f"✅ Valheim updated: **{prev_version}** → **{ev.extra.get('version')}**. "
                         f"Players need the same version to join.")
@@ -1362,7 +1412,8 @@ def main():
         if ev.kind == "logout" and summary and "session_summary" in events:
             discord.post(Event("logout_summary", ev.player, {**ev.extra, **summary}), server_name, {"logout_summary"})
         elif first_visit:
-            discord.post(Event("welcome", ev.player, dict(ev.extra)), server_name, {"welcome"})
+            discord.post(Event("welcome", ev.player, {**ev.extra, "mention": mention_for(ev.player)}),
+                         server_name, {"welcome"})
         elif ev.kind == "version_mismatch":
             key = (ev.extra["their"], ev.extra["mine"])
             if time.time() - mismatch_posted.get(key, 0) < 3600:
@@ -1388,7 +1439,8 @@ def main():
                 if n:
                     detail = f"has died **{n} times** in {server_name}. Odin is keeping count."
             if detail:
-                discord.post(Event("milestone", ev.player, {"detail": detail}), server_name, events)
+                discord.post(Event("milestone", ev.player, {"detail": detail, "mention": mention_for(ev.player)}),
+                             server_name, events)
 
     maint = build_maintenance(cfg, source, discord, server_name)
     if maint:
@@ -1496,6 +1548,14 @@ def main():
                         store.set_meta("weekly_recap_week", week)
                 except Exception as e:
                     log.warning("Weekly recap failed: %s", e)
+            if daily and daily.due(datetime.now().astimezone(), not offline and count == 0):
+                err = upd.request("restart")
+                log.info("Daily restart: %s", err or "requested (server empty)")
+                if store and not err:
+                    store.set_meta("daily_restart_date", daily.done_date)
+                if admin:
+                    admin.post_admin(f"🔄 Daily restart: {err}" if err else
+                                     "🔄 Daily restart: the server was empty, so it's restarting now.")
             if backups and now - last_backup_check >= 600:
                 last_backup_check = now
                 msg = backups.stale_alert(not (parser.s.down or now - last_line_at > stale_after))
