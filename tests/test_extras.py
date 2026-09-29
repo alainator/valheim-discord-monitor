@@ -121,7 +121,7 @@ class BackupTest(unittest.TestCase):
             with open(os.path.join(src, "Alheim.db"), "w") as f:      # the live world: never copied
                 f.write("live")
             b = extras.BackupCopier({"source_dir": src, "dest_dir": dest, "keep": 3, "alert_after_hours": 2})
-            self.assertEqual(b.copy_new(), 6)                          # newest 3 pairs only
+            self.assertEqual(b.copy_new(), 3)                          # newest 3 pairs only
             self.assertEqual(b.copy_new(), 0)                          # nothing new
             names = sorted(os.listdir(dest))
             self.assertEqual(len(names), 6)                            # 3 newest pairs kept
@@ -132,6 +132,38 @@ class BackupTest(unittest.TestCase):
             later = time.time() + 5 * 3600
             self.assertIn("hasn't made a world backup", b.stale_alert(True, now=later))
             self.assertIsNone(b.stale_alert(True, now=later))          # only once
+
+    def test_valheim_1_0_backup_folders(self):
+        # Valheim 1.0: the world and each backup are folders of chunk files.
+        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as dest:
+            def make(name, age, chunks=3):
+                d = os.path.join(src, name)
+                os.makedirs(os.path.join(d, "chunks"))
+                for i in range(chunks):
+                    with open(os.path.join(d, "chunks", f"c{i}.bin"), "wb") as f:
+                        f.write(b"x" * 100)
+                with open(os.path.join(d, "Alheim.fwl"), "wb") as f:
+                    f.write(b"meta")
+                t = time.time() - age
+                os.utime(d, (t, t))
+            make("Alheim", 0, chunks=5)                                  # the live world: never copied
+            for i, stamp in enumerate(("20260927-190102", "20260928-050110",
+                                       "20260928-150118", "20260928-170645")):
+                make(f"Alheim_backup_auto-{stamp}", age=(4 - i) * 3600)
+            b = extras.BackupCopier({"source_dir": src, "dest_dir": dest, "keep": 3})
+            self.assertEqual(b.copy_new(), 3)
+            self.assertEqual(sorted(os.listdir(dest)), ["Alheim_backup_auto-20260928-050110",
+                                                         "Alheim_backup_auto-20260928-150118",
+                                                         "Alheim_backup_auto-20260928-170645"])
+            copied = os.path.join(dest, "Alheim_backup_auto-20260928-170645")
+            self.assertEqual(sorted(os.listdir(os.path.join(copied, "chunks"))), ["c0.bin", "c1.bin", "c2.bin"])
+            self.assertEqual(b.copy_new(), 0)                          # already there
+            newest = b.listing()[0]
+            self.assertEqual((newest[1], newest[2]), (304, "Alheim_backup_auto-20260928-170645"))
+            make("Alheim_backup_auto-20260928-210000", age=0)          # a new one arrives
+            self.assertEqual(b.copy_new(), 1)
+            self.assertNotIn("Alheim_backup_auto-20260928-050110", os.listdir(dest))   # pruned to 3
+            self.assertFalse([n for n in os.listdir(dest) if n.startswith(".")])      # no leftovers
 
 
 if __name__ == "__main__":

@@ -188,15 +188,30 @@ class WeeklyRecap:
 # ---------------------------------------------------------------------------
 # Backups
 # ---------------------------------------------------------------------------
-BACKUP_RE = re.compile(r"_backup_.*\.(?:db|fwl)$")
+BACKUP_RE = re.compile(r"_backup_")
+LEGACY_EXTS = (".db", ".fwl")
+
+
+def _tree_size(path: str) -> int:
+    total = 0
+    for root, _, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
 
 
 class BackupCopier:
-    """Copies Valheim's own world backups (worlds_local/<world>_backup_*.db/.fwl) to a
-    second folder, e.g. another disk, and keeps the newest `keep` there.
+    """Copies Valheim's own world backups from worlds_local to a second folder, e.g.
+    another disk, and keeps the newest `keep` there.
 
-    Valheim writes each backup file once ("Backup created in …" in the log) and never
-    changes it, so copying after that line can't catch a half-written file."""
+    A backup is either a folder (Valheim 1.0 saves a world as chunk files, so
+    worlds_local/Alheim_backup_auto-20260928-170645/ is one backup) or, on older servers,
+    a <world>_backup_….db + .fwl pair. Valheim writes each backup once ("Backup created in
+    …" in the log) and never changes it, so copying after that line can't catch a
+    half-written one."""
 
     def __init__(self, cfg: dict):
         self.src = cfg["source_dir"]
@@ -207,42 +222,70 @@ class BackupCopier:
         self.lock = threading.Lock()
 
     def _backups(self, folder: str) -> list:
+        """[(mtime, size, name)] newest first. name is the folder name, or the file stem
+        for an old .db/.fwl pair."""
         try:
-            names = [n for n in os.listdir(folder) if BACKUP_RE.search(n)]
+            entries = os.listdir(folder)
         except FileNotFoundError:
             return []
-        out = []
-        for n in names:
+        out, pairs = [], {}
+        for n in entries:
+            if n.startswith(".") or not BACKUP_RE.search(n):
+                continue
+            path = os.path.join(folder, n)
             try:
-                st = os.stat(os.path.join(folder, n))
+                if os.path.isdir(path):
+                    out.append((os.stat(path).st_mtime, _tree_size(path), n))
+                elif n.endswith(LEGACY_EXTS):
+                    st = os.stat(path)
+                    stem = n.rsplit(".", 1)[0]
+                    m, size = pairs.get(stem, (0.0, 0))
+                    pairs[stem] = (max(m, st.st_mtime), size + st.st_size)
             except FileNotFoundError:
                 continue
-            out.append((st.st_mtime, st.st_size, n))
+        out += [(m, size, stem) for stem, (m, size) in pairs.items()]
         return sorted(out, reverse=True)
 
+    def _paths(self, folder: str, name: str) -> list:
+        path = os.path.join(folder, name)
+        if os.path.isdir(path):
+            return [path]
+        return [path + ext for ext in LEGACY_EXTS if os.path.exists(path + ext)]
+
+    @staticmethod
+    def _remove(path: str) -> None:
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+
     def copy_new(self) -> int:
-        """Copy backup files not yet in dest; prune dest. Returns files copied."""
+        """Copy the newest `keep` backups that dest doesn't have yet (or has only part
+        of); prune dest. Returns how many backups were copied."""
         with self.lock:
-            os.makedirs(self.dest, exist_ok=True)
-            have = {n: size for _, size, n in self._backups(self.dest)}
-            # Only the newest `keep` backups: older ones would just be pruned again.
-            wanted = []
-            for _, _, n in self._backups(self.src):
-                stem = n.rsplit(".", 1)[0]
-                if stem not in wanted:
-                    wanted.append(stem)
-            wanted = set(wanted[:self.keep])
+            have = {name: size for _, size, name in self._backups(self.dest)}
             copied = 0
-            for _, size, n in self._backups(self.src):
-                if n.rsplit(".", 1)[0] not in wanted or have.get(n) == size:
+            # Only the newest `keep`: older ones would just be pruned again.
+            for _, size, name in self._backups(self.src)[:self.keep]:
+                if have.get(name) == size:
                     continue
-                tmp = os.path.join(self.dest, f".{n}.part")
-                shutil.copy2(os.path.join(self.src, n), tmp)
-                os.replace(tmp, os.path.join(self.dest, n))
+                for src in self._paths(self.src, name):
+                    dst = os.path.join(self.dest, os.path.basename(src))
+                    tmp = os.path.join(self.dest, f".{os.path.basename(src)}.part")
+                    self._remove(tmp)
+                    if os.path.isdir(src):
+                        shutil.copytree(src, tmp)
+                    else:
+                        shutil.copy2(src, tmp)
+                    self._remove(dst)
+                    os.replace(tmp, dst)
                 copied += 1
             self._prune()
         if copied:
-            log.info("Backups: copied %d file(s) to %s", copied, self.dest)
+            log.info("Backups: copied %d backup(s) to %s", copied, self.dest)
         return copied
 
     def copy_in_background(self) -> None:
@@ -254,27 +297,13 @@ class BackupCopier:
         threading.Thread(target=run, name="backup-copy", daemon=True).start()
 
     def _prune(self) -> None:
-        # A backup is a .db + .fwl pair sharing a stem; keep the newest `keep` stems.
-        stems = []
-        for _, _, n in self._backups(self.dest):
-            stem = n.rsplit(".", 1)[0]
-            if stem not in stems:
-                stems.append(stem)
-        for stem in stems[self.keep:]:
-            for ext in ("db", "fwl"):
-                try:
-                    os.remove(os.path.join(self.dest, f"{stem}.{ext}"))
-                except FileNotFoundError:
-                    pass
+        for _, _, name in self._backups(self.dest)[self.keep:]:
+            for path in self._paths(self.dest, name):
+                self._remove(path)
 
     def listing(self, limit: int = 10) -> list:
-        """[(mtime, total size, stem)] of the newest copies in dest."""
-        sets: dict = {}
-        for mtime, size, n in self._backups(self.dest):
-            stem = n.rsplit(".", 1)[0]
-            m, s = sets.get(stem, (0, 0))
-            sets[stem] = (max(m, mtime), s + size)
-        return sorted(((m, s, stem) for stem, (m, s) in sets.items()), reverse=True)[:limit]
+        """[(mtime, size, name)] of the newest copies in dest."""
+        return self._backups(self.dest)[:limit]
 
     def stale_alert(self, server_up: bool, now: Optional[float] = None) -> Optional[str]:
         """A one-off warning when Valheim hasn't made a backup for a long time."""
