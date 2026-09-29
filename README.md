@@ -533,7 +533,8 @@ was already online when the monitor started gets a plain leave message.
 The admin bot keeps **one message** in a channel up to date:
 - a title: 🟢 *N online* / 🟢 *empty* / 🔴 *offline*;
 - who's on, with "joined 25 minutes ago";
-- when the server came up, its version, portal count, and the last world save, backup and raid.
+- the current join code, when the server came up, its version, portal count, and the last
+  world save, backup and raid.
 
 Times use Discord's own relative timestamps, so they stay current by themselves. The bot
 only edits the message when something changes.
@@ -559,6 +560,14 @@ It works alongside the [status voice channel](#status-voice-channel): the channe
 the glanceable version, and the board has the details.
 
 **Commands:**
+- **`/valheim join`** (anyone): how to connect, shown only to the person who asked:
+  - the current **join code**, which works on every platform and changes whenever the server
+    restarts;
+  - the server's **address** for PC;
+  - the **password**, if one is set, hidden behind a spoiler;
+  - the in-game steps (Join Game → Add server);
+  - if you use a permitted list, a note that a refused player should ask an admin, who
+    then gets the Permit button.
 - **`/valheim online`** (anyone): who's on right now, and since when.
 - **`/valheim backups`** (admins): the newest copied world backups, with sizes and ages.
 
@@ -823,6 +832,9 @@ or run it in a terminal.
 | `admin_bot.status_channel.stale_after_seconds` | 900 | Show offline if the log has been silent this long. |
 | `admin_bot.status_board.channel_id` | — | Text channel for the live status board message. |
 | `admin_bot.status_board.state_file` | `status_board.json` | Where the board's message id is remembered. |
+| `admin_bot.join.address` | — | Shown by `/valheim join` for PC players, e.g. `203.0.113.7:2456` or `valheim.example.com:2456`. Without it, the IP the server logs is used, when it logs one. |
+| `admin_bot.join.password` | — | Shown by `/valheim join` behind a spoiler. Leave out for a passwordless server. |
+| `admin_bot.join.note` | — | Extra text for `/valheim join`, e.g. "Ask in #general for an invite". |
 | `backups.source_dir` / `dest_dir` | — | Valheim's `worlds_local` folder, and where to copy its backups (must exist). |
 | `backups.keep` | 30 | Backup copies to keep. |
 | `backups.alert_after_hours` | 48 | Warn the admin channel if Valheim makes no backup for this long. |

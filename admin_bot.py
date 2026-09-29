@@ -279,6 +279,7 @@ class AdminBot:
         if bc.get("channel_id") and not self.board_channel:
             log.warning("admin_bot: status_board.channel_id isn't a channel ID; status board off")
         self.board_state = bc.get("state_file", "status_board.json")
+        self.join = cfg.get("join") or {}         # address / password / note for /valheim join
         self._board_task = None
         self.live = None                     # extras.LiveState, from attach()
         self.backups = None                  # extras.BackupCopier, from attach()
@@ -456,6 +457,51 @@ class AdminBot:
                     except discord.HTTPException as e:
                         log.warning("admin_bot: status board update failed: %s", e)
             await asyncio.sleep(10)
+
+    def join_embed(self) -> dict:
+        """The /valheim join answer: everything a new player needs to connect."""
+        snap = self.live.snapshot() if self.live else None
+        if snap is None or not snap["known"]:
+            status = "⚪ Status unknown right now."
+        elif snap["down"]:
+            status = "🔴 The server is **offline** right now; try again in a few minutes."
+        elif snap["count"]:
+            status = f"🟢 Online, **{snap['count']}** playing."
+        else:
+            status = "🟢 Online, nobody playing yet."
+        fields = []
+        code = snap.get("join_code") if snap else None
+        fields.append({"name": "Join code (any platform, crossplay)",
+                       "value": f"**`{code}`**\nIt changes whenever the server restarts; run `/valheim join` again then."
+                       if code else "Not known yet. It shows up here once someone joins after the server's "
+                                    "last restart. Until then, ask someone who's playing (it's in the pause menu), "
+                                    "or use the address.",
+                       "inline": False})
+        address = str(self.join.get("address") or "")
+        if address.upper().startswith("YOUR"):     # the example config's placeholder
+            address = ""
+        address = address or (snap.get("server_ip") if snap else None)
+        if address:
+            fields.append({"name": "Address (PC / Steam)", "value": f"**`{address}`**", "inline": True})
+        if self.join.get("password"):
+            fields.append({"name": "Password", "value": f"||`{self.join['password']}`||", "inline": True})
+        fields.append({"name": "How to join",
+                       "value": "Start Valheim → pick a character → **Join Game** → **Add server**, "
+                                "and enter the join code (or the address on PC). Anyone already in the "
+                                "game can also read the current code from the pause menu.", "inline": False})
+        try:
+            permitted = bool(self.lists.ids("permitted"))
+        except OSError:
+            permitted = False
+        if permitted:
+            fields.append({"name": "First time?",
+                           "value": "This server only lets in players on its list. If you're turned away, "
+                                    "tell an admin: they get a notice with a button to let you in.",
+                           "inline": False})
+        if self.join.get("note"):
+            fields.append({"name": "Note", "value": str(self.join["note"])[:1000], "inline": False})
+        return {"title": f"⚔️ Join {self.server_name}", "description": status, "color": 0x5865F2,
+                "fields": fields}
 
     async def _public(self, text: str) -> None:
         if self.announce:
@@ -644,6 +690,11 @@ class AdminBot:
             else:
                 text = f"🟢 **{snap['count']} online** in {bot.server_name}:\n" + "\n".join(extras.player_lines(snap))
             await it.response.send_message(text[:2000])
+
+        @group.command(name="join", description="How to join the Valheim server: join code, address, password")
+        async def join(it: discord.Interaction):
+            embed = discord.Embed.from_dict(bot.join_embed())
+            await it.response.send_message(embed=embed, ephemeral=True)
 
         @group.command(name="backups", description="List the copied world backups")
         async def backups(it: discord.Interaction):
