@@ -46,8 +46,25 @@ And without the bot:
 **Running the Valheim server on your own Linux machine?** Start with the
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
+**What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/valheim map` works with Valheim 1.0 worlds.** It reads the seed from the world
+  folder (`worlds_local/<world>/_main.<N>.fwl2`); set `admin_bot.map.seed` if it can't
+  ([players & community](#players--community)).
+- **Community commands:** `/valheim stats`, `top`, `notify`, `link`, `request-access`,
+  `plan` and `map`, plus an optional "In Valheim" role
+  ([players & community](#players--community)).
+- **Server health:** low-disk and slow-save warnings, and an optional daily restart while
+  nobody's on ([server health](#server-health)).
+- **World settings from Discord:** `/valheim settings`, `preset`, `modifier`, `setkey`
+  ([host/README.md](host/README.md#world-settings-from-discord-preset-modifiers-setkeys)).
+- **`/valheim join`** and a status board with the join code, uptime, version, last save,
+  backup and raid ([status board](#status-board)).
+- **Secrets belong in `.env`.** If your webhook URL or bot token is in `config.json`, move
+  it ([keeping secrets safe](#keeping-secrets-safe)).
+
 **Contents:**
 - **Getting started:** [Self-hosted quick start](#self-hosted-linux-server-quick-start) ·
+  [Keeping secrets safe](#keeping-secrets-safe) ·
   [Count mode](#count-mode-quick-start) · [Log mode](#log-mode)
 - **Admin bot:** [Join alerts & setup](#join-attempt-alerts--discord-admin-bot) ·
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
@@ -103,7 +120,8 @@ if you enable the admin bot, edits the ban and permitted lists in the save dir.
      Otherwise follow [Setting up the bot](#setting-up-the-bot).
 
    Keep secrets in `.env` rather than `config.json`. Both files are git-ignored, but a
-   `grep` or a pasted snippet of `config.json` can easily leak a token.
+   `grep` or a pasted snippet of `config.json` can easily leak a token. See
+   [keeping secrets safe](#keeping-secrets-safe).
 3. **Start it:**
    ```bash
    docker compose up -d --build
@@ -147,6 +165,40 @@ The container runs as root, so it can read and edit those files anyway.
 4. [Copy world backups](#world-backup-copies) to another disk.
 5. Link your update script and world settings ([host/README.md](host/README.md)) for
    `/valheim restart`, update posts and `/valheim modifier`.
+
+### Keeping secrets safe
+
+Two values give control of your Discord channel to anyone who has them:
+- **The webhook URL** (`DISCORD_WEBHOOK_URL`): anyone with it can post to the channel.
+- **The bot token** (`DISCORD_BOT_TOKEN`): anyone with it can act as your bot.
+
+Keep both in `.env` only:
+- `.env` wins over `config.json`: when `DISCORD_WEBHOOK_URL` or `DISCORD_BOT_TOKEN` is
+  set there, `webhook_url` / `admin_bot.token` in `config.json` are ignored.
+- `.env` and `config.json` are git-ignored, so neither is committed. Keep it that way.
+- When asking for help, share `config.json` without the secrets, and never paste `.env`.
+  To check that a token is loaded without printing it, use the
+  [length check](#troubleshooting) instead.
+
+**Moving a secret out of `config.json`:**
+1. Add it to `.env`, with no quotes and no spaces around `=`:
+   ```
+   DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/…
+   ```
+2. In `config.json`, delete the whole `"webhook_url": "…",` line (or `"token": "…",` in
+   `admin_bot`). If it was the last line in its block, also delete the comma at the end
+   of the line above it. Check with `python3 -m json.tool config.json > /dev/null`.
+3. `docker compose up -d --force-recreate`, then `docker compose logs --tail 20`. No
+   `No Discord webhook URL configured` error means it was picked up.
+
+**If one has leaked** (pasted in a chat, a screenshot, an issue, a commit), replace it.
+The old one keeps working until you do:
+- **Webhook:** the channel → Edit Channel → Integrations → Webhooks → select it →
+  **Delete Webhook**. Create a new one, copy its URL into `.env`, and recreate the
+  container.
+- **Bot token:** [Discord developer portal](https://discord.com/developers/applications)
+  → your app → Bot → **Reset Token**. Put the new token in `.env` and recreate the
+  container. The old token stops working immediately.
 
 ## Count mode (quick start)
 
@@ -623,6 +675,8 @@ These need the stats database (`database.path`), which the bot and the monitor s
 | `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |
 | No backups copied | `source_dir` isn't Valheim's `worlds_local`, or `dest_dir` isn't mounted | Check both, then see what the log says after `Backup created` (`Backups: copied N backup(s)`) |
 | Times in the log are off by hours | The container runs in UTC | Set `TZ=America/Los_Angeles` (etc.) in `.env` and recreate |
+| `No Discord webhook URL configured` | Neither `.env` nor `config.json` has a webhook URL, or `.env` wasn't loaded | Set `DISCORD_WEBHOOK_URL` in `.env` (next to `docker-compose.yml`) and recreate the container |
+| Posts stopped after replacing the webhook; the log shows `Discord HTTP 404` | The old webhook URL is still in use | Put the new URL in `.env` as `DISCORD_WEBHOOK_URL` and recreate the container (`.env` wins over `config.json`) |
 
 To check which token the container actually has without printing it:
 ```bash
@@ -1113,7 +1167,8 @@ Added here:
   update script, and `/valheim restart` with a countdown (`host/`).
 - **World settings from Discord:** preset, modifiers and setkeys, validated on the host.
 - **Community:** `/valheim stats`, `top`, `notify` (DMs), `link` with an "In Valheim" role,
-  `request-access`, `plan` (game nights with RSVPs and reminders), and `map`.
+  `request-access`, `plan` (game nights with RSVPs and reminders), and `map` (reads the
+  seed from Valheim 1.0 world folders).
 - **Server health:** low-disk and slow-save warnings, an optional daily restart, and
   exploration in the weekly recap.
 - **Docker setup:** `Dockerfile`, `docker-compose.yml`, `.env.example` and a self-hosted
