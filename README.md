@@ -619,8 +619,20 @@ small helper on the host lets the monitor:
   - `/valheim restart-cancel` stops a countdown.
 
 The container gets no host privileges. It drops a request file into a shared folder, and a
-systemd path unit on the host runs a two-command handler as the `valheim` user. **Setup,
+systemd path unit on the host runs a small handler as the `valheim` user. **Setup,
 including the change to `check_update.sh`: [host/README.md](host/README.md).**
+
+**World settings from Discord.** The same link lets admins change the world's preset,
+modifiers and setkeys:
+- `/valheim settings` shows what's set and every allowed value.
+- `/valheim modifier raids more`, `/valheim preset hard` and `/valheim setkey passivemobs on`
+  make a change.
+
+Changes apply at the next restart; the bot offers a "Restart in 5 min" button.
+
+The service file isn't edited by the bot. You change it once to read a `valheim`-owned
+`world-settings.env`, and the host side only ever writes known values into that file. See
+[host/README.md → World settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys).
 
 ## Player stats & public web page
 
@@ -840,7 +852,8 @@ or run it in a terminal.
 | `backups.alert_after_hours` | 48 | Warn the admin channel if Valheim makes no backup for this long. |
 | `weekly_recap.day` / `hour` | sunday / 18 | When to post the weekly recap (container time zone). |
 | `updater.log` | — | The host updater's log (`update_check.log`), for update posts. |
-| `updater.bot_dir` | — | Folder shared with the host: `status.json` out, `request` for restart/check. |
+| `updater.bot_dir` | — | Folder shared with the host: `status.json` out, `request` for restart/check/settings. |
+| `admin_bot.world_settings.file` | `/valheim_home/world-settings.env` | The host's world settings file, as mounted in the container (read-only). |
 | `discord.embeds` | true | Coloured embed vs plain text. |
 | `discord.show_player_count` | true | Footer with the current online count. |
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |
@@ -922,6 +935,7 @@ Added here:
   backup copies to another disk.
 - **Auto-update integration:** update posts, a reliable player count for the host's
   update script, and `/valheim restart` with a countdown (`host/`).
+- **World settings from Discord:** preset, modifiers and setkeys, validated on the host.
 - **Docker setup:** `Dockerfile`, `docker-compose.yml`, `.env.example` and a self-hosted
   example config.
 - **Docs:** the self-hosted quick start, bot setup and troubleshooting, and these tips.

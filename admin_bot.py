@@ -280,6 +280,8 @@ class AdminBot:
             log.warning("admin_bot: status_board.channel_id isn't a channel ID; status board off")
         self.board_state = bc.get("state_file", "status_board.json")
         self.join = cfg.get("join") or {}         # address / password / note for /valheim join
+        # The host's world-settings.env, read-only via the /valheim_home mount.
+        self.world_file = (cfg.get("world_settings") or {}).get("file", "/valheim_home/world-settings.env")
         self._board_task = None
         self.live = None                     # extras.LiveState, from attach()
         self.backups = None                  # extras.BackupCopier, from attach()
@@ -503,6 +505,57 @@ class AdminBot:
         return {"title": f"⚔️ Join {self.server_name}", "description": status, "color": 0x5865F2,
                 "fields": fields}
 
+    def start_restart(self, minutes: int, reason: str, by: str) -> str:
+        """Start a restart countdown (command or button). Returns the reply for the admin."""
+        minutes = max(0, min(int(minutes), 60))
+        if self._countdown and not self._countdown.done():
+            return "A restart is already counting down. `/valheim restart-cancel` stops it."
+        if self.updater is None:
+            return ("Restarting needs the updater link (`updater` in config.json and the host helper, "
+                    "see host/README.md).")
+        if self._online_count() == 0:
+            minutes = 0
+        self._countdown_cancel = asyncio.Event()
+        self._countdown = asyncio.ensure_future(self._restart_countdown(minutes, reason.strip()[:100], by))
+        return ("Restarting now (nobody is online)." if minutes == 0 else
+                f"Restart in {minutes} min, or sooner if everyone leaves. `/valheim restart-cancel` stops it.")
+
+    async def _change_setting(self, it, kind: str, key: str, value: str = "") -> None:
+        """Validate, ask the host to write world-settings.env, and confirm once it has."""
+        import discord
+        import world_settings as ws
+        before = ws.read_file(self.world_file)
+        try:
+            wanted = ws.apply(before, kind, key, value)
+        except ValueError as e:
+            await it.response.send_message(f"Not changed: {e}", ephemeral=True)
+            return
+        label = f"{kind} {key}" + (f" → {value}" if value else "")
+        if wanted == before:
+            await it.response.send_message(f"Already set: {label}. Nothing to change.", ephemeral=True)
+            return
+        err = await self._request(f"set {kind} {key} {value}".strip())
+        if err:
+            await it.response.send_message(f"Couldn't send the change: {err}", ephemeral=True)
+            return
+        await it.response.defer(ephemeral=True, thinking=True)
+        for _ in range(20):                           # the host helper normally takes a second
+            await asyncio.sleep(1)
+            if ws.read_file(self.world_file) == wanted:
+                log.info("admin_bot: world setting %s by %s", label, it.user)
+                view = discord.ui.View(timeout=None)
+                view.add_item(discord.ui.Button(label="Restart in 5 min (with warning)",
+                                                style=discord.ButtonStyle.primary,
+                                                custom_id=f"{BTN_PREFIX}:restart:5"))
+                await it.followup.send(
+                    f"✅ Saved: **{label}**. It takes effect at the next server restart.\n"
+                    f"Now: `{ws.format_args(wanted) or '(all normal)'}`", view=view, ephemeral=True)
+                return
+        await it.followup.send(
+            "⚠️ The change was sent, but the settings file didn't change within 20 s. Check that the host "
+            "helper is updated (host/README.md, world settings) and that `/valheim_home` is mounted.",
+            ephemeral=True)
+
     async def _public(self, text: str) -> None:
         if self.announce:
             await asyncio.get_running_loop().run_in_executor(None, self.announce, text)
@@ -611,6 +664,11 @@ class AdminBot:
         if not self._is_admin(it.user):
             await it.response.send_message("Only the server admins can do that.", ephemeral=True)
             return
+        if action == "restart":                  # the button on a world-settings confirmation
+            minutes = int(pid) if pid.isdigit() else 5
+            await it.response.send_message(self.start_restart(minutes, "applying new world settings", str(it.user)),
+                                            ephemeral=True)
+            return
         if action == "ignore":
             outcome = "ignored"
         else:
@@ -691,6 +749,49 @@ class AdminBot:
                 text = f"🟢 **{snap['count']} online** in {bot.server_name}:\n" + "\n".join(extras.player_lines(snap))
             await it.response.send_message(text[:2000])
 
+        import world_settings as ws
+
+        @group.command(name="settings", description="Show the world settings (preset, modifiers) and what can change")
+        async def settings(it: discord.Interaction):
+            if not await guard(it):
+                return
+            st = ws.read_file(bot.world_file)
+            opts = [f"**preset**: {', '.join(ws.PRESETS)}"]
+            opts += [f"**{k}**: {', '.join(v)}. {ws.DESCRIPTIONS[k]}" for k, v in ws.MODIFIERS.items()]
+            opts += [f"**{k}**: on/off. {ws.DESCRIPTIONS[k]}" for k in ws.SETKEYS]
+            embed = discord.Embed(title="🌍 World settings", color=0x5865F2,
+                                  description="\n".join(ws.describe(st)))
+            embed.add_field(name="What can change", value="\n".join(opts)[:1024], inline=False)
+            embed.add_field(name="How", value="`/valheim preset`, `/valheim modifier`, `/valheim setkey`. "
+                            "Changes apply at the next restart (`/valheim restart`).", inline=False)
+            await it.response.send_message(embed=embed, ephemeral=True)
+
+        @group.command(name="modifier", description="Change a world modifier (applies at the next restart)")
+        @app_commands.describe(name="Which modifier", value="New value (normal = default)")
+        @app_commands.choices(name=[app_commands.Choice(name=f"{k}: {ws.DESCRIPTIONS[k]}"[:100], value=k)
+                                    for k in ws.MODIFIERS])
+        async def modifier(it: discord.Interaction, name: str, value: str):
+            await bot._change_setting(it, "modifier", name, value)
+
+        @modifier.autocomplete("value")
+        async def modifier_values(it: discord.Interaction, current: str):
+            key = getattr(it.namespace, "name", None)
+            values = ws.MODIFIERS.get(key) or sorted({v for vs in ws.MODIFIERS.values() for v in vs})
+            return [app_commands.Choice(name=v, value=v) for v in values if current.lower() in v][:25]
+
+        @group.command(name="preset", description="Change the world preset (applies at the next restart)")
+        @app_commands.choices(name=[app_commands.Choice(name=p, value=p) for p in ws.PRESETS])
+        async def preset(it: discord.Interaction, name: str):
+            await bot._change_setting(it, "preset", name)
+
+        @group.command(name="setkey", description="Turn a world option on or off (applies at the next restart)")
+        @app_commands.choices(key=[app_commands.Choice(name=f"{k}: {ws.DESCRIPTIONS[k]}"[:100], value=k)
+                                   for k in ws.SETKEYS],
+                              state=[app_commands.Choice(name="on", value="on"),
+                                     app_commands.Choice(name="off", value="off")])
+        async def setkey(it: discord.Interaction, key: str, state: str):
+            await bot._change_setting(it, "setkey", key, state)
+
         @group.command(name="join", description="How to join the Valheim server: join code, address, password")
         async def join(it: discord.Interaction):
             embed = discord.Embed.from_dict(bot.join_embed())
@@ -730,23 +831,7 @@ class AdminBot:
             # resolves the type at module level, where app_commands isn't imported.
             if not await guard(it):
                 return
-            minutes = max(0, min(int(minutes), 60))
-            if bot._countdown and not bot._countdown.done():
-                await it.response.send_message("A restart is already counting down. `/valheim restart-cancel` stops it.",
-                                                ephemeral=True)
-                return
-            if bot.updater is None:
-                await it.response.send_message("Restarting needs the updater link (`updater` in config.json and "
-                                                "the host helper, see host/README.md).", ephemeral=True)
-                return
-            if bot._online_count() == 0:
-                minutes = 0
-            bot._countdown_cancel = asyncio.Event()
-            bot._countdown = asyncio.ensure_future(bot._restart_countdown(minutes, reason.strip()[:100], str(it.user)))
-            await it.response.send_message(
-                "Restarting now (nobody is online)." if minutes == 0 else
-                f"Restart in {minutes} min, or sooner if everyone leaves. `/valheim restart-cancel` stops it.",
-                ephemeral=True)
+            await it.response.send_message(bot.start_restart(minutes, reason, str(it.user)), ephemeral=True)
 
         @group.command(name="restart-cancel", description="Cancel a restart countdown")
         async def restart_cancel(it: discord.Interaction):

@@ -32,6 +32,7 @@ RE_ERROR = re.compile(r"ERROR: (?P<err>.*)")
 RE_REQ_CHECK = re.compile(r"Update check requested from Discord")
 
 REQUESTS = ("check", "restart")
+RE_SET_REQUEST = re.compile(r"^set (preset|modifier|setkey) [a-z]+( [a-z]+)?$")
 
 
 class UpdateWatcher:
@@ -111,8 +112,9 @@ class UpdateWatcher:
             log.debug("status.json not written: %s", e)
 
     def request(self, action: str) -> Optional[str]:
-        """Ask the host helper to act. Returns an error message, or None when queued."""
-        if action not in REQUESTS:
+        """Ask the host helper to act: "check", "restart", or "set <kind> <key> [value]"
+        (world settings; the host re-checks every value). Returns an error, or None."""
+        if action not in REQUESTS and not RE_SET_REQUEST.match(action):
             return f"unknown request {action!r}"
         if not self.bot_dir or not os.path.isdir(self.bot_dir):
             return "the shared bot folder isn't mounted (updater.bot_dir)"
