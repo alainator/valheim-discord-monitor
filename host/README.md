@@ -85,9 +85,13 @@ sleep 5; sudo tail -3 /home/valheim/update_check.log
 
 ## 4. Monitor configuration
 
-`docker-compose.yml`: uncomment the two updater volumes:
+Add the two updater volumes to `docker-compose.override.yml`, next to
+`docker-compose.yml`. Keep your own settings there so `git pull` never conflicts:
 ```yaml
-      - /home/valheim:/valheim_home:ro        # update_check.log (read-only)
+services:
+  valheim-discord-monitor:
+    volumes:
+      - /home/valheim:/valheim_home:ro        # update_check.log + world-settings.env (read-only)
       - /home/valheim/bot:/bot                # status.json + requests
 ```
 The whole home folder is mounted (read-only) rather than the log file alone because

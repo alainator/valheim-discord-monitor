@@ -27,3 +27,6 @@ maintenance_state.json
 # Status board message id (admin bot)
 status_board.json
 updater_state.json
+
+# Your machine-specific Compose settings (volumes etc.)
+docker-compose.override.yml
