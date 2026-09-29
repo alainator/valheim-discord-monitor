@@ -17,32 +17,43 @@ servers, because relayed players never register with Steam.
 Python 3.9+, no third-party packages for the core monitor. Optional extras: SFTP
 (`paramiko`) and the Discord admin bot (`discord.py`, see `requirements.txt`).
 
-On top of the Discord posts it can also:
-- **Alert you when someone is refused** by your ban or permitted list, and let you
-  **Permit** or **Ban** them with a button in Discord (self-hosted servers). See
-  [Join-attempt alerts & Discord admin bot](#join-attempt-alerts--discord-admin-bot).
-- Keep a **voice channel's name showing who's on** ("🟢 Valheim: 3 online"). See
-  [Status voice channel](#status-voice-channel).
-- **Raid alerts, session summaries, welcomes, milestones, a weekly recap, a live status
-  board and off-disk world backups.** See [Extras](#extras-raids-summaries-milestones-recap-board-backups).
-- Keep **play stats** in SQLite and publish a leaderboard page.
-- Show players' **Steam achievements** on that page.
+On top of the Discord posts it can also, with the optional **admin bot**:
+- **Alert you when someone is refused** by your ban or permitted list, with **Permit** /
+  **Ban** buttons ([join-attempt alerts](#join-attempt-alerts--discord-admin-bot)).
+- Show **who's online**: in a voice channel's name ([status
+  channel](#status-voice-channel)), and in a live message with the join code, uptime,
+  version, last save, backup and raid ([status board](#status-board)).
+- Answer **`/valheim join`** for anyone: the current join code, the address and how to
+  connect ([commands](#discord-commands)).
+- **Restart and update the server** from Discord with a countdown warning, and post when a
+  Valheim update is waiting or installed ([auto-updates](#auto-updates-and-restarts-from-discord)).
+- **Change world settings** (preset, modifiers, setkeys) from Discord, checked on the
+  server before anything is written ([world settings](#auto-updates-and-restarts-from-discord)).
+
+And without the bot:
+- **Raid alerts, version-mismatch alerts, session summaries, first-visit welcomes,
+  milestones and a weekly recap** ([extras](#extras-raids-summaries-milestones-recap-board-backups)).
+- **Copy Valheim's world backups to another disk** ([backup copies](#world-backup-copies)).
+- Keep **play stats** in SQLite and publish a leaderboard page, with players' **Steam
+  achievements**.
 - Run **unattended updates and nightly backups** on LOW.MS.
 
 **Running the Valheim server on your own Linux machine?** Start with the
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **Contents:**
-- Getting started: [Self-hosted quick start](#self-hosted-linux-server-quick-start) ·
+- **Getting started:** [Self-hosted quick start](#self-hosted-linux-server-quick-start) ·
   [Count mode](#count-mode-quick-start) · [Log mode](#log-mode)
-- Admin bot: [Join-attempt alerts & admin bot](#join-attempt-alerts--discord-admin-bot) ·
-  [Status voice channel](#status-voice-channel) · [Troubleshooting](#troubleshooting)
-- [Extras: raids, summaries, milestones, recap, board, backups](#extras-raids-summaries-milestones-recap-board-backups) ·
-  [Auto-updates & restarts from Discord](#auto-updates-and-restarts-from-discord)
-- Extras: [Stats page](#player-stats--public-web-page) ·
+- **Admin bot:** [Join alerts & setup](#join-attempt-alerts--discord-admin-bot) ·
+  [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
+  [Testing](#testing-it) · [Troubleshooting](#troubleshooting)
+- **Extras:** [Raids, summaries, milestones, recap](#extras-raids-summaries-milestones-recap-board-backups) ·
+  [Status board](#status-board) · [Backup copies](#world-backup-copies) ·
+  [Auto-updates, restarts & world settings](#auto-updates-and-restarts-from-discord)
+- **Stats & LOW.MS:** [Stats page](#player-stats--public-web-page) ·
   [Steam achievements](#steam-achievements) ·
   [Updates & backups (LOW.MS)](#unattended-updates--nightly-backups-lowms)
-- Reference: [Running it permanently](#running-it-permanently) · [Options](#options) ·
+- **Reference:** [Running it permanently](#running-it-permanently) · [Options](#options) ·
   [Server admin tips](#server-admin-tips) · [Development](#development) ·
   [About this fork](#about-this-fork)
 
@@ -68,7 +79,9 @@ if you enable the admin bot, edits the ban and permitted lists in the save dir.
    sudo systemctl daemon-reload && sudo systemctl restart valheimserver
    ```
    To check what your server actually uses: `systemctl cat valheimserver | grep ExecStart`.
-   If your `-savedir` or log path differs, change the two paths in `docker-compose.yml`.
+   If your `-savedir` or log path differs, remap it in `docker-compose.override.yml` with
+   the same container path, e.g. `- /srv/valheim/logs:/logs:ro`. Compose replaces a mount
+   when the override uses the same target.
 2. **Get the code and configure it:**
    ```bash
    git clone https://github.com/alainator/valheim-discord-monitor.git
@@ -92,6 +105,20 @@ if you enable the admin bot, edits the ban and permitted lists in the save dir.
    A healthy start logs `Monitoring file source for <your server>; posting [...]`,
    plus `; admin bot on` and `admin_bot: connected as …` if the bot is enabled.
 
+**Your own folders go in `docker-compose.override.yml`**, next to `docker-compose.yml`.
+Docker Compose merges it in automatically, and git ignores it, so `git pull` never
+conflicts with your changes. Leave `docker-compose.yml` as it comes from the repo. For
+example:
+```yaml
+services:
+  valheim-discord-monitor:
+    volumes:
+      - /mnt/backups/valheim:/backups           # backup copies
+      - /home/valheim:/valheim_home:ro          # updater log + world settings
+      - /home/valheim/bot:/bot                  # restart / settings requests
+```
+Check the result with `docker compose config | grep -E "source:|target:"`.
+
 **Updating:** `git pull && docker compose up -d --build`.
 
 **After editing `config.json` or `.env`:** `docker compose up -d --force-recreate`. The
@@ -104,6 +131,15 @@ monitor reads its settings only at start-up.
 sudo sh -c 'ls -la /home/valheim/valheim_save_data/*list.txt'
 ```
 The container runs as root, so it can read and edit those files anyway.
+
+**Next steps**, each optional:
+1. [Set up the admin bot](#setting-up-the-bot): refused-join alerts and `/valheim` commands.
+2. Add a [status voice channel](#status-voice-channel) and a [status board](#status-board).
+3. Turn on the [extras](#extras-raids-summaries-milestones-recap-board-backups): raids,
+   summaries, milestones, weekly recap. They're just names in `events`.
+4. [Copy world backups](#world-backup-copies) to another disk.
+5. Link your update script and world settings ([host/README.md](host/README.md)) for
+   `/valheim restart`, update posts and `/valheim modifier`.
 
 ## Count mode (quick start)
 
@@ -311,10 +347,9 @@ lists are doing their job. There are two ways to receive it:
   | **Ban** | Adds the ID to `bannedlist.txt` and removes it from `permittedlist.txt` |
   | **Ignore** | Closes the notice |
 
-  Only the Discord users and roles you list can press them. There are also slash
-  commands for IDs you already know: `/valheim permit`, `/valheim ban`,
-  `/valheim unban`, `/valheim unpermit`, `/valheim lists`. (`/valheim online` is open
-  to everyone; see [Extras](#extras-raids-summaries-milestones-recap-board-backups).)
+  Only the Discord users and roles you list can press them. For IDs you already know,
+  there are also slash commands (`/valheim permit`, `ban`, `unban`, `unpermit`,
+  `lists`). See [all Discord commands](#discord-commands).
 
   **Permit** never *starts* a permitted list. With an empty `permittedlist.txt`
   the server is open to everyone who isn't banned, and adding the first ID would lock
@@ -329,6 +364,34 @@ to match. Other platforms are written as the server printed them (`X_`, `S_`, `N
 the same player. Community docs say list edits apply without a restart
 (the next join attempt is checked against the file). If a change doesn't seem to take
 effect, `sudo systemctl restart valheimserver`.
+
+### Discord commands
+
+All commands are under `/valheim`. **Admin** commands only work for the users and roles
+in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visible to you.
+
+| Command | Who | What it does | Needs |
+|---|---|---|---|
+| `/valheim join` | Anyone | Join code, address, password (spoiler) and how to connect; only the asker sees it | The bot; `admin_bot.join` for the address |
+| `/valheim online` | Anyone | Who's on right now, and since when | The bot |
+| `/valheim permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
+| `/valheim ban <id>` | Admin | Ban, and remove from the permitted list | `save_dir` |
+| `/valheim unban <id>` / `unpermit <id>` | Admin | Remove from one list | `save_dir` |
+| `/valheim lists` | Admin | Show the permitted, banned and admin lists | `save_dir` |
+| `/valheim backups` | Admin | Newest backup copies, with size and age | [`backups`](#world-backup-copies) |
+| `/valheim update-check` | Admin | Check for a Valheim update now | [host helper](host/README.md) |
+| `/valheim restart [minutes] [reason]` | Admin | Restart (installs any waiting update); warns players at N/5/1 min, early if everyone leaves | [host helper](host/README.md) |
+| `/valheim restart-cancel` | Admin | Stop a restart countdown | — |
+| `/valheim settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
+| `/valheim modifier <name> <value>` | Admin | Change a modifier, e.g. `raids more`; `normal` resets it | world settings |
+| `/valheim preset <name>` | Admin | Change the preset; `default` removes it | world settings |
+| `/valheim setkey <key> on\|off` | Admin | Turn nomap, playerevents, passivemobs or nobuildcost on or off | world settings |
+
+Player IDs look like `V_76561198…` (Steam), `X_…`, `S_…` or `N_…`. World-setting changes
+apply at the next restart; the bot offers a "Restart in 5 min" button.
+
+**Buttons:** refused-join notices have **Permit / Ban / Ignore**, and world-setting
+confirmations have **Restart in 5 min**. They keep working after the bot restarts.
 
 ### Setting up the bot
 
@@ -480,11 +543,16 @@ won't rename a text channel: it logs a warning and skips it.
 | Status channel never changes; log says `no permission to rename the status channel` | The bot lacks **Manage Channels** on that channel | Add it in the channel's permissions (the bot can't rename a channel it can't manage) |
 | Status channel lags behind | Discord's limit of 2 renames per 10 minutes | Expected: it catches up within 5 minutes |
 | Status board never appears; log says `no permission to post in the status board channel` | Missing channel permissions | Give the bot View Channel, Send Messages, Embed Links and Read Message History there |
-| `backups.dest_dir … doesn't exist` | The backup folder isn't mounted | Add the volume in `docker-compose.yml` and create the folder on the host |
+| `backups.dest_dir … doesn't exist` | The backup folder isn't mounted | Add the volume in `docker-compose.override.yml` and create the folder on the host |
 | `The restart request wasn't picked up` | The host helper isn't installed or running | `systemctl status valheim-bot-request.path`; see [host/README.md](host/README.md) |
 | Raids, summaries etc. don't post | Their names aren't in `events` | Add them (see [Extras](#extras-raids-summaries-milestones-recap-board-backups)) and recreate the container |
 | "Couldn't edit the list files" | `save_dir` doesn't point at the mounted save dir | Check the volume in `docker-compose.yml` and `save_dir` in `config.json` |
 | `PyNaCl is not installed, voice will NOT be supported` | Harmless | Nothing: the bot doesn't use voice |
+| New commands missing after an update | Discord caches the command list | Press Ctrl+R in Discord. If they're still missing, check the log for `admin_bot stopped` |
+| `/valheim join` says the join code isn't known | Nobody has joined since the server's last restart, so the new code isn't in the log yet | It appears at the next join. Meanwhile, players can use the address, or ask someone in-game (pause menu) |
+| World setting: "the settings file didn't change within 20 s" | The host helper isn't updated, or `/valheim_home` isn't mounted | Re-run the two `install` commands in [host/README.md](host/README.md#one-time-setup); check the mount with `docker compose config` |
+| No backups copied | `source_dir` isn't Valheim's `worlds_local`, or `dest_dir` isn't mounted | Check both, then see what the log says after `Backup created` (`Backups: copied N backup(s)`) |
+| Times in the log are off by hours | The container runs in UTC | Set `TZ=America/Los_Angeles` (etc.) in `.env` and recreate |
 
 To check which token the container actually has without printing it:
 ```bash
@@ -579,8 +647,9 @@ the log). On Valheim 1.0 each backup is a **folder** in `worlds_local/`, e.g.
 servers made `.db` + `.fwl` file pairs instead. Both kinds are copied. The monitor can copy those backups to **another
 disk**, so a failure of the server's disk doesn't take the backups with it:
 
-1. Mount a folder on the other disk in `docker-compose.yml`, e.g.
-   `- /mnt/backups/valheim:/backups`. The folder must exist; the monitor won't create it.
+1. Mount a folder on the other disk in `docker-compose.override.yml`, e.g.
+   `- /mnt/backups/valheim:/backups` (see the [quick start](#self-hosted-linux-server-quick-start)).
+   The folder must exist; the monitor won't create it.
 2. Add:
    ```json
    "backups": {
@@ -929,10 +998,13 @@ This is a fork of
 Added here:
 - **Admin bot:** refused-join alerts with Permit / Ban / Ignore buttons, `/valheim`
   commands, and support for Valheim 1.0's `V_…` player IDs.
-- **Status voice channel** showing who's online.
+- **Status voice channel** and a live **status board**, filled in from the existing log
+  at start-up.
+- **`/valheim join`:** the current join code (tracked across restarts), address and how
+  to connect.
 - **Extras:** raid alerts, version-mismatch alerts, session summaries, first-visit
-  welcomes, milestones, a weekly recap, a live status board, `/valheim online`, and world
-  backup copies to another disk.
+  welcomes, milestones, a weekly recap, `/valheim online`, and copies of Valheim's world
+  backups to another disk (including Valheim 1.0's backup folders).
 - **Auto-update integration:** update posts, a reliable player count for the host's
   update script, and `/valheim restart` with a countdown (`host/`).
 - **World settings from Discord:** preset, modifiers and setkeys, validated on the host.
