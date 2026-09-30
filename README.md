@@ -36,8 +36,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   server before anything is written ([world settings](#auto-updates-and-restarts-from-discord)).
 - **Community:** `/valheim stats` and `/valheim top`, DMs when friends come online, an
   "In Valheim" role, weekly **title roles** for the leaderboard leaders (Heimdall, Hel,
-  Sleipnir, Thor, Bragi), an **Odin** role for the server owner, game-night signups with
-  reminders, a world map link, and a smoother first join
+  Sleipnir, Thor, Bragi), an **Odin** role for the server owner, game nights with a
+  planning thread, reminders and **time polls**, a world map link, and a smoother first join
   ([players & community](#players--community), [roles & names](#roles--names)).
 - **Server health:** warnings before the save disk fills up or saves get slow, and an
   optional daily restart while nobody's on ([server health](#server-health)).
@@ -1142,6 +1142,10 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | A refused-join notice has no "Who this is" | The bot hasn't seen that account join before (platform IDs are recorded from this version on), and nobody used `/valheim request-access` for that name | Nothing to fix: it fills in once the player has joined, or has asked with `request-access` |
 | A refused or out-of-date player wasn't DMed | The bot doesn't know their Discord account, they're banned, they were DMed in the last 30 minutes, or their DMs are closed | Have them `/valheim request-access <character>`, or `/valheim link` once they're in |
 | ☀️ Day never changes | Valheim only logs the day when everyone sleeps through a night | It updates after the next night slept through. Check with `sudo grep -m3 "day:" /home/valheim/logs/valheim_console.log` |
+| A time poll closed but no signup appeared | Nobody voted (the bot says so in the channel), or the bot was offline when it closed | It's picked up within a minute of the bot coming back; a poll with no votes plans nothing |
+| No thread on a game-night signup / no reactions on Huginn's posts / the guide isn't pinned | Missing Create Public Threads, Add Reactions or Pin Messages (in that channel too) | See [bot permissions](#bot-permissions); the log says `couldn't open a thread` / `couldn't pin` |
+| The weekly recap has no chart | Pillow isn't installed (an old image), or nobody played that week | `docker compose up -d --build --force-recreate` |
+| Handled refused-join notices aren't deleted | The bot lacks Manage Messages in the admin channel, or `tidy_notices_hours` is 0 | Grant it in the channel's permissions |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
 | `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |
 | No backups copied | `source_dir` isn't Valheim's `worlds_local`, or `dest_dir` isn't mounted | Check both, then see what the log says after `Backup created` (`Backups: copied N backup(s)`) |
@@ -1177,7 +1181,7 @@ switched on by adding their name to `events` in `config.json`:
 | `session_summary` | Replaces the plain leave message: "**Ingrid** left Alheim after 2h 14m and died 3 times." | the player's join and leave |
 | `welcome` | Replaces the join message on someone's **first ever** visit: "🎉 **Ingrid** arrived for the first time. Welcome, viking!" | stats database |
 | `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths | stats database |
-| `weekly_recap` | 📜 A weekly embed: top players by time, most deaths, raids, new vikings, total hours, peak online, and exploration ("12 new areas discovered: 3 sunken crypts, 1 fuling village") | stats database, `Placed location` lines |
+| `weekly_recap` | 📜 A weekly embed with a **chart of hours played per day**: top players by time, most deaths, raids, new vikings, total hours, peak online, and exploration ("12 new areas discovered: 3 sunken crypts, 1 fuling village") | stats database, `Placed location` lines |
 | `update` | ✅ "Valheim updated: l-1.0.16 → l-1.0.17" when the server comes back on a new version, plus the [auto-updater](#auto-updates-and-restarts-from-discord)'s "update available" and "installing" posts | `Valheim version:` at boot |
 
 `welcome`, `milestone` and `weekly_recap` need the stats database (`database.path`).
@@ -1706,9 +1710,12 @@ Added here:
   update script, and `/valheim restart` with a countdown (`host/`).
 - **World settings from Discord:** preset, modifiers and setkeys, validated on the host.
 - **Community:** `/valheim stats`, `top`, `notify` (DMs), `link` with an "In Valheim" role,
-  `request-access`, `plan` (game nights with RSVPs and reminders), `map` (reads the
-  seed from Valheim 1.0 world folders), weekly title roles (`titles`), and the
-  bot-created "In Valheim" and Odin (owner) roles.
+  `request-access`, `plan` (game nights with RSVPs, a planning thread, reminders and time
+  polls), `map` (reads the seed from Valheim 1.0 world folders), weekly title roles
+  (`titles`), the bot-created "In Valheim" and Odin (owner) roles, and optional nicknames
+  on link.
+- **Polish:** reactions on Huginn's posts, a chart in the weekly recap, a pinned channel
+  guide, the AFK channel set by `/valheim setup`, and handled admin notices tidied away.
 - **Steam achievements in Discord:** unlock posts, achievements in `/valheim stats`, a
   "Most achievements" leaderboard, and the Bragi title.
 - **Server health:** low-disk and slow-save warnings, an optional daily restart, and
