@@ -57,6 +57,8 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **[Bot permissions](#bot-permissions):** the full list, with what each one is for, the
+  ones to leave off, and ready-made invite links.
 - **The bot handles Huginn's webhook:** `/valheim setup` moves it into #huginns-watch, or
   creates it on a fresh install, and the bot warns you at start-up if it posts into the
   private admin channel ([server setup](#server-setup-valheim-setup)).
@@ -561,17 +563,60 @@ This takes about five minutes in Discord's developer portal.
 **2. Invite it.**
 1. Open **OAuth2** → **URL Generator**.
 2. Under scopes, tick **`bot`** and **`applications.commands`**.
-3. Under bot permissions, tick **View Channels**, **Send Messages**, **Embed Links** and
-   **Read Message History**. Also tick:
-   - **Manage Channels**, for the [status voice channel](#status-voice-channel) and the
-     [stat channels](#stat-channels);
-   - **Manage Roles**, for the ["In Valheim", Odin and title roles](#roles--names);
-   - **Manage Events**, only if game nights should create Discord Events;
-   - **Manage Server**, only if `/valheim setup` should move Discord's join messages
-     ("Yay you made it") out of a private channel;
-   - **Manage Webhooks**, so `/valheim setup` can create Huginn's webhook or move it to
-     #huginns-watch.
+3. Under bot permissions, tick the ones in [Bot permissions](#bot-permissions) below: at
+   least the "needed now" list, or everything in both lists so future features work
+   without re-inviting.
 4. Open the generated URL, pick your Discord server, and click **Authorize**.
+
+Or skip the ticking and use a ready-made link. Replace `YOUR_APP_ID` with the
+**Application ID** from the developer portal's General Information page:
+- Everything (needed now plus future features):
+  `https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot+applications.commands&permissions=2832677918338160`
+- Only what's needed now:
+  `https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot+applications.commands&permissions=9395326000`
+
+Opening an invite link again for a bot that's already in your server just updates its
+permissions; it doesn't add a second bot.
+
+#### Bot permissions
+
+**Needed now**, for every current feature:
+
+| Permission | Used for |
+|---|---|
+| View Channels | Seeing the channels it works in |
+| Send Messages | Admin notices, game nights, the channel guide, the titles post |
+| Embed Links | Every notice and stat post is an embed |
+| Read Message History | Finding and editing its own earlier messages (guide, signups, status board) |
+| Manage Channels | [Stat channels](#stat-channels), the [status channel](#status-voice-channel), [`/valheim setup`](#server-setup-valheim-setup) |
+| Manage Roles | ["In Valheim", Odin and the title roles](#roles--names); channel permissions in `/valheim setup` |
+| Manage Webhooks | Creating Huginn's webhook, or moving it to #huginns-watch |
+| Manage Server | Moving Discord's "Yay you made it" join messages (optional) |
+| Manage Events | Discord Events for game nights, with `lfg.discord_event` (optional) |
+
+**For features that may come later** (harmless to grant now):
+
+| Permission | Would allow |
+|---|---|
+| Attach Files | Images: a world-map snapshot, stats charts, a recap card |
+| Add Reactions, Use External Emojis | Reacting to posts, themed emoji |
+| Create Polls | Voting on game-night times or the next boss |
+| Create Public Threads, Send Messages in Threads, Manage Threads | A thread per game night or boss attempt |
+| Manage Messages, Pin Messages | Cleaning up old notices, pinning the channel guide |
+| Create Events | The newer half of the events permission |
+| Connect, Move Members | Moving idle voice users to 🎣 Fishing Hut (AFK) |
+| Manage Nicknames | Setting a member's nickname to their character on `/valheim link` |
+
+**Don't grant:**
+- **Administrator.** It overrides everything, and a leaked token would mean full control
+  of your server.
+- **Kick Members, Ban Members, Moderate Members.** The bot bans from the *game*, not
+  Discord.
+- **Mention Everyone.** The bot never pings everyone.
+
+After inviting, keep the bot's role **above** the roles it hands out (In Valheim, Odin,
+the titles) in Server Settings → Roles. A private channel's own permissions override the
+server-wide ones, so allow the bot there too.
 
 **3. Make a private admin channel.** For example `#valheim-admin`, with Private Channel on.
 Then channel settings → **Permissions** → add the bot with View Channel, Send Messages
