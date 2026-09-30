@@ -63,6 +63,34 @@ class LogoutDetectionTest(unittest.TestCase):
         self.assertEqual(got, [("logout", "Bjorn")])
         warn.assert_not_called()
 
+    def test_restart_remembers_who_is_online(self):
+        """What happened on 09/30: players joined, the monitor was restarted, and their
+        later "abandoned zdo" lines (which only carry the owner id learned at spawn) were
+        no longer recognised, so they stayed "In Valheim"."""
+        import json
+        before = vdm.ValheimLogParser()
+        self.feed(before, join("7BF1CB302F4DF6B4", "Frankeem", 2107543341, 1)
+                  + join("D30A9C442A56F3EC", "Hiemdalbars", -841609285, 2))
+        saved = json.loads(json.dumps(before.state_dict()))      # through the JSON file
+        after = vdm.ValheimLogParser()
+        after.load_state(saved)
+        got = self.feed(after, [
+            "09/30/2026 11:10:39: Destroying abandoned non persistent zdo 2107543341:5863 owner 2107543341",
+            "ZPlayFabSocket::Dispose. State: CLOSED",
+            '09/30/2026 11:10:39: Player connection lost server "S" that has join code 183427, now 1 player(s)',
+            "09/30/2026 11:34:05: Destroying abandoned non persistent zdo -841609285:1 owner -841609285",
+            '09/30/2026 11:34:05: Player connection lost server "S" that has join code 183427, now 0 player(s)'])
+        self.assertEqual(got, [("logout", "Frankeem"), ("logout", "Hiemdalbars")])
+        # Without the saved state, neither leave is recognised.
+        blank = vdm.ValheimLogParser()
+        self.assertEqual(self.feed(blank, ["09/30/2026 11:10:39: Destroying abandoned non persistent zdo "
+                                           "2107543341:5863 owner 2107543341"]), [])
+
+    def test_bad_saved_state_is_ignored(self):
+        p = vdm.ValheimLogParser()
+        p.load_state({"online": 5})
+        self.assertEqual(p.s.online, {})
+
 
 if __name__ == "__main__":
     unittest.main()

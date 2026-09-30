@@ -786,6 +786,9 @@ These need the stats database (`database.path`), which the bot and the monitor s
   - **It follows who's online.** It's given at login and taken at logout, and every 5
     minutes the bot also checks everyone it gave the role to. Anyone the monitor no longer
     sees in the game loses it, so a failed removal or a bot restart can't leave it stuck.
+  - **Restarts:** the monitor saves who's online (`parser_state.json`, next to
+    `monitor_state.json`), so players who leave while it's being restarted or rebuilt are
+    still recognised and lose the role.
   - **Quitting straight to desktop:** on crossplay servers Valheim doesn't always log *who*
     left, only that the player count dropped. The monitor then can't tell who to remove
     until the server is empty. When that happens it writes the surrounding server log lines
@@ -1002,7 +1005,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | Stat channels don't appear; log says `can't create the stat channels` | The bot lacks Manage Channels | Give its role Manage Channels (Server Settings → Roles) |
 | A stat channel shows an old value | Discord's limit of 2 renames per channel per 10 minutes | Expected: it catches up within 5 minutes |
 | `can't give the owner role` | The bot lacks Manage Roles, or the Odin role was moved above the bot's role | Give it Manage Roles and keep the bot's role above Odin |
-| "In Valheim" stays on someone who quit | Valheim didn't log who left (quit to desktop on crossplay) | It's removed once the server is empty. Check `docker compose logs \| grep "didn't say who"` and share those lines in an issue |
+| "In Valheim" stays on someone who quit | Before this version: they left while the monitor was restarting. Otherwise Valheim didn't log who left | Update; the bot's 5-minute check clears it. If it still happens, check `docker compose logs \| grep "didn't say who"` and share those lines in an issue |
 | `/valheim setup` says some changes failed | The bot lacks Manage Channels or Manage Roles, or a channel's permissions deny it | Give its role both permissions (Server Settings → Roles), then run `/valheim setup apply` again; it only redoes what's missing |
 | `/valheim setup` picked the wrong channel for a slot | It matched by name | Run `/valheim setup undo`, rename that channel so it doesn't match (or give the right one the slot's name, e.g. `rules`), then preview and apply again |
 | `can't change the In-Valheim role` | The bot lacks Manage Roles, or its role is below the "In Valheim" role | Give it Manage Roles and drag the bot's role above that role in Server Settings → Roles |

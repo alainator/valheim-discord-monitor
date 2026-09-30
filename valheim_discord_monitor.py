@@ -175,6 +175,28 @@ class ValheimLogParser:
         self.watch: Optional[dict] = None
         self.last_diag = 0.0
 
+    # Who's online and which owner/connection id is whose, saved between monitor restarts.
+    # Without it, a player who leaves after a restart can't be recognised (their "abandoned
+    # zdo" line only carries the owner id learned when they spawned) and stays "online".
+    def state_dict(self) -> dict:
+        s = self.s
+        return {"online": s.online, "owner_to_name": s.owner_to_name, "dead": sorted(s.dead),
+                "pending_ids": s.pending_ids, "id_to_name": s.id_to_name, "id_to_steam": s.id_to_steam,
+                "server_count": s.server_count, "down": s.down, "join_code": s.join_code}
+
+    def load_state(self, d: dict) -> None:
+        try:
+            self.s = ParserState(online=dict(d.get("online") or {}),
+                                 owner_to_name=dict(d.get("owner_to_name") or {}),
+                                 dead=set(d.get("dead") or ()), pending_ids=list(d.get("pending_ids") or ()),
+                                 id_to_name=dict(d.get("id_to_name") or {}),
+                                 id_to_steam=dict(d.get("id_to_steam") or {}),
+                                 server_count=d.get("server_count"), down=bool(d.get("down")),
+                                 join_code=d.get("join_code"))
+        except (TypeError, ValueError) as e:
+            log.warning("Ignoring the saved parser state: %s", e)
+            self.s = ParserState()
+
     def _count(self) -> dict:
         return {"count": self.s.server_count} if self.s.server_count is not None else {}
 
@@ -1322,6 +1344,33 @@ def main():
     else:
         tailer = OffsetTailer(source, cfg.get("state_file", "monitor_state.json"), start_at_end=not args.from_start)
     parser = ValheimLogParser()
+    # Restore who's online from before a restart (see ValheimLogParser.state_dict).
+    parser_state_path = cfg.get("parser_state_file") or os.path.join(
+        os.path.dirname(cfg.get("state_file", "monitor_state.json")) or ".", "parser_state.json")
+    try:
+        with open(parser_state_path) as f:
+            parser.load_state(json.load(f))
+        if parser.s.online:
+            log.info("Restored %d player(s) online from before the restart: %s", len(parser.s.online),
+                     ", ".join(sorted(parser.s.online)))
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as e:
+        log.warning("Couldn't read %s: %s", parser_state_path, e)
+    saved_parser_state = json.dumps(parser.state_dict(), sort_keys=True)
+
+    def save_parser_state() -> None:
+        nonlocal saved_parser_state
+        now_state = json.dumps(parser.state_dict(), sort_keys=True)
+        if now_state == saved_parser_state:
+            return
+        try:
+            with open(parser_state_path + ".tmp", "w") as f:
+                f.write(now_state)
+            os.replace(parser_state_path + ".tmp", parser_state_path)
+            saved_parser_state = now_state
+        except OSError as e:
+            log.warning("Couldn't save %s: %s", parser_state_path, e)
     extra_events = {"raid", "version_mismatch", "session_summary", "welcome", "milestone", "weekly_recap",
                     "update", "achievement"}
     log_events = {"login", "logout", "death", "respawn", "server_up",
@@ -1376,6 +1425,10 @@ def main():
     import stats_db
     live = extras.LiveState()
     prime_live_state(live, source)
+    for name in parser.s.online:              # restored from before a restart; join time unknown
+        live.online.setdefault(name, None)
+    if parser.s.server_count is not None and parser.s.online:
+        live.count = parser.s.server_count
     needs_db = events & {"welcome", "milestone", "weekly_recap"}
     if needs_db and not store:
         log.warning("%s need the stats database (database.path); they're off", ", ".join(sorted(needs_db)))
@@ -1542,6 +1595,7 @@ def main():
                     if ev.kind == "server_online":
                         booted = True
             backoff = interval
+            save_parser_state()
             now = time.time()
             count = parser.s.server_count
             if count is None and (parser.s.online or booted):
