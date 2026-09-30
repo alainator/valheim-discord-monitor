@@ -30,7 +30,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
 - **Change world settings** (preset, modifiers, setkeys) from Discord, checked on the
   server before anything is written ([world settings](#auto-updates-and-restarts-from-discord)).
 - **Community:** `/valheim stats` and `/valheim top`, DMs when friends come online, an
-  "In Valheim" role, game-night signups with reminders, a world map link, and a smoother
+  "In Valheim" role, weekly **title roles** for the leaderboard leaders (Heimdall, Hel,
+  Huginn, Thor), game-night signups with reminders, a world map link, and a smoother
   first join ([players & community](#players--community)).
 - **Server health:** warnings before the save disk fills up or saves get slow, and an
   optional daily restart while nobody's on ([server health](#server-health)).
@@ -47,6 +48,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Title roles:** the leader of each `/valheim top` board gets a Norse role (Heimdall,
+  Hel, Huginn, Thor), reassigned weekly. Turn on with `"titles": {"enabled": true}`
+  ([title roles](#title-roles)).
 - **`/valheim map` works with Valheim 1.0 worlds.** It reads the seed from the world
   folder (`worlds_local/<world>/_main.<N>.fwl2`); set `admin_bot.map.seed` if it can't
   ([players & community](#players--community)).
@@ -68,7 +72,8 @@ And without the bot:
   [Count mode](#count-mode-quick-start) · [Log mode](#log-mode)
 - **Admin bot:** [Join alerts & setup](#join-attempt-alerts--discord-admin-bot) ·
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
-  [Players & community](#players--community) · [Testing](#testing-it) ·
+  [Players & community](#players--community) · [Title roles](#title-roles) ·
+  [Testing](#testing-it) ·
   [Troubleshooting](#troubleshooting)
 - **Extras:** [Raids, summaries, milestones, recap](#extras-raids-summaries-milestones-recap-board-backups) ·
   [Status board](#status-board) · [Backup copies](#world-backup-copies) ·
@@ -435,6 +440,7 @@ in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visib
 | `/valheim online` | Anyone | Who's on right now, and since when | The bot |
 | `/valheim stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen. No name = your linked character | Stats database |
 | `/valheim top [category]` | Anyone | Leaderboard: time played, deaths, visits or longest session | Stats database |
+| `/valheim titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
 | `/valheim notify <when> [player]` | Anyone | DM me when the first player joins an empty server, or when a given character joins; `off` / `list` | Stats database |
 | `/valheim link <character>` / `unlink` | Anyone | Link your Discord account to your character (stats, role, mentions) | Stats database |
 | `/valheim request-access <character>` | Anyone | New player: "I'll join as …". The admins' refused-join notice then says who it is | Stats database |
@@ -591,6 +597,7 @@ These need the stats database (`database.path`), which the bot and the monitor s
 - **"In Valheim" role.** Set `admin_bot.online_role_id` to a role's ID, and linked players
   get it while they're in the game, so the member list shows who's playing. The bot needs
   **Manage Roles**, and its own role must sit **above** that role in Server Settings → Roles.
+- **Title roles.** See [below](#title-roles).
 - **Notifications (DMs).**
   - `/valheim notify first` DMs you when someone joins an empty server.
   - `/valheim notify follow Ingrid` DMs you whenever Ingrid joins.
@@ -622,9 +629,66 @@ These need the stats database (`database.path`), which the bot and the monitor s
 "admin_bot": {
   "online_role_id": "123456789012345678",
   "lfg": { "reminder_minutes": 15, "discord_event": false },
-  "map": { "enabled": true }
+  "map": { "enabled": true },
+  "titles": { "enabled": true }
 }
 ```
+
+### Title roles
+
+The leader of each `/valheim top` board gets a role named after a figure from Norse
+mythology:
+
+| Role | Leaderboard | Why |
+|---|---|---|
+| **Heimdall** | Most time played | The watchman of Bifröst never sleeps and never leaves his post |
+| **Hel** | Most deaths | Ruler of the realm of the dead: everyone who dies ends up with her |
+| **Huginn** | Most visits | Odin's raven flies out over the world every day and always comes back |
+| **Thor** | Longest single session | Drank from a horn linked to the sea and lowered the ocean |
+
+**How it works:**
+- **Weekly.** Every week (default Sunday 18:00, container time zone) the bot looks at the
+  leaderboards again. If a title changes hands, it takes the role from the old holder,
+  gives it to the new one, and posts a "Titles of the realm" message saying who holds what.
+  Nothing is posted in a week where nothing changed. The first run happens right after
+  you turn it on.
+- **Linked players only.** A role goes to the Discord account linked to the leading
+  character (`/valheim link`). If the leader isn't linked, the title is theirs but the role
+  waits: the post says so, and the role is given as soon as they link.
+- **Ties** keep the current holder, so a title doesn't flip back and forth.
+- **All time or weekly.** By default the titles follow the same all-time numbers as
+  `/valheim top`. With `"period": "week"`, only the last 7 days count, so the titles move
+  around more.
+- **`/valheim titles`** shows the current holders. Admins can run `/valheim titles
+  refresh:True` to reassign them right away.
+
+**Setup:**
+1. Add `"titles": { "enabled": true }` to the `admin_bot` block. It needs `guild_id` and the
+   stats database.
+2. The bot needs **Manage Roles**. It creates the four roles itself the first time it gives
+   them out. New roles go at the bottom of the role list, below the bot's own role, so it can
+   manage them.
+3. `docker compose up -d --force-recreate`.
+
+You can rename, recolour or move the roles in Server Settings → Roles; the bot remembers
+them by ID. Turn on **Display role members separately** on a title role to show its holder
+at the top of the member list. Options:
+
+```json
+"titles": {
+  "enabled": true,
+  "period": "all",
+  "day": "sunday",
+  "hour": 18,
+  "channel_id": "",
+  "roles": { "time": "", "deaths": "", "sessions": "", "longest": "" }
+}
+```
+- **`period`:** `all` (default) or `week`.
+- **`day` / `hour`:** when to reassign.
+- **`channel_id`:** where to post the changes. Empty posts through the webhook, to the same
+  channel as logins and deaths.
+- **`roles`:** use roles you already have instead of the bot creating them (role IDs).
 
 ### Testing it
 
@@ -670,6 +734,8 @@ These need the stats database (`database.path`), which the bot and the monitor s
 | New commands missing after an update | Discord caches the command list | Press Ctrl+R in Discord. If they're still missing, check the log for `admin_bot stopped` |
 | `/valheim join` says the join code isn't known | Nobody has joined since the server's last restart, so the new code isn't in the log yet | It appears at the next join. Meanwhile, players can use the address, or ask someone in-game (pause menu) |
 | World setting: "the settings file didn't change within 20 s" | The host helper isn't updated, or `/valheim_home` isn't mounted | Re-run the two `install` commands in [host/README.md](host/README.md#one-time-setup); check the mount with `docker compose config` |
+| `can't give the Hel title role` (or another title) | The bot lacks Manage Roles, or a title role was moved above the bot's role | Give it Manage Roles and keep the bot's role above the title roles |
+| `/valheim titles` says title roles are off | `titles.enabled` isn't true, or `guild_id` / the stats database is missing (the log says which) | Fix the config and recreate the container |
 | `can't change the In-Valheim role` | The bot lacks Manage Roles, or its role is below the "In Valheim" role | Give it Manage Roles and drag the bot's role above that role in Server Settings → Roles |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
 | `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |
@@ -1077,6 +1143,11 @@ or run it in a terminal.
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
 | `admin_bot.map.seed` | "" | Use this seed instead of reading it from the world file. |
+| `admin_bot.titles.enabled` | false | Weekly title roles for the `/valheim top` leaders. |
+| `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |
+| `admin_bot.titles.day` / `hour` | sunday / 18 | When to reassign the titles (container time zone). |
+| `admin_bot.titles.channel_id` | — | Where to post title changes; empty = the webhook channel. |
+| `admin_bot.titles.roles` | — | Existing role IDs per category (`time`, `deaths`, `sessions`, `longest`); otherwise the bot creates them. |
 | `health.low_disk_gb` | 10 | Warn when the save disk has less free space than this. |
 | `health.slow_save_seconds` | 5 | Warn when a world save takes longer than this. |
 | `daily_restart.time` / `window_minutes` | — / 120 | Restart once a day in this window while nobody's on (needs the host helper). |
@@ -1167,8 +1238,8 @@ Added here:
   update script, and `/valheim restart` with a countdown (`host/`).
 - **World settings from Discord:** preset, modifiers and setkeys, validated on the host.
 - **Community:** `/valheim stats`, `top`, `notify` (DMs), `link` with an "In Valheim" role,
-  `request-access`, `plan` (game nights with RSVPs and reminders), and `map` (reads the
-  seed from Valheim 1.0 world folders).
+  `request-access`, `plan` (game nights with RSVPs and reminders), `map` (reads the
+  seed from Valheim 1.0 world folders), and weekly title roles (`titles`).
 - **Server health:** low-disk and slow-save warnings, an optional daily restart, and
   exploration in the weekly recap.
 - **Docker setup:** `Dockerfile`, `docker-compose.yml`, `.env.example` and a self-hosted

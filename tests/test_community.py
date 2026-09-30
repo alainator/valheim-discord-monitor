@@ -109,6 +109,48 @@ class WhenTest(unittest.TestCase):
                 self.at(bad)
 
 
+class TitlesTest(DB):
+    def play(self, player, start, minutes):
+        self.st.login(player, start)
+        self.st.logout(player, start + minutes * 60)
+
+    def test_leaders_and_ties(self):
+        self.play("Ingrid", 1000, 120)            # most time, longest
+        self.play("Bjorn", 10000, 30)
+        self.play("Bjorn", 20000, 30)
+        self.play("Bjorn", 30000, 30)             # most visits
+        for t in (1100, 1200):
+            self.st.death("Bjorn", t)
+        self.st.death("Ingrid", 1300)
+        lead = community.title_leaders(self.c)
+        self.assertEqual({k: v["player"] for k, v in lead.items()},
+                         {"time": "Ingrid", "deaths": "Bjorn", "sessions": "Bjorn", "longest": "Ingrid"})
+        self.assertEqual(lead["time"]["v"], 7200)
+        # A tie keeps the current holder instead of flipping to the first name.
+        self.st.death("Ingrid", 1400)
+        community.set_title_holder(self.c, "deaths", "Ingrid", None)
+        self.assertEqual(community.title_leaders(self.c)["deaths"]["player"], "Ingrid")
+        community.set_title_holder(self.c, "deaths", "Nobody", None)
+        self.assertEqual(community.title_leaders(self.c)["deaths"]["player"], "Bjorn")
+
+    def test_week_period_and_empty(self):
+        self.assertEqual(community.title_leaders(self.c), dict.fromkeys(community.TITLES))
+        self.play("Old", 1000, 600)
+        self.play("New", 900000, 60)
+        self.assertEqual(community.title_leaders(self.c)["time"]["player"], "Old")
+        self.assertEqual(community.title_leaders(self.c, since=800000)["time"]["player"], "New")
+        self.assertEqual(community.title_value(self.c, "time", "old"), 36000)
+
+    def test_render(self):
+        e = community.render_titles({"time": {"player": "Ingrid", "v": 7200, "user_id": "42"},
+                                     "deaths": {"player": "Bjorn", "v": 3, "user_id": None},
+                                     "sessions": None, "longest": None}, {"time"})
+        self.assertIn("**Heimdall** 🆕: <@42> (Ingrid), 2h", e["description"])
+        self.assertIn("/valheim link Bjorn", e["description"])
+        self.assertIn("**Huginn**: nobody yet", e["description"])
+        self.assertIn("all time", e["footer"]["text"])
+
+
 class SeedTest(unittest.TestCase):
     def fwl(self, path, name, seed):
         def s(x):

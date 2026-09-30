@@ -57,6 +57,12 @@
     },
     "map": {
       "enabled": true
+    },
+    "titles": {
+      "enabled": false,
+      "period": "all",
+      "day": "sunday",
+      "hour": 18
     }
   },
   "steam": {
