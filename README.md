@@ -19,7 +19,9 @@ Python 3.9+, no third-party packages for the core monitor. Optional extras: SFTP
 
 On top of the Discord posts it can also, with the optional **admin bot**:
 - **Alert you when someone is refused** by your ban or permitted list, with **Permit** /
-  **Ban** buttons ([join-attempt alerts](#join-attempt-alerts--discord-admin-bot)).
+  **Ban** buttons and who the player is (their Discord member and other characters). The
+  player gets a DM explaining why, and so does anyone on the wrong game version
+  ([join-attempt alerts](#join-attempt-alerts--discord-admin-bot)).
 - **Organise your Discord** into Valheim-themed channels with one command, previewed first
   and undoable ([server setup](#server-setup-valheim-setup)).
 - Show **who's online** and the server's numbers in locked voice channels at the top of
@@ -1044,6 +1046,9 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/valheim setup` says some changes failed | The bot lacks Manage Channels or Manage Roles, or a channel's permissions deny it | Give its role both permissions (Server Settings → Roles), then run `/valheim setup apply` again; it only redoes what's missing |
 | `/valheim setup` picked the wrong channel for a slot | It matched by name | Run `/valheim setup undo`, rename that channel so it doesn't match (or give the right one the slot's name, e.g. `rules`), then preview and apply again |
 | `can't change the In-Valheim role` | The bot lacks Manage Roles, or its role is below the "In Valheim" role | Give it Manage Roles and drag the bot's role above that role in Server Settings → Roles |
+| A refused-join notice has no "Who this is" | The bot hasn't seen that account join before (platform IDs are recorded from this version on), and nobody used `/valheim request-access` for that name | Nothing to fix: it fills in once the player has joined, or has asked with `request-access` |
+| A refused or out-of-date player wasn't DMed | The bot doesn't know their Discord account, they're banned, they were DMed in the last 30 minutes, or their DMs are closed | Have them `/valheim request-access <character>`, or `/valheim link` once they're in |
+| ☀️ Day never changes | Valheim only logs the day when everyone sleeps through a night | It updates after the next night slept through. Check with `sudo grep -m3 "day:" /home/valheim/logs/valheim_console.log` |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
 | `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |
 | No backups copied | `source_dir` isn't Valheim's `worlds_local`, or `dest_dir` isn't mounted | Check both, then see what the log says after `Backup created` (`Backups: copied N backup(s)`) |
@@ -1582,8 +1587,9 @@ python valheim_discord_monitor.py --config config.example.json --replay sample_c
 This is a fork of
 [justin7jones/valheim-discord-monitor](https://github.com/justin7jones/valheim-discord-monitor).
 Added here:
-- **Admin bot:** refused-join alerts with Permit / Ban / Ignore buttons, `/valheim`
-  commands, and support for Valheim 1.0's `V_…` player IDs.
+- **Admin bot:** refused-join alerts with Permit / Ban / Ignore buttons and who the player
+  is, DMs telling refused or out-of-date players why, `/valheim` commands, and support for
+  Valheim 1.0's `V_…` player IDs on every platform.
 - **Status voice channel**, bot-created **stat channels**, and a live **status board**,
   filled in from the existing log at start-up.
 - **`/valheim setup`:** organises a Discord server into themed channels, with preview and
