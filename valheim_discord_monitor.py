@@ -510,6 +510,7 @@ class Discord:
     def __init__(self, webhook_url: str, username: str = "Valheim", show_count: bool = True,
                  use_embeds: bool = True, messages: Optional[dict] = None):
         self.url = webhook_url
+        self.on_posted = None            # callable(kind, channel_id, message_id), set by the admin bot
         self.username = username
         self.show_count = show_count
         self.use_embeds = use_embeds
@@ -542,27 +543,48 @@ class Discord:
             # an embed never notify, so the ping goes in the message text.)
             payload["content"] = (payload.get("content", "") + f" <@{uid}>").strip()
             payload["allowed_mentions"] = {"parse": [], "users": [str(uid)]}
-        self.send(payload)
+        self.send(payload, kind=ev.kind)
 
-    def post_embed(self, kind: str, embed: dict, event_filter: set) -> None:
-        """Post a ready-made embed (the weekly recap)."""
+    def post_embed(self, kind: str, embed: dict, event_filter: set, file: Optional[tuple] = None) -> None:
+        """Post a ready-made embed (the weekly recap), optionally with an attached file
+        (name, bytes) that the embed can show as attachment://name."""
         if kind not in event_filter:
             return
         embed = {"color": self.COLORS.get(kind, 0), "timestamp": datetime.now(timezone.utc).isoformat(), **embed}
-        self.send({"username": self.username, "embeds": [embed]})
+        self.send({"username": self.username, "embeds": [embed]}, kind=kind, file=file)
 
-    def send(self, payload: dict) -> None:
+    def send(self, payload: dict, kind: Optional[str] = None, file: Optional[tuple] = None) -> None:
         if not self.url:
             return                                   # no webhook yet (the admin bot can create one)
         # Character names are chosen by players: never let one ping @everyone, a role or a user.
         payload.setdefault("allowed_mentions", {"parse": []})
-        body = json.dumps(payload).encode()
-        req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json",
-                                                                  "User-Agent": "valheim-discord-monitor/1.0"})
+        # on_posted (the admin bot's reactions) needs the new message's id: ask Discord for it.
+        want_reply = bool(self.on_posted and kind)
+        url = self.url + (("&" if "?" in self.url else "?") + "wait=true" if want_reply else "")
+        if file:
+            boundary = "vdm" + os.urandom(12).hex()
+            name, data = file
+            body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n"
+                    f"Content-Type: application/json\r\n\r\n{json.dumps(payload)}\r\n"
+                    f"--{boundary}\r\nContent-Disposition: form-data; name=\"files[0]\"; filename=\"{name}\"\r\n"
+                    f"Content-Type: application/octet-stream\r\n\r\n").encode() + data + \
+                f"\r\n--{boundary}--\r\n".encode()
+            ctype = f"multipart/form-data; boundary={boundary}"
+        else:
+            body, ctype = json.dumps(payload).encode(), "application/json"
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": ctype,
+                                                              "User-Agent": "valheim-discord-monitor/1.0"})
         for attempt in range(4):
             try:
                 with urllib.request.urlopen(req, timeout=15) as r:
-                    r.read()
+                    reply = r.read()
+                if want_reply:
+                    try:
+                        msg = json.loads(reply or b"{}")
+                        if msg.get("id") and msg.get("channel_id"):
+                            self.on_posted(kind, msg["channel_id"], msg["id"])
+                    except (ValueError, TypeError) as e:
+                        log.debug("Couldn't read Discord's reply: %s", e)
                 return
             except urllib.error.HTTPError as e:
                 if e.code == 429:
@@ -1523,6 +1545,7 @@ def main():
                      post_embed=lambda embed: discord.post_embed("titles", embed, {"titles"}),
                      db_path=db_cfg["path"] if db_enabled else None, webhook_url=discord.url,
                      set_webhook=set_webhook)
+        discord.on_posted = admin.react_to        # the bot reacts to some of Huginn's posts
 
     health = extras.HealthWatch(cfg.get("health") or {})
     daily = extras.DailyRestart(cfg["daily_restart"]) if (cfg.get("daily_restart") or {}).get("time") else None
@@ -1708,7 +1731,12 @@ def main():
                         off = int(store.get_meta("log_clock_offset") or 0)
                         embed = extras.WeeklyRecap.build(store.conn, int(now) - off, server_name)
                         if embed:
-                            discord.post_embed("weekly_recap", embed, events)
+                            png = extras.WeeklyRecap.chart(
+                                extras.WeeklyRecap.hours_by_day(store.conn, int(now) - off, off))
+                            if png:
+                                embed["image"] = {"url": "attachment://activity.png"}
+                            discord.post_embed("weekly_recap", embed, events,
+                                               file=("activity.png", png) if png else None)
                         store.set_meta("weekly_recap_week", week)
                 except Exception as e:
                     log.warning("Weekly recap failed: %s", e)

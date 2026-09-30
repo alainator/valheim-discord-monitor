@@ -53,6 +53,8 @@
     },
     "online_role": true,
     "owner_role": true,
+    "link_nickname": false,
+    "tidy_notices_hours": 24,
     "stat_channels": {
       "enabled": false
     },

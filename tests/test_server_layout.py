@@ -131,9 +131,13 @@ class ApplyUndoTest(unittest.TestCase):
             id = 9
             hooks: list
             system_channel_id = 41             # Discord's join messages go to the admin channel
+            afk_channel = None
 
-            async def edit(self, system_channel=None, reason=None):
-                self.system_channel_id = system_channel.id if system_channel else None
+            async def edit(self, system_channel=False, afk_channel=False, afk_timeout=None, reason=None):
+                if system_channel is not False:
+                    self.system_channel_id = system_channel.id if system_channel else None
+                if afk_channel is not False:
+                    self.afk_channel = afk_channel
 
             def __init__(self):
                 self.hooks = []
@@ -216,6 +220,7 @@ class ApplyUndoTest(unittest.TestCase):
             # The admin channel became private, so Discord's join messages moved to the welcome channel.
             welcome = next(c for c in guild.all if c.name == "🚪┃the-gates")
             self.assertEqual(guild.system_channel_id, welcome.id)
+            self.assertEqual(guild.afk_channel.name, "🎣 Fishing Hut (AFK)")      # idle voice users go here
             self.assertIn("Discord's join messages", __import__("server_layout").render(p))
 
             restored, created, problems = asyncio.run(bot._layout_undo(guild))
@@ -226,6 +231,7 @@ class ApplyUndoTest(unittest.TestCase):
             self.assertEqual(byid[40].category_id, 30)
             self.assertEqual(byid[41].overwrites, {})             # permissions back as they were
             self.assertEqual(guild.system_channel_id, 41)
+            self.assertIsNone(guild.afk_channel)
             self.assertGreaterEqual(len(created), 10)             # listed, not deleted
 
 

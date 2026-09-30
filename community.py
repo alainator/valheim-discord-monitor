@@ -413,6 +413,24 @@ def create_plan(conn, title: str, at: int, channel_id, creator_id) -> int:
     return cur.lastrowid
 
 
+def parse_whens(text: str, now: _dt.datetime) -> list:
+    """Several times for a time poll: "sat 20:00, sun 18:00" or "8pm or tomorrow 8pm".
+    Returns them sorted, without duplicates; raises ValueError on one it can't read."""
+    parts = [p.strip() for p in re.split(r",|;|\bor\b", text, flags=re.IGNORECASE) if p.strip()]
+    times = sorted({parse_when(p, now) for p in parts})
+    return times
+
+
+def poll_winner(results: list) -> Optional[int]:
+    """results: [(votes, start time)] in the poll's order. The most votes wins, the earlier
+    time on a tie; None when nobody voted."""
+    voted = [(v, at) for v, at in results if v]
+    if not voted:
+        return None
+    best = max(v for v, _ in voted)
+    return min(at for v, at in voted if v == best)
+
+
 def set_plan_message(conn, plan_id: int, message_id) -> None:
     conn.execute("UPDATE plans SET message_id = ? WHERE id = ?", (str(message_id), plan_id))
     conn.commit()

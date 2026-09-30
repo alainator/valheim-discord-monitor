@@ -42,6 +42,10 @@ import threading
 import time
 from typing import Optional
 
+# Huginn's posts the bot reacts to, so people can react along.
+REACTIONS = {"raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
+             "weekly_recap": "📜", "version_mismatch": "⚠️"}
+
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 log = logging.getLogger("valheim-monitor.bot")
@@ -344,6 +348,10 @@ class AdminBot:
         self.discord_events = bool(lfg.get("discord_event", False))
         self.map_enabled = bool((cfg.get("map") or {}).get("enabled", True))
         self.map_seed = str((cfg.get("map") or {}).get("seed") or "").strip()
+        # /valheim link sets a member's server nickname to the character (only if they have none).
+        self.link_nickname = bool(cfg.get("link_nickname", False))
+        # Handled refused-join notices are deleted this many hours later (0 keeps them).
+        self.tidy_hours = float(cfg.get("tidy_notices_hours", 24))
         # Weekly title roles for the /valheim top leaders (community.TITLES).
         tc = cfg.get("titles") or {}
         self.titles_on = bool(tc.get("enabled", False))
@@ -970,24 +978,122 @@ class AdminBot:
             view.add_item(discord.ui.Button(label=label, style=style, custom_id=f"{BTN_PREFIX}:rsvp:{plan_id}:{choice}"))
         return view
 
+    async def _post_plan(self, channel, title: str, at, creator_id, guild=None):
+        """Post a game-night signup, open a thread on it for the planning chat, and create a
+        Discord Event if that's turned on. Returns the signup message."""
+        import datetime as _dt
+        import discord
+        import community
+        plan_id = community.create_plan(self.db, title, int(at.timestamp()), channel.id, creator_id)
+        community.rsvp(self.db, plan_id, creator_id, "going")
+        p = community.get_plan(self.db, plan_id)
+        msg = await channel.send(embed=discord.Embed.from_dict(community.render_plan(p, self.server_name)),
+                                 view=self._plan_buttons(plan_id))
+        community.set_plan_message(self.db, plan_id, msg.id)
+        try:                                     # the thread shares the message's id
+            thread = await msg.create_thread(name=f"🗺️ {title}"[:100], auto_archive_duration=4320)
+            await thread.send(f"Plan **{title}** here: who brings what, where to meet. The reminder "
+                              f"<t:{p['at']}:R> is posted here too.")
+        except discord.HTTPException as e:
+            log.info("admin_bot: couldn't open a thread for the game night (needs Create Public Threads): %s", e)
+        if self.discord_events and guild:
+            try:
+                await guild.create_scheduled_event(
+                    name=p["title"], start_time=at, end_time=at + _dt.timedelta(hours=2),
+                    entity_type=discord.EntityType.external, location=f"Valheim: {self.server_name}",
+                    privacy_level=discord.PrivacyLevel.guild_only, description=f"Signup: {msg.jump_url}")
+            except discord.HTTPException as e:
+                log.info("admin_bot: couldn't create the Discord event (needs Manage Events): %s", e)
+        return msg
+
+    def _pending_polls(self) -> list:
+        try:
+            return json.loads(self._meta("polls:pending") or "[]")
+        except ValueError:
+            return []
+
+    async def _post_time_poll(self, channel, title: str, times: list, creator_id) -> None:
+        """A Discord poll to pick a game night's time. It closes an hour before the earliest
+        option (at most a week); then the winner becomes a signup (_resolve_polls)."""
+        import datetime as _dt
+        import discord
+        hours = int((times[0] - _dt.datetime.now().astimezone()).total_seconds() // 3600) - 1
+        hours = max(1, min(hours, 168))
+        poll = discord.Poll(question=f"When should we do {title}?"[:300], duration=_dt.timedelta(hours=hours))
+        for at in times:
+            poll.add_answer(text=at.strftime("%a %d %b, %H:%M %Z").strip()[:55])
+        msg = await channel.send(content=f"🗳️ Vote for a time for **{title}**. The winner becomes a "
+                                         "game-night signup when the poll closes.", poll=poll)
+        pending = self._pending_polls()
+        pending.append({"message_id": msg.id, "channel_id": channel.id, "title": title,
+                        "times": [int(t.timestamp()) for t in times], "creator": str(creator_id),
+                        "ends_at": int(time.time()) + hours * 3600})
+        self._meta("polls:pending", json.dumps(pending))
+
+    async def _resolve_polls(self) -> None:
+        """Turn closed time polls into signups."""
+        import datetime as _dt
+        import discord
+        import community
+        pending, keep = self._pending_polls(), []
+        for rec in pending:
+            if time.time() < rec["ends_at"] + 60:
+                keep.append(rec)
+                continue
+            try:
+                channel = self.client.get_channel(int(rec["channel_id"])) or \
+                    await self.client.fetch_channel(int(rec["channel_id"]))
+                msg = await channel.fetch_message(int(rec["message_id"]))
+            except discord.NotFound:
+                continue                          # deleted: drop it
+            except discord.HTTPException:
+                keep.append(rec)                  # try again next time
+                continue
+            answers = list(msg.poll.answers) if msg.poll else []
+            winner = community.poll_winner([(a.vote_count, t) for a, t in zip(answers, rec["times"])])
+            if winner is None:
+                await channel.send(f"🗳️ Nobody voted on a time for **{rec['title']}**, so nothing was planned.")
+                continue
+            at = _dt.datetime.fromtimestamp(winner).astimezone()
+            await channel.send(f"🗳️ The vote picked <t:{winner}:F> for **{rec['title']}**:")
+            await self._post_plan(channel, rec["title"], at, int(rec["creator"]), getattr(channel, "guild", None))
+        if len(keep) != len(pending):
+            self._meta("polls:pending", json.dumps(keep))
+
     async def _plan_loop(self) -> None:
-        """Ping the people signed up for a game night shortly before it starts."""
+        """Ping the people signed up for a game night shortly before it starts, turn
+        closed time polls into signups, and tidy handled admin notices."""
         import discord
         import community
         while True:
             await asyncio.sleep(30)
+            for job in (self._resolve_polls, self._tidy_notices):
+                try:
+                    await job()
+                except Exception as e:  # noqa: BLE001
+                    log.warning("admin_bot: %s failed: %s", job.__name__, e)
             try:
                 for plan in community.due_reminders(self.db, time.time(), self.remind_minutes * 60):
                     community.mark_reminded(self.db, plan["id"])
                     people = plan["rsvps"]["going"] + plan["rsvps"]["maybe"]
-                    channel = self.client.get_channel(int(plan["channel_id"])) or \
-                        await self.client.fetch_channel(int(plan["channel_id"]))
-                    await channel.send(
-                        f"⏰ **{plan['title']}** starts <t:{plan['at']}:R>! "
-                        + (" ".join(f"<@{u}>" for u in people) if people else "Nobody has signed up yet.")
-                        + " `/valheim join` has the join code.",
-                        allowed_mentions=discord.AllowedMentions(users=[discord.Object(id=int(u)) for u in people],
-                                                                 everyone=False, roles=False))
+                    text = (f"⏰ **{plan['title']}** starts <t:{plan['at']}:R>! "
+                            + (" ".join(f"<@{u}>" for u in people) if people else "Nobody has signed up yet.")
+                            + " `/valheim join` has the join code.")
+                    pings = discord.AllowedMentions(users=[discord.Object(id=int(u)) for u in people],
+                                                    everyone=False, roles=False)
+                    sent = False
+                    if plan.get("message_id"):       # the plan's thread (same id as the signup)
+                        try:
+                            thread = self.client.get_channel(int(plan["message_id"])) or \
+                                await self.client.fetch_channel(int(plan["message_id"]))
+                            await thread.send(text, allowed_mentions=pings)
+                            sent = True
+                        except discord.HTTPException:
+                            pass
+                    if not sent:
+                        channel = self.client.get_channel(int(plan["channel_id"])) or \
+                            await self.client.fetch_channel(int(plan["channel_id"]))
+                        await channel.send(text, allowed_mentions=pings)
             except Exception as e:  # noqa: BLE001
                 log.warning("admin_bot: plan reminders failed: %s", e)
 
@@ -1295,6 +1401,17 @@ class AdminBot:
         except Exception as e:  # noqa: BLE001
             problems.append(f"ordering the categories: {e}")
         await self._layout_webhook(guild, p, undo, problems)
+        # Idle voice users: Discord moves them to the AFK channel by itself once it's set.
+        afk = self._meta("layout:ch:vc_afk")
+        if afk and getattr(guild, "afk_channel", None) is None:
+            try:
+                undo.setdefault("afk_channel", None)
+                await guild.edit(afk_channel=guild.get_channel(int(afk)), afk_timeout=900, reason="/valheim setup")
+            except discord.Forbidden:
+                problems.append("The Fishing Hut isn't the AFK channel yet: the bot needs Manage Server. Set it in "
+                                "Server Settings → Overview → Inactive Channel.")
+            except discord.HTTPException as e:
+                problems.append(f"AFK channel: {e}")
         # Discord's join greetings: into the welcome channel if they'd be hidden or go nowhere.
         welcome = self._meta("layout:ch:welcome")
         if (p.get("system") or {}).get("move") and welcome:
@@ -1339,15 +1456,21 @@ class AdminBot:
                               color=0xC27C0E)
         try:
             mid = self._meta("layout:guide")
+            msg = None
             if mid:
                 try:
                     msg = await channel.fetch_message(int(mid))
                     await msg.edit(embed=embed)
-                    return
                 except discord.NotFound:
-                    pass
-            msg = await channel.send(embed=embed)
-            self._meta("layout:guide", msg.id)
+                    msg = None
+            if msg is None:
+                msg = await channel.send(embed=embed)
+                self._meta("layout:guide", msg.id)
+            if not getattr(msg, "pinned", False):
+                try:
+                    await msg.pin(reason="/valheim setup: channel guide")
+                except discord.HTTPException as e:
+                    log.info("admin_bot: couldn't pin the channel guide (needs Pin Messages): %s", e)
         except discord.HTTPException as e:
             log.info("admin_bot: couldn't post the channel guide: %s", e)
 
@@ -1386,6 +1509,13 @@ class AdminBot:
                                 reason="/valheim setup undo")
             except (discord.HTTPException, AttributeError, TypeError) as e:
                 problems.append(f"Huginn's webhook: {e}")
+        if "afk_channel" in undo:
+            try:
+                old = undo["afk_channel"]
+                await guild.edit(afk_channel=guild.get_channel(int(old)) if old else None,
+                                 reason="/valheim setup undo")
+            except discord.HTTPException as e:
+                problems.append(f"AFK channel: {e}")
         if "system_channel" in undo:
             try:
                 old = undo["system_channel"]
@@ -1716,6 +1846,53 @@ class AdminBot:
         if embed is not None:
             embed.add_field(name="Result", value=f"{outcome} by {it.user.mention}", inline=False)
         await it.response.edit_message(embed=embed, view=self._buttons(pid, disabled=True))
+        if self.tidy_hours > 0 and it.message:
+            self._queue_tidy(it.message.channel.id, it.message.id)
+
+    def _queue_tidy(self, channel_id, message_id) -> None:
+        try:
+            queue = json.loads(self._meta("tidy:queue") or "[]")
+        except ValueError:
+            queue = []
+        queue.append([str(channel_id), str(message_id), int(time.time() + self.tidy_hours * 3600)])
+        self._meta("tidy:queue", json.dumps(queue[-500:]))
+
+    async def _tidy_notices(self) -> None:
+        """Delete handled refused-join notices once they're tidy_notices_hours old."""
+        import discord
+        try:
+            queue = json.loads(self._meta("tidy:queue") or "[]")
+        except ValueError:
+            queue = []
+        due = [q for q in queue if q[2] <= time.time()]
+        if not due:
+            return
+        keep = [q for q in queue if q[2] > time.time()]
+        for cid, mid, _ in due:
+            try:
+                await self.client.get_partial_messageable(int(cid)).get_partial_message(int(mid)).delete()
+            except discord.NotFound:
+                pass
+            except discord.Forbidden:
+                log.info("admin_bot: can't delete old notices (needs Manage Messages); keeping them")
+                keep = []                         # no point retrying without the permission
+                break
+        self._meta("tidy:queue", json.dumps(keep))
+
+    def react_to(self, kind: str, channel_id, message_id) -> None:
+        """Thread-safe: react to one of Huginn's posts (the monitor calls this after posting)."""
+        emoji = REACTIONS.get(kind)
+        if not (emoji and self.loop and self.ready.is_set()):
+            return
+
+        async def react():
+            import discord
+            try:
+                msg = self.client.get_partial_messageable(int(channel_id)).get_partial_message(int(message_id))
+                await msg.add_reaction(emoji)
+            except discord.HTTPException as e:
+                log.debug("admin_bot: couldn't react to a %s post: %s", kind, e)
+        asyncio.run_coroutine_threadsafe(react(), self.loop)
 
     def _register_commands(self, tree) -> None:
         import discord
@@ -1945,6 +2122,12 @@ class AdminBot:
                                                    "your stats, and milestones will mention you.", ephemeral=True)
             if not err:
                 bot._titles_relink()
+                if bot.link_nickname and it.guild and isinstance(it.user, discord.Member) \
+                        and not it.user.nick and it.user.id != it.guild.owner_id:
+                    try:
+                        await it.user.edit(nick=name[:32], reason="/valheim link")
+                    except discord.HTTPException as e:
+                        log.info("admin_bot: couldn't set %s's nickname (needs Manage Nicknames): %s", it.user, e)
         link.autocomplete("character")(player_choices)
 
         @group.command(name="unlink", description="Unlink a character from your Discord account")
@@ -1991,35 +2174,31 @@ class AdminBot:
                 "(`/valheim join` has the code). If you're turned away, the admins see it's you and "
                 "can let you in with one click, and you'll get a DM.", ephemeral=True)
 
-        @group.command(name="plan", description="Plan a game night: posts a signup with a reminder")
+        @group.command(name="plan", description="Plan a game night: a signup with a reminder, or a poll for the time")
         @app_commands.describe(title="What's happening, e.g. 'Bonemass run'",
-                               when="e.g. 20:00, 8pm, tomorrow 8pm, sat 20:00, in 2h")
+                               when="e.g. 20:00, 8pm, sat 20:00, in 2h. Several ('sat 20:00, sun 18:00') "
+                                    "start a poll for the time")
         async def plan(it: discord.Interaction, title: str, when: str):
             if not await need_db(it):
                 return
             import datetime as _dt
+            now = _dt.datetime.now().astimezone()
+            title = title.strip()[:100]
             try:
-                at = community.parse_when(when, _dt.datetime.now().astimezone())
+                times = community.parse_whens(when, now)
             except ValueError as e:
                 await it.response.send_message(str(e), ephemeral=True)
                 return
-            plan_id = community.create_plan(bot.db, title.strip()[:100], int(at.timestamp()),
-                                            it.channel_id, it.user.id)
-            community.rsvp(bot.db, plan_id, it.user.id, "going")
-            p = community.get_plan(bot.db, plan_id)
-            await it.response.send_message(embed=discord.Embed.from_dict(community.render_plan(p, bot.server_name)),
-                                            view=bot._plan_buttons(plan_id))
-            msg = await it.original_response()
-            community.set_plan_message(bot.db, plan_id, msg.id)
-            if bot.discord_events and it.guild:
-                try:
-                    await it.guild.create_scheduled_event(
-                        name=p["title"], start_time=at, end_time=at + _dt.timedelta(hours=2),
-                        entity_type=discord.EntityType.external, location=f"Valheim: {bot.server_name}",
-                        privacy_level=discord.PrivacyLevel.guild_only,
-                        description=f"Signup: {msg.jump_url}")
-                except discord.HTTPException as e:
-                    log.info("admin_bot: couldn't create the Discord event (needs Manage Events): %s", e)
+            if not times:
+                await it.response.send_message("When? e.g. `sat 20:00`.", ephemeral=True)
+                return
+            if len(times) == 1:
+                await it.response.send_message(f"📅 Planned **{title}**.", ephemeral=True)
+                await bot._post_plan(it.channel, title, times[0], it.user.id, it.guild)
+                return
+            await it.response.send_message(f"🗳️ Poll posted for **{title}**. When it closes, the winning time "
+                                            "becomes a signup automatically.", ephemeral=True)
+            await bot._post_time_poll(it.channel, title, times[:10], it.user.id)
 
         @group.command(name="map", description="The world seed and a link to a map of it (spoilers!)")
         async def map_(it: discord.Interaction):

@@ -208,6 +208,55 @@ class WeeklyRecap:
                    + (f", and peaked at **{s['peak']}** online at once." if s["peak"] else "."))
         return {"title": f"📜 This week in {server_name}", "description": summary, "fields": fields}
 
+    @staticmethod
+    def hours_by_day(conn, log_now: int, offset: int = 0, days: int = 7) -> list:
+        """[(date, hours played)] for the last `days` days, oldest first. Sessions count on
+        the day they started (log timestamps + offset = real time, in the local zone)."""
+        today = _dt.datetime.fromtimestamp(log_now + offset).astimezone().date()
+        start = today - _dt.timedelta(days=days - 1)
+        totals = {start + _dt.timedelta(days=i): 0.0 for i in range(days)}
+        since = int(_dt.datetime.combine(start, _dt.time()).astimezone().timestamp()) - offset
+        for login, secs in conn.execute("SELECT login_at, COALESCE(duration_seconds, 0) FROM play_sessions "
+                                        "WHERE login_at >= ?", (since,)):
+            day = _dt.datetime.fromtimestamp(login + offset).astimezone().date()
+            if day in totals:
+                totals[day] += max(secs, 0) / 3600
+        return sorted(totals.items())
+
+    @staticmethod
+    def chart(hours: list) -> Optional[bytes]:
+        """A PNG bar chart of hours played per day, or None without Pillow or data."""
+        if not hours or not any(h for _, h in hours):
+            return None
+        try:
+            from io import BytesIO
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError:
+            return None
+        w, h, pad, top, bottom = 800, 360, 40, 50, 60
+        img = Image.new("RGB", (w, h), (43, 45, 49))              # Discord's dark background
+        draw = ImageDraw.Draw(img)
+        try:
+            font, small = ImageFont.load_default(size=20), ImageFont.load_default(size=16)
+        except TypeError:                                          # Pillow before 10.1
+            font = small = ImageFont.load_default()
+        draw.text((pad, 14), "Hours played per day", fill=(242, 243, 245), font=font)
+        peak = max(v for _, v in hours)
+        slot = (w - 2 * pad) / len(hours)
+        for i, (day, v) in enumerate(hours):
+            x0 = pad + i * slot + slot * 0.15
+            x1 = pad + (i + 1) * slot - slot * 0.15
+            bar = (h - top - bottom) * (v / peak) if peak else 0
+            y0 = h - bottom - bar
+            draw.rectangle([x0, y0, x1, h - bottom], fill=(230, 126, 34))
+            label = "0" if v < 0.05 else f"{v:.1f}" if v < 10 else f"{v:.0f}"
+            draw.text(((x0 + x1) / 2, y0 - 6), label, fill=(242, 243, 245), font=small, anchor="mb")
+            draw.text(((x0 + x1) / 2, h - bottom + 10), day.strftime("%a"), fill=(181, 186, 193),
+                      font=small, anchor="mt")
+        out = BytesIO()
+        img.save(out, "PNG")
+        return out.getvalue()
+
 
 # ---------------------------------------------------------------------------
 # Backups
