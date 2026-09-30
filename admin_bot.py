@@ -1239,7 +1239,7 @@ class AdminBot:
             await it.response.send_message(embed=discord.Embed.from_dict(embed))
         stats.autocomplete("player")(player_choices)
 
-        @group.command(name="top", description="Leaderboards: time played, deaths, visits, longest session")
+        @group.command(name="top", description="Leaderboards: time played, deaths, visits, longest session, achievements")
         @app_commands.choices(category=[app_commands.Choice(name=v[0], value=k) for k, v in community.TOP.items()])
         async def top(it: discord.Interaction, category: str = "time"):
             if not await need_db(it):
@@ -1247,7 +1247,7 @@ class AdminBot:
             embed = community.render_top(category, community.top(bot.db, category, 10))
             await it.response.send_message(embed=discord.Embed.from_dict(embed))
 
-        @group.command(name="titles", description="Who holds Heimdall, Hel, Sleipnir and Thor (the top of each board)")
+        @group.command(name="titles", description="Who holds Heimdall, Hel, Sleipnir, Thor and Bragi (the top of each board)")
         @app_commands.describe(refresh="Admins: reassign the titles now instead of waiting for the weekly run")
         async def titles(it: discord.Interaction, refresh: bool = False):
             if not await need_db(it):
