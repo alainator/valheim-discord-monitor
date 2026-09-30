@@ -44,7 +44,14 @@ from typing import Optional
 
 # Commands with public replies, and the /odin setup channel they belong in. Others (their
 # replies are private) work anywhere; admins can run anything anywhere.
-COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "plan": "plans"}
+COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
+                  "uptime": "bots", "plan": "plans"}
+WELCOME_DM = ("👋 Welcome to **{guild}**, {member}! We play Valheim on **{server}**.\n"
+              "• `/valheim join`: the join code and how to get in\n"
+              "• `/valheim request-access`: tell the admins which character you'll play, if the server "
+              "uses a permitted list\n"
+              "• `/valheim link`: link your character, for the In Valheim role and your stats\n"
+              "See you in the tenth world.")
 
 # Huginn's posts the bot reacts to, so people can react along.
 REACTIONS = {"raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
@@ -356,6 +363,11 @@ class AdminBot:
         self.link_nickname = bool(cfg.get("link_nickname", False))
         # Commands used in the wrong channel get a private "run it in #…" instead. true: the
         # channels /odin setup made; false: off; {"stats": "<channel id>", …}: overrides.
+        # A DM to people who join the Discord server: true for the default text, or your own
+        # ({server}, {guild} and {member} are filled in). Needs the Server Members Intent.
+        wdm = cfg.get("welcome_dm")
+        self.welcome_dm = (wdm.strip() if isinstance(wdm, str) and wdm.strip()
+                           else WELCOME_DM if wdm is True else None)
         cc = cfg.get("command_channels", True)
         self.command_channels_on = cc is not False
         self.command_channel_ids = {k: int(v) for k, v in cc.items() if str(v).isdigit()} \
@@ -401,8 +413,19 @@ class AdminBot:
         self.client = self._build_client()
 
         async def main():
-            async with self.client:
-                await self.client.start(self.token)      # reconnects by itself after drops
+            import discord
+            try:
+                async with self.client:
+                    await self.client.start(self.token)      # reconnects by itself after drops
+            except discord.PrivilegedIntentsRequired:
+                if not self.welcome_dm:
+                    raise
+                log.warning("admin_bot: welcome_dm needs the Server Members Intent (developer portal → Bot → "
+                            "Privileged Gateway Intents); welcome DMs are off until it's turned on")
+                self.welcome_dm = None
+                self.client = self._build_client()
+                async with self.client:
+                    await self.client.start(self.token)
 
         try:
             # Not client.run(): that makes its own loop, and notify_refused needs this one.
@@ -505,20 +528,28 @@ class AdminBot:
         return self._db
 
     # -- called from the monitor thread: roles and DMs --------------------------
-    def on_login(self, player: str, server_was_empty: bool) -> None:
+    def on_login(self, player: str, server_was_empty: bool, before: int = 0, now: int = 0,
+                 online: Optional[list] = None) -> None:
         if self.loop and self.ready.is_set() and self.db_path:
-            asyncio.run_coroutine_threadsafe(self._on_login(player, server_was_empty), self.loop)
+            asyncio.run_coroutine_threadsafe(
+                self._on_login(player, server_was_empty, before, now, online or [player]), self.loop)
 
     def on_logout(self, player: str) -> None:
         if self.loop and self.ready.is_set() and self.db_path and (self.online_role or self.online_role_name):
             asyncio.run_coroutine_threadsafe(self._set_role(player, False), self.loop)
 
-    async def _on_login(self, player: str, server_was_empty: bool) -> None:
+    async def _on_login(self, player: str, server_was_empty: bool, before: int = 0, count: int = 0,
+                        online: Optional[list] = None) -> None:
         import community
         try:
             if self.online_role or self.online_role_name:
                 await self._set_role(player, True)
             now = time.time()
+            # "Come join": the count just reached someone's /valheim notify crowd threshold.
+            for uid in community.who_to_nudge(self.db, before, count, online or [player]):
+                names = ", ".join(f"**{p}**" for p in (online or [player])[:10])
+                await self._dm_once(uid, "crowd", f"⚔️ **{count}** Vikings are on **{self.server_name}** now "
+                                    f"({names}). Come join! Stop these with `/valheim notify off`.", every=3 * 3600)
             for uid, reason in community.who_to_notify(self.db, player, server_was_empty).items():
                 if now - self._dm_sent.get((uid, reason, player), 0) < 1800:
                     continue
@@ -918,6 +949,10 @@ class AdminBot:
         embed.timestamp = discord.utils.utcnow()
         await channel.send(embed=embed, view=self._buttons(pid),
                            allowed_mentions=discord.AllowedMentions.none())
+
+    def welcome_text(self, member: str, guild: str) -> str:
+        return self.welcome_dm.replace("{server}", self.server_name or "our server") \
+            .replace("{guild}", guild).replace("{member}", member)
 
     async def _dm_once(self, uid, reason: str, text: str, every: float = 1800) -> bool:
         """A DM at most once per `every` seconds for the same user and reason."""
@@ -1802,6 +1837,7 @@ class AdminBot:
         bot = self
         intents = discord.Intents.none()
         intents.guilds = True                 # enough for buttons + slash commands; no privileged intents
+        intents.members = bool(bot.welcome_dm)  # privileged: only for welcome_dm
 
         class Tree(app_commands.CommandTree):
             async def interaction_check(self, it: discord.Interaction) -> bool:
@@ -1831,6 +1867,10 @@ class AdminBot:
                 log.info("admin_bot: connected as %s; posting join notices to channel %s", self.user, bot.channel_id)
                 bot.ready.set()
                 bot._start_tasks()
+
+            async def on_member_join(self, member: discord.Member):
+                if bot.welcome_dm and not member.bot and (not bot.guild_id or member.guild.id == bot.guild_id):
+                    await bot._dm(member.id, bot.welcome_text(member.display_name, member.guild.name))
 
             async def on_interaction(self, it: discord.Interaction):
                 cid = (it.data or {}).get("custom_id", "") if it.type == discord.InteractionType.component else ""
@@ -2126,14 +2166,58 @@ class AdminBot:
                 community.render_titles(holders, changed, bot.titles_period)),
                 allowed_mentions=discord.AllowedMentions.none())
 
+        @muninn.command(name="compare", description="Two characters side by side: time, visits, deaths and more")
+        @app_commands.describe(player="First character", other="Second character (leave empty for yours if linked)")
+        async def compare(it: discord.Interaction, player: str, other: str = ""):
+            if not await need_db(it):
+                return
+            second = other.strip() or next(iter(community.linked_players(bot.db, it.user.id)), "")
+            if not second:
+                await it.response.send_message("Compare with whom? Fill in `other`, or link your character with "
+                                                "`/valheim link`.", ephemeral=True)
+                return
+            a, b = community.player_stats(bot.db, player.strip()), community.player_stats(bot.db, second)
+            missing = [n for n, st in ((player.strip(), a), (second, b)) if not st]
+            if missing:
+                await it.response.send_message("No play time recorded for " + " or ".join(
+                    f"**{discord.utils.escape_markdown(n)}**" for n in missing) + ".", ephemeral=True)
+                return
+            await it.response.send_message(embed=discord.Embed.from_dict(community.render_compare(a, b)))
+        compare.autocomplete("player")(player_choices)
+        compare.autocomplete("other")(player_choices)
+
+        @muninn.command(name="uptime", description="How much the server was up: this week, 30 days, restarts")
+        async def uptime_cmd(it: discord.Interaction):
+            if not await need_db(it):
+                return
+            import stat_channels
+            off = community.log_clock_offset(bot.db)
+            now = _dt.datetime.now().astimezone()
+            until = int(now.timestamp()) - off
+            lines = []
+            for label, since in (("This week", int(stat_channels.week_start(now).timestamp()) - off),
+                                 ("Last 7 days", until - 7 * 86400), ("Last 30 days", until - 30 * 86400)):
+                u = community.uptime(bot.db, since, max(until, since + 1))
+                down = f", down {community._dur(u['down_seconds'])}" if u["down_seconds"] >= 60 else ""
+                lines.append(f"**{label}**: {u['fraction'] * 100:.1f}% up · {u['restarts']} restart"
+                             f"{'s' if u['restarts'] != 1 else ''}{down}")
+            live = bot.live.snapshot() if bot.live else {}
+            if live.get("up_since") and not live.get("down"):
+                lines.append(f"Up now for {stat_channels.uptime(now.timestamp() - live['up_since'])}.")
+            await it.response.send_message(embed=discord.Embed(
+                title=f"📶 {bot.server_name or 'Server'} uptime", description="\n".join(lines), color=0x57F287))
+
         @valheim.command(name="notify", description="Get a DM when someone joins the server")
-        @app_commands.describe(when="What to be told about", player="For follow/unfollow: which character")
+        @app_commands.describe(when="What to be told about", player="For follow/unfollow: which character",
+                               players="For crowd: how many players online (default 3)")
         @app_commands.choices(when=[app_commands.Choice(name="First player joins an empty server", value="first"),
+                                    app_commands.Choice(name="A crowd gathers (N players online)", value="crowd"),
                                     app_commands.Choice(name="A specific character joins (follow)", value="follow"),
                                     app_commands.Choice(name="Stop following a character", value="unfollow"),
                                     app_commands.Choice(name="Turn all notifications off", value="off"),
                                     app_commands.Choice(name="Show my notifications", value="list")])
-        async def notify(it: discord.Interaction, when: str, player: str = ""):
+        async def notify(it: discord.Interaction, when: str, player: str = "",
+                         players: int = 3):
             if not await need_db(it):
                 return
             uid, name = it.user.id, player.strip()
@@ -2148,14 +2232,20 @@ class AdminBot:
             elif when == "first":
                 community.set_notify_first(bot.db, uid, True)
                 text = "You'll get a DM when someone joins an empty server."
+            elif when == "crowd":
+                players = max(2, min(players, 64))
+                community.set_notify_crowd(bot.db, uid, players)
+                text = f"You'll get a DM when **{players}** players are online (at most every 3 hours)."
             elif when == "off":
                 community.notify_off(bot.db, uid)
                 text = "All notifications off."
             else:
                 mine = community.my_notifications(bot.db, uid)
-                parts = (["first player joins"] if mine["first"] else []) + [f"**{p}** joins" for p in mine["follows"]]
+                parts = (["first player joins"] if mine["first"] else []) + \
+                    ([f"**{mine['crowd']}** players are online"] if mine.get("crowd") else []) + \
+                    [f"**{p}** joins" for p in mine["follows"]]
                 text = "You're notified when: " + ", ".join(parts) if parts else "You have no notifications on."
-            if when in ("first", "follow"):
+            if when in ("first", "follow", "crowd"):
                 text += " (Make sure you accept DMs from server members.)"
             await it.response.send_message(text, ephemeral=True)
         notify.autocomplete("player")(player_choices)
@@ -2338,6 +2428,31 @@ class AdminBot:
             except OSError as e:
                 text = f"Couldn't read the list files: {e}"
             await it.response.send_message(text[:1990], ephemeral=True)
+
+        @odin.command(name="announce", description="Post an announcement as Huginn in the feed channel")
+        @app_commands.describe(message="What to announce (use \\n for a new line)", title="An optional headline",
+                               ping="Also ping @everyone")
+        async def announce_cmd(it: discord.Interaction, message: str, title: str = "", ping: bool = False):
+            if not await guard(it):
+                return
+            if not (bot.post_embed and bot.webhook_url):
+                await it.response.send_message("There's no feed webhook yet: run `/odin setup apply`, or set "
+                                                "`discord.webhook_url`.", ephemeral=True)
+                return
+            embed = {"description": message.replace("\\n", "\n")[:4000],
+                     "footer": {"text": f"From {it.user.display_name}"}}
+            if title.strip():
+                embed["title"] = "📣 " + title.strip()[:250]
+            kw = {"content": "@everyone", "allowed_mentions": {"parse": ["everyone"]}} if ping else {}
+            await it.response.defer(ephemeral=True)
+            try:
+                await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: bot.post_embed(embed, "announcement", **kw))
+            except Exception as e:  # noqa: BLE001
+                await it.followup.send(f"Couldn't post it: {e}", ephemeral=True)
+                return
+            log.info("admin_bot: announcement by %s", it.user)
+            await it.followup.send("📣 Posted.", ephemeral=True)
 
         @odin.command(name="setup", description="Admins: organise this Discord into Valheim-themed channels")
         @app_commands.describe(action="preview: show what would change · apply: do it (asks first) · "

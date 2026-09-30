@@ -32,6 +32,7 @@ GROUPS = [
         "peak_today": "most players online at once today",
         "hours_week": "hours played this week, all players together",
         "deaths_week": "deaths this week",
+        "uptime_week": "share of this week the server was up, and restarts",
         "last_raid": "the most recent raid",
         "next_plan": "the next game night (/warcouncil plan)",
         "vikings": "characters that have ever played",
@@ -50,7 +51,7 @@ STATS = {k: v for _, _, keys in GROUPS for k, v in keys.items()}
 GROUP_OF = {k: g for g, _, keys in GROUPS for k in keys}
 # Older names still accepted in stat_channels.show.
 ALIASES = {"titles": [k for k in STATS if k.startswith("title_")]}
-NEEDS_DB = {"peak_today", "hours_week", "deaths_week", "vikings", "next_plan", "achievements"} | \
+NEEDS_DB = {"peak_today", "hours_week", "deaths_week", "uptime_week", "vikings", "next_plan", "achievements"} | \
     {k for k in STATS if k.startswith("title_") and k != "title_owner"}
 # title_<category> -> (emoji, what it's for); the role names come from community.TITLES.
 TITLE_LABELS = {
@@ -204,6 +205,13 @@ def name_for(key: str, snap: Optional[dict], conn=None, now: Optional[_dt.dateti
         since = week_start(now).timestamp() - offset
         n = _one(conn, "SELECT COUNT(*) FROM deaths WHERE died_at >= ?", (int(since),)) or 0
         return f"💀 Deaths this week: {n}"
+    if key == "uptime_week":
+        import community
+        since = int(week_start(now).timestamp() - offset)
+        u = community.uptime(conn, since, max(int(now.timestamp() - offset), since + 1))
+        pct = f"{u['fraction'] * 100:.1f}".rstrip("0").rstrip(".")
+        restarts = f" · {u['restarts']} restart{'s' if u['restarts'] != 1 else ''}" if u["restarts"] else ""
+        return f"📶 Up {pct}% this week{restarts}"
     if key == "vikings":
         n = _one(conn, "SELECT COUNT(DISTINCT player) FROM play_sessions") or 0
         return f"🧭 {n} Viking{'s have' if n != 1 else ' has'} visited"
