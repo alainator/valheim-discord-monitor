@@ -48,6 +48,8 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **The bot creates the "In Valheim" role** with `"online_role": true`, instead of you
+  making it and copying its ID ([players & community](#players--community)).
 - **Title roles:** the leader of each `/valheim top` board gets a Norse role (Heimdall,
   Hel, Huginn, Thor), reassigned weekly. Turn on with `"titles": {"enabled": true}`
   ([title roles](#title-roles)).
@@ -594,9 +596,15 @@ These need the stats database (`database.path`), which the bot and the monitor s
 
   A character can only be linked to one account. Anyone can claim an unlinked character,
   since the log can't prove who owns it; admins can `/valheim unlink` anyone's.
-- **"In Valheim" role.** Set `admin_bot.online_role_id` to a role's ID, and linked players
-  get it while they're in the game, so the member list shows who's playing. The bot needs
-  **Manage Roles**, and its own role must sit **above** that role in Server Settings → Roles.
+- **"In Valheim" role.** Linked players get it while they're in the game, so the member
+  list shows who's playing.
+  - Turn it on with `"online_role": true`. The bot creates an "In Valheim" role, shown
+    separately in the member list, the first time someone joins. It reuses a role that
+    already has that name. Use `"online_role": "Vikings online"` for a different name.
+  - Or set `online_role_id` to a role you made yourself; that takes precedence.
+  - The bot needs **Manage Roles**. A role it creates sits below its own role, so that
+    works by itself. A role you made must be **below** the bot's role in Server Settings →
+    Roles. You can rename, recolour or move the role later; the bot remembers it by ID.
 - **Title roles.** See [below](#title-roles).
 - **Notifications (DMs).**
   - `/valheim notify first` DMs you when someone joins an empty server.
@@ -627,7 +635,7 @@ These need the stats database (`database.path`), which the bot and the monitor s
 
 ```json
 "admin_bot": {
-  "online_role_id": "123456789012345678",
+  "online_role": true,
   "lfg": { "reminder_minutes": 15, "discord_event": false },
   "map": { "enabled": true },
   "titles": { "enabled": true }
@@ -1138,7 +1146,8 @@ or run it in a terminal.
 | `weekly_recap.day` / `hour` | sunday / 18 | When to post the weekly recap (container time zone). |
 | `updater.log` | — | The host updater's log (`update_check.log`), for update posts. |
 | `updater.bot_dir` | — | Folder shared with the host: `status.json` out, `request` for restart/check/settings. |
-| `admin_bot.online_role_id` | — | Role given to linked players while they're in-game. |
+| `admin_bot.online_role` | — | `true` (or a role name): the bot creates the "In Valheim" role, given to linked players while they're in-game. |
+| `admin_bot.online_role_id` | — | Use this existing role instead (takes precedence over `online_role`). |
 | `admin_bot.lfg.reminder_minutes` | 15 | Ping game-night signups this long before the start. |
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |

@@ -93,8 +93,9 @@ class BotCommandsTest(unittest.TestCase):
             def get_role(self, rid):
                 return next((r for r in self.roles if r.id == rid), None)
 
-            async def create_role(self, name, colour=None, reason=None):
+            async def create_role(self, name, colour=None, hoist=False, reason=None):
                 self.roles.append(Role(len(self.roles) + 100, name))
+                self.roles[-1].hoist = hoist
                 return self.roles[-1]
 
             async def fetch_member(self, uid):
@@ -132,6 +133,15 @@ class BotCommandsTest(unittest.TestCase):
         self.assertIn(("add", 42, "Heimdall"), guild.log)
         self.assertIn(("add", 77, "Hel"), guild.log)                          # given after linking
         self.assertIn(("add", 77, "Huginn"), guild.log)                       # tied on visits: first by name
+        # The "In Valheim" role with "online_role": true: created once (shown separately), then reused.
+        bot.online_role_name = "In Valheim"
+        asyncio.run(bot._set_role("Ingrid", True))
+        asyncio.run(bot._set_role("Ingrid", False))
+        online = [r for r in guild.roles if r.name == "In Valheim"]
+        self.assertEqual(len(online), 1)
+        self.assertTrue(online[0].hoist)
+        self.assertIn(("add", 42, "In Valheim"), guild.log)
+        self.assertIn(("remove", 42, "In Valheim"), guild.log)
         # Weekly schedule: first run right away, then only on the configured day and hour.
         self.assertIsNotNone(bot._titles_due())
         community.set_meta(bot.db, "titles_week", "2026-W39")
