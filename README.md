@@ -57,6 +57,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Discord's own join messages** ("Yay you made it, …") no longer end up hidden in the
+  private admin channel: `/valheim setup` moves them to #the-gates
+  ([server setup](#server-setup-valheim-setup)).
 - **Refused-join notices say who it is** (the linked Discord member, other characters on that
   account), and the player gets a DM explaining why. Players on the wrong game version get a
   DM too. The stat channels gain **☀️ Day 142**
@@ -520,7 +523,7 @@ in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visib
 | `/valheim update-check` | Admin | Check for a Valheim update now | [host helper](host/README.md) |
 | `/valheim restart [minutes] [reason]` | Admin | Restart (installs any waiting update); warns players at N/5/1 min, early if everyone leaves | [host helper](host/README.md) |
 | `/valheim restart-cancel` | Admin | Stop a restart countdown | — |
-| `/valheim setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-valheim-setup)) | Manage Channels, Manage Roles |
+| `/valheim setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-valheim-setup)) | Manage Channels, Manage Roles (Manage Server to move Discord's join messages) |
 | `/valheim settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
 | `/valheim modifier <name> <value>` | Admin | Change a modifier, e.g. `raids more`; `normal` resets it | world settings |
 | `/valheim preset <name>` | Admin | Change the preset; `default` removes it | world settings |
@@ -557,7 +560,9 @@ This takes about five minutes in Discord's developer portal.
    - **Manage Channels**, for the [status voice channel](#status-voice-channel) and the
      [stat channels](#stat-channels);
    - **Manage Roles**, for the ["In Valheim", Odin and title roles](#roles--names);
-   - **Manage Events**, only if game nights should create Discord Events.
+   - **Manage Events**, only if game nights should create Discord Events;
+   - **Manage Server**, only if `/valheim setup` should move Discord's join messages
+     ("Yay you made it") out of a private channel.
 4. Open the generated URL, pick your Discord server, and click **Authorize**.
 
 **3. Make a private admin channel.** For example `#valheim-admin`, with Private Channel on.
@@ -796,8 +801,9 @@ The [stat channels](#stat-channels) stay on top.
   renamed back. A second run on an organised server changes nothing.
 
 **Needs:** Manage Channels and Manage Roles (Discord needs Manage Roles to change channel
-permissions). To make the Fishing Hut the server's AFK channel, set it yourself in Server
-Settings → Overview → Inactive Channel.
+permissions). **Manage Server** is optional: it only lets setup move Discord's join
+messages; without it you're told to do that by hand. To make the Fishing Hut the server's
+AFK channel, set it yourself in Server Settings → Overview → Inactive Channel.
 
 ### Players & community
 
