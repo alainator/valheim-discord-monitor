@@ -59,7 +59,7 @@ And without the bot:
 **What's new** (already running it? `git pull && docker compose up -d --build`):
 - **`/odin restore`:** put the world back to one of Valheim's backups from Discord. It
   asks first, keeps the current world as a backup (so it can be undone), and needs a
-  one-time host step ([restore](host/README.md#restoring-a-world-backup-from-discord)).
+  one-time host step ([restore setup](#restoring-a-backup-odin-restore)).
 - **Join-to-create voice:** join **➕ Raise a longship** and the bot makes you your own
   voice channel ("⛵ Ingrid's longship"), deleted once everyone leaves
   ([join-to-create](#join-to-create-voice-channels)).
@@ -1264,6 +1264,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/valheim stats`, `/valheim plan` or `/valheim permit` are gone | The commands were split into groups | Use `/muninn stats` (and `top`, `titles`, `online`), `/warcouncil plan`, and `/odin` for the admin commands. Press Ctrl+R if Discord still shows the old ones |
 | You can see `/muninn`, `/warcouncil` and `/odin` in every channel | You're the owner or an admin: Discord shows them everything | Members don't; check with a friend or a second account |
 | A bot admin can't see `/odin` | Discord hides it from anyone without Manage Server | Server Settings → Integrations → the bot → `/odin` → add their role |
+| `/odin restore` says "couldn't stop the server" | The sudoers line for stop/start is missing | Add it ([restore setup](#restoring-a-backup-odin-restore)); `sudo -l -U valheim` must list `stop` and `start` |
+| `/odin restore` lists nothing | No Valheim backups in `worlds_local` yet, or `save_dir` / `backups.source_dir` points elsewhere | `sudo ls /home/valheim/valheim_save_data/worlds_local`; check the paths in `config.json` |
 | A Steam player's achievement wasn't posted | Their game details are private (Steam's default is Friends only), `"achievement"` isn't in `events`, or it's been under 30 minutes | `/muninn stats <character>` says "private" if it's privacy: they set Game details to Public. Otherwise check `events` |
 | Someone was posted as leaving while still playing | The log line that looked like their leave belonged to an earlier connection of theirs (fixed), or a pattern the monitor doesn't know | Update; if it happens again, share the monitor's log lines around their `EVENT logout` in an issue |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
@@ -1419,9 +1421,40 @@ What happens:
 How often Valheim makes backups, and how many it keeps, is set with the server's
 `-backups`, `-backupshort` and `-backuplong` launch options.
 
-**Restoring:** `/odin restore` puts back one of Valheim's own backups in `worlds_local`,
-with the [host helper](host/README.md#restoring-a-world-backup-from-discord). To restore a
-copy from the other disk, copy its folder back into `worlds_local` first.
+### Restoring a backup: `/odin restore`
+
+Admins can put the world back to one of Valheim's own backups from Discord (self-hosted
+servers with the [host helper](host/README.md)):
+
+1. `/odin restore` lists the backups in `worlds_local`, newest first, with their age.
+2. After you pick one, it asks to confirm and says how many players would be disconnected.
+3. The host stops the server, keeps the current world as `Alheim_backup_prerestore-…`,
+   copies the backup in and starts the server again. The admin channel gets
+   "✅ World restored from `…`"; the public channel is told too.
+
+Picking the `…_backup_prerestore-…` entry undoes a restore. If anything is off (the
+backup doesn't match the world, the server won't stop, the copy fails), nothing changes
+and the error goes to the admin channel.
+
+**One-time setup** on the host, from the repo folder
+([full steps and checks](host/README.md#one-time-setup-1)):
+```bash
+git pull && docker compose up -d --build
+sudo install -o valheim -g valheim -m 755 host/valheim-bot-request.sh /home/valheim/valheim-bot-request.sh
+sudo grep -c restore /home/valheim/valheim-bot-request.sh      # above 0 = the new handler
+sudo visudo -f /etc/sudoers.d/valheim-restore                  # add the line below
+sudo -l -U valheim                                             # lists restart, stop and start
+sudo ls /home/valheim/valheim_save_data/worlds_local           # your world and its backups
+```
+The sudoers line lets the handler stop and start the server (restart was already allowed):
+```
+valheim ALL=(root) NOPASSWD: /bin/systemctl stop valheimserver.service, /bin/systemctl start valheimserver.service
+```
+- Use `sudo` for the checks: your own user can't read `/home/valheim`.
+- A server that saves somewhere else (`-savedir`): change `WORLDS=` at the top of the
+  installed handler.
+- Copies on the other disk aren't listed. To restore one, copy its folder back into
+  `worlds_local` first.
 
 ### Server health
 

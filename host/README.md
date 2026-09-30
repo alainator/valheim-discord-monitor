@@ -217,20 +217,68 @@ isn't removed.
 
 ### One-time setup
 
-1. **Install the updated handler** (from the repo folder, after `git pull`):
+Run these on the host, from the repo folder (e.g.
+`cd /path/to/valheim-discord-monitor`). Your own user can't read `/home/valheim`, so the
+checks use `sudo`.
+
+1. **Update the monitor and install the new request handler:**
    ```bash
+   git pull
+   docker compose up -d --build
    sudo install -o valheim -g valheim -m 755 host/valheim-bot-request.sh /home/valheim/valheim-bot-request.sh
    ```
-2. **Allow `valheim` to stop and start the server.** Restarting was already allowed;
-   restoring needs the server stopped while the files are swapped. Run
-   `sudo visudo -f /etc/sudoers.d/valheim-restore` and add:
+   Check it's the new one (any number above 0 is fine; `0` means the install didn't run):
+   ```bash
+   sudo grep -c restore /home/valheim/valheim-bot-request.sh
+   ```
+   Nothing needs restarting: the handler is started fresh for each request.
+
+2. **Allow `valheim` to stop and start the server.** Restarting was already allowed, but
+   a restore needs the server stopped while the files are swapped:
+   ```bash
+   sudo visudo -f /etc/sudoers.d/valheim-restore
+   ```
+   Add this one line, then save (visudo checks it before saving):
    ```
    valheim ALL=(root) NOPASSWD: /bin/systemctl stop valheimserver.service, /bin/systemctl start valheimserver.service
    ```
-   Check it: `sudo -l -U valheim` lists both commands.
-3. **Check the worlds folder.** The handler uses
-   `/home/valheim/valheim_save_data/worlds_local`. If your server saves somewhere else
-   (`-savedir`), change `WORLDS=` near the top of `/home/valheim/valheim-bot-request.sh`.
+   Check it:
+   ```bash
+   sudo -l -U valheim
+   ```
+   The end of the output should list all three commands:
+   ```
+   (root) NOPASSWD: /bin/systemctl restart valheimserver.service
+   (root) NOPASSWD: /bin/systemctl stop valheimserver.service, /bin/systemctl start valheimserver.service
+   ```
+
+3. **Check the worlds folder.** The handler restores in
+   `/home/valheim/valheim_save_data/worlds_local`:
+   ```bash
+   sudo ls /home/valheim/valheim_save_data/worlds_local
+   ```
+   You should see your world (e.g. `Alheim`) and Valheim's backups
+   (`Alheim_backup_auto-20260930-153328`, …). Those backups are what `/odin restore` lists.
+   If your server saves somewhere else (`-savedir`), change `WORLDS=` near the top of
+   `/home/valheim/valheim-bot-request.sh` (`sudo -u valheim nano …`). Installing the handler
+   again resets it, so repeat the edit after each install.
+
+4. **Try it** at a time nobody's online: run `/odin restore` in Discord, pick a recent
+   backup and press **Restore**. After a minute or two the admin channel says
+   "✅ World restored from `…`" and the server is back up. Your world from just before
+   is kept as `Alheim_backup_prerestore-…`, so picking that one in `/odin restore` undoes it.
+
+**If it doesn't work:**
+
+| What you see | Why | Fix |
+|---|---|---|
+| "The `restore …` request wasn't picked up after 30 s" | The request watcher isn't running | `sudo systemctl enable --now valheim-bot-request.path`, see [the request handler](#3-the-request-handler) |
+| "restore: couldn't stop the server" | The sudoers line is missing or has a typo | Step 2; `sudo -l -U valheim` must list `stop` and `start` |
+| "restore: no single backup … matches" | The backup was deleted since the list was shown, or the handler looks in another folder | Step 3 |
+| "restore: … doesn't match the live world" | The backup belongs to another world, or the live world folder is missing | Pick a backup of the world the server runs |
+| Nothing in the admin channel | The monitor doesn't read `update_check.log` | The `updater` block in `config.json` ([monitor configuration](#4-monitor-configuration)) |
+
+Every restore is also logged: `sudo tail -5 /home/valheim/update_check.log`.
 
 **Backups on another disk** ([backup copies](../README.md#world-backup-copies)) aren't
 restored from directly. To use one, copy its folder back into `worlds_local` first; it
