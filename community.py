@@ -2,12 +2,12 @@
 Community features for the Discord bot, stored in the stats database:
 
   * linked Discord accounts (character <-> Discord user), which the "In Valheim" role,
-    /valheim stats with no name, and mentions in welcome/milestone posts use;
+    /muninn stats with no name, and mentions in welcome/milestone posts use;
   * notifications: DM when the server gets its first player, or when a followed
     character joins;
   * access requests: "I'll join as Ingrid", so a refused-join notice can say who it is;
   * game-night plans with RSVPs and a reminder;
-  * weekly title roles for the /valheim top leaders (Heimdall, Hel, Sleipnir, Thor);
+  * weekly title roles for the /muninn top leaders (Heimdall, Hel, Sleipnir, Thor);
   * reading the world seed for a map link.
 
 Functions take an sqlite3 connection (stats_db.connect) so the monitor thread and the
@@ -207,7 +207,7 @@ def top(conn, category: str, limit: int = 10) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Title roles: one Discord role per /valheim top category, held by its leader
+# Title roles: one Discord role per /muninn top category, held by its leader
 # ---------------------------------------------------------------------------
 # category -> (role name, why it fits, role colour)
 TITLES = {
@@ -297,7 +297,7 @@ def render_titles(holders: dict, changed: set = frozenset(), period: str = "all"
     return {"title": "🏆 Titles of the realm", "color": 0xF1C40F,
             "description": "\n".join(lines),
             "footer": {"text": "Reassigned weekly · " + ("last 7 days" if period == "week" else "all time")
-                               + " · /valheim top"}}
+                               + " · /muninn top"}}
 
 
 def player_stats(conn, player: str) -> Optional[dict]:
@@ -604,7 +604,7 @@ def log_clock_offset(conn) -> int:
 
 
 def render_stats(s: dict, offset: int, linked: Optional[str] = None) -> dict:
-    """Embed for /valheim stats. Log times + offset = real time, for Discord timestamps."""
+    """Embed for /muninn stats. Log times + offset = real time, for Discord timestamps."""
     fields = [
         {"name": "Time played", "value": _dur(s["seconds"]), "inline": True},
         {"name": "Rank", "value": f"#{s['rank']} of {s['players']}", "inline": True},

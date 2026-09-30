@@ -23,7 +23,7 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   player gets a DM explaining why, and so does anyone on the wrong game version
   ([join-attempt alerts](#join-attempt-alerts--discord-admin-bot)).
 - **Organise your Discord** into Valheim-themed channels with one command, previewed first
-  and undoable ([server setup](#server-setup-valheim-setup)).
+  and undoable ([server setup](#server-setup-odin-setup)).
 - Show **who's online** and the server's numbers in locked voice channels at the top of
   the channel list: names online, join code, uptime, this week's stats and every title
   holder ([stat channels](#stat-channels)). A single [status channel](#status-voice-channel)
@@ -34,14 +34,14 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   Valheim update is waiting or installed ([auto-updates](#auto-updates-and-restarts-from-discord)).
 - **Change world settings** (preset, modifiers, setkeys) from Discord, checked on the
   server before anything is written ([world settings](#auto-updates-and-restarts-from-discord)).
-- **Community:** `/valheim stats` and `/valheim top`, DMs when friends come online, an
+- **Community:** `/muninn stats` and `/muninn top`, DMs when friends come online, an
   "In Valheim" role, weekly **title roles** for the leaderboard leaders (Heimdall, Hel,
   Sleipnir, Thor, Bragi), an **Odin** role for the server owner, game nights with a
   planning thread, reminders and **time polls**, a world map link, and a smoother first join
   ([players & community](#players--community), [roles & names](#roles--names)).
 - **Server health:** warnings before the save disk fills up or saves get slow, and an
   optional daily restart while nobody's on ([server health](#server-health)).
-- **Steam achievements in Discord:** unlock posts, achievements in `/valheim stats`, a
+- **Steam achievements in Discord:** unlock posts, achievements in `/muninn stats`, a
   leaderboard and the Bragi title, with a free Steam API key
   ([achievements](#steam-achievements-in-discord)).
 
@@ -57,21 +57,25 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
-- **Commands have a home channel:** `/valheim stats` in the general chat gets a private
+- **Commands are split into four groups:** `/valheim` (join, map, link, notify…),
+  `/muninn` (stats, top, titles, online), `/warcouncil plan` and `/odin` (admin, hidden from
+  members). Each group can be limited to its channel in Discord's settings
+  ([commands](#discord-commands)).
+- **Commands have a home channel:** `/muninn stats` in the general chat gets a private
   "run it in #🪶┃muninns-roost" instead of cluttering the chat
   ([commands](#discord-commands)).
 - **Game nights get a thread and time polls** ("sat 20:00, sun 18:00" → a vote, then a
   signup). The **weekly recap gets a chart**, the bot **reacts** to raids, welcomes and
-  titles, `/valheim setup` **pins the guide** and sets the **AFK channel**, handled admin
+  titles, `/odin setup` **pins the guide** and sets the **AFK channel**, handled admin
   notices are **tidied**, and `/valheim link` can set **nicknames** (opt-in).
 - **[Bot permissions](#bot-permissions):** the full list, with what each one is for, the
   ones to leave off, and ready-made invite links.
-- **The bot handles Huginn's webhook:** `/valheim setup` moves it into #huginns-watch, or
+- **The bot handles Huginn's webhook:** `/odin setup` moves it into #huginns-watch, or
   creates it on a fresh install, and the bot warns you at start-up if it posts into the
-  private admin channel ([server setup](#server-setup-valheim-setup)).
+  private admin channel ([server setup](#server-setup-odin-setup)).
 - **Discord's own join messages** ("Yay you made it, …") no longer end up hidden in the
-  private admin channel: `/valheim setup` moves them to #the-gates
-  ([server setup](#server-setup-valheim-setup)).
+  private admin channel: `/odin setup` moves them to #the-gates
+  ([server setup](#server-setup-odin-setup)).
 - **Refused-join notices say who it is** (the linked Discord member, other characters on that
   account), and the player gets a DM explaining why. Players on the wrong game version get a
   DM too. The stat channels gain **☀️ Day 142**
@@ -80,16 +84,16 @@ And without the bot:
   and rebuilds, and every 5 minutes the bot takes the role from anyone who isn't in the
   game. Roles already stuck clear on their own after updating
   ([details](#players--community)).
-- **`/valheim setup`:** organises your whole Discord into Valheim-themed categories and
+- **`/odin setup`:** organises your whole Discord into Valheim-themed categories and
   channels (The Gates, The Mead Hall, The Wilds, The Longhouses, Odin's Seat). It previews
-  first, never deletes anything, and can be undone ([server setup](#server-setup-valheim-setup)).
+  first, never deletes anything, and can be undone ([server setup](#server-setup-odin-setup)).
 - **Stat channels:** three bot-made categories of locked voice channels: Heimdall's Watch
   (who's online by name, join code, uptime, saves, backups, disk), The Saga (this week's
   numbers, next game night) and the Hall of Champions (Odin and every title holder). Your
   status channel moves in, and the status board isn't needed any more:
   `"stat_channels": {"enabled": true}` ([stat channels](#stat-channels)).
 - **Steam achievements in Discord:** unlock posts from Huginn, achievements in
-  `/valheim stats`, a "Most achievements" board in `/valheim top`, and a fifth title role,
+  `/muninn stats`, a "Most achievements" board in `/muninn top`, and a fifth title role,
   **Bragi**. No web page needed ([details](#steam-achievements-in-discord)).
 - **[Roles & names](#roles--names):** one overview of the bot (Muninn), the announcer
   (Huginn), and every role the bot hands out.
@@ -99,18 +103,18 @@ And without the bot:
   making it and copying its ID ([players & community](#players--community)).
 - **Odin, the server owner's role:** `"owner_role": true` gives the Discord server's owner
   an "Odin" role near the top of the member list ([players & community](#players--community)).
-- **Title roles:** the leader of each `/valheim top` board gets a Norse role (Heimdall,
+- **Title roles:** the leader of each `/muninn top` board gets a Norse role (Heimdall,
   Hel, Sleipnir, Thor, Bragi), reassigned weekly. Turn on with `"titles": {"enabled": true}`
   ([title roles](#title-roles)).
 - **`/valheim map` works with Valheim 1.0 worlds.** It reads the seed from the world
   folder (`worlds_local/<world>/_main.<N>.fwl2`); set `admin_bot.map.seed` if it can't
   ([players & community](#players--community)).
-- **Community commands:** `/valheim stats`, `top`, `notify`, `link`, `request-access`,
+- **Community commands:** `/muninn stats`, `top`, `notify`, `link`, `request-access`,
   `plan` and `map`, plus an optional "In Valheim" role
   ([players & community](#players--community)).
 - **Server health:** low-disk and slow-save warnings, and an optional daily restart while
   nobody's on ([server health](#server-health)).
-- **World settings from Discord:** `/valheim settings`, `preset`, `modifier`, `setkey`
+- **World settings from Discord:** `/odin settings`, `preset`, `modifier`, `setkey`
   ([host/README.md](host/README.md#world-settings-from-discord-preset-modifiers-setkeys)).
 - **`/valheim join`** and a status board with the join code, uptime, version, last save,
   backup and raid ([status board](#status-board)).
@@ -123,7 +127,7 @@ And without the bot:
   [Count mode](#count-mode-quick-start) · [Log mode](#log-mode)
 - **Admin bot:** [Join alerts & setup](#join-attempt-alerts--discord-admin-bot) ·
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
-  [Stat channels](#stat-channels) · [Server setup](#server-setup-valheim-setup) ·
+  [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
@@ -174,7 +178,7 @@ if you enable the admin bot, edits the ban and permitted lists in the save dir.
    - In `config.json`, set `server_name`.
    - In `.env`, set `DISCORD_WEBHOOK_URL` (channel → Edit Channel → Integrations →
      Webhooks → New Webhook → Copy Webhook URL) and `TZ`. Using the admin bot? You can
-     leave the webhook out: [`/valheim setup`](#server-setup-valheim-setup) creates one in
+     leave the webhook out: [`/odin setup`](#server-setup-odin-setup) creates one in
      the right channel.
    - If you don't want the admin bot yet, set `admin_bot.enabled` to `false`.
      Otherwise follow [Setting up the bot](#setting-up-the-bot).
@@ -218,8 +222,8 @@ sudo sh -c 'ls -la /home/valheim/valheim_save_data/*list.txt'
 The container runs as root, so it can read and edit those files anyway.
 
 **Next steps**, each optional:
-1. [Set up the admin bot](#setting-up-the-bot): refused-join alerts and `/valheim` commands.
-2. Organise your Discord with [`/valheim setup`](#server-setup-valheim-setup): themed
+1. [Set up the admin bot](#setting-up-the-bot): refused-join alerts and the slash commands.
+2. Organise your Discord with [`/odin setup`](#server-setup-odin-setup): themed
    channels, previewed first and undoable.
 3. Turn on the bot-made [stat channels](#stat-channels) (`"stat_channels": {"enabled": true}`)
    and the [roles](#roles--names).
@@ -227,7 +231,7 @@ The container runs as root, so it can read and edit those files anyway.
    summaries, milestones, weekly recap. They're just names in `events`.
 5. [Copy world backups](#world-backup-copies) to another disk.
 6. Link your update script and world settings ([host/README.md](host/README.md)) for
-   `/valheim restart`, update posts and `/valheim modifier`.
+   `/odin restart`, update posts and `/odin modifier`.
 
 ### Keeping secrets safe
 
@@ -471,7 +475,7 @@ lists are doing their job. There are two ways to receive it:
   | **Ignore** | Closes the notice |
 
   Only the Discord users and roles you list can press them. For IDs you already know,
-  there are also slash commands (`/valheim permit`, `ban`, `unban`, `unpermit`,
+  there are also slash commands (`/odin permit`, `ban`, `unban`, `unpermit`,
   `lists`). See [all Discord commands](#discord-commands).
 
   **Permit** never *starts* a permitted list. With an empty `permittedlist.txt`
@@ -518,48 +522,56 @@ effect, `sudo systemctl restart valheimserver`.
 
 ### Discord commands
 
-All commands are under `/valheim`. **Admin** commands only work for the users and roles
-in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visible to you.
+The commands are in four groups, one per place they're used:
 
-**Commands have a home channel.** After [`/valheim setup`](#server-setup-valheim-setup),
-commands whose replies everyone sees go in their own channel:
-- `stats`, `top`, `titles` and `online` in #🪶┃muninns-roost;
-- `plan` in #🗺️┃war-council, or one of its game-night threads.
+| Group | Commands | Where |
+|---|---|---|
+| **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access` | Anywhere: the replies are private |
+| **`/muninn`** | `stats`, `top`, `titles`, `online` | #🪶┃muninns-roost |
+| **`/warcouncil`** | `plan` | #🗺️┃war-council and its game-night threads |
+| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup` | Admins, anywhere: replies are private |
 
-Run one anywhere else and only you see "Run `/valheim stats` in #🪶┃muninns-roost, please";
-nothing is posted, so there's nothing to clean up. Commands with private replies (`join`,
-`map`, `link`, `notify`…) work everywhere, and admins can run anything anywhere.
-- Point a command somewhere else with `"command_channels": {"stats": "<channel id>"}`, or
-  turn this off with `"command_channels": false`.
-- To hide commands from other channels entirely, use Discord's own setting instead: Server
-  Settings → Integrations → the bot → pick a command → Channels. Bots can't change that one
-  themselves.
+**Admins:** `/odin` only works for the users and roles in `admin_user_ids` /
+`admin_role_ids`. Discord also hides it from anyone without **Manage Server**. If one of
+your bot admins doesn't have that permission, allow their role for `/odin` in Server
+Settings → Integrations → the bot.
+
+**Keeping commands in their channel.** Two layers:
+1. **Discord's own setting** (recommended) removes a group from the `/` menu everywhere
+   else. Go to Server Settings → Integrations → the bot, click **`/muninn`** → Channels
+   and allow only #🪶┃muninns-roost; do the same for **`/warcouncil`** with
+   #🗺️┃war-council. Bots can't change this setting themselves.
+2. **The bot's own check**, on by default after [`/odin setup`](#server-setup-odin-setup):
+   run in the wrong channel, only you see "Run `/muninn stats` in #🪶┃muninns-roost, please",
+   and nothing is posted. Admins can run anything anywhere.
+   - Point a command somewhere else with `"command_channels": {"stats": "<channel id>"}`, or
+     turn this off with `"command_channels": false`.
 
 | Command | Who | What it does | Needs |
 |---|---|---|---|
 | `/valheim join` | Anyone | Join code, address, password (spoiler) and how to connect; only the asker sees it | The bot; `admin_bot.join` for the address |
-| `/valheim online` | Anyone | Who's on right now, and since when | The bot |
-| `/valheim stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen, Steam achievements. No name = your linked character | Stats database |
-| `/valheim top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, or Steam achievements | Stats database |
-| `/valheim titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
+| `/muninn online` | Anyone | Who's on right now, and since when | The bot |
+| `/muninn stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen, Steam achievements. No name = your linked character | Stats database |
+| `/muninn top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, or Steam achievements | Stats database |
+| `/muninn titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
 | `/valheim notify <when> [player]` | Anyone | DM me when the first player joins an empty server, or when a given character joins; `off` / `list` | Stats database |
 | `/valheim link <character>` / `unlink` | Anyone | Link your Discord account to your character (stats, role, mentions) | Stats database |
 | `/valheim request-access <character>` | Anyone | New player: "I'll join as …". The admins' refused-join notice then says who it is | Stats database |
-| `/valheim plan <title> <when>` | Anyone | Game night with Going / Maybe / Can't buttons, a planning thread and a reminder ping. Several times (`sat 20:00, sun 18:00`) start a poll for the time | Stats database |
+| `/warcouncil plan <title> <when>` | Anyone | Game night with Going / Maybe / Can't buttons, a planning thread and a reminder ping. Several times (`sat 20:00, sun 18:00`) start a poll for the time | Stats database |
 | `/valheim map` | Anyone | World seed and a map link (spoilers; only the asker sees it) | `save_dir` |
-| `/valheim permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
-| `/valheim ban <id>` | Admin | Ban, and remove from the permitted list | `save_dir` |
-| `/valheim unban <id>` / `unpermit <id>` | Admin | Remove from one list | `save_dir` |
-| `/valheim lists` | Admin | Show the permitted, banned and admin lists | `save_dir` |
-| `/valheim backups` | Admin | Newest backup copies, with size and age | [`backups`](#world-backup-copies) |
-| `/valheim update-check` | Admin | Check for a Valheim update now | [host helper](host/README.md) |
-| `/valheim restart [minutes] [reason]` | Admin | Restart (installs any waiting update); warns players at N/5/1 min, early if everyone leaves | [host helper](host/README.md) |
-| `/valheim restart-cancel` | Admin | Stop a restart countdown | — |
-| `/valheim setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-valheim-setup)) | Manage Channels, Manage Roles (Manage Webhooks for Huginn's webhook, Manage Server for Discord's join messages) |
-| `/valheim settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
-| `/valheim modifier <name> <value>` | Admin | Change a modifier, e.g. `raids more`; `normal` resets it | world settings |
-| `/valheim preset <name>` | Admin | Change the preset; `default` removes it | world settings |
-| `/valheim setkey <key> on\|off` | Admin | Turn nomap, playerevents, passivemobs or nobuildcost on or off | world settings |
+| `/odin permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
+| `/odin ban <id>` | Admin | Ban, and remove from the permitted list | `save_dir` |
+| `/odin unban <id>` / `unpermit <id>` | Admin | Remove from one list | `save_dir` |
+| `/odin lists` | Admin | Show the permitted, banned and admin lists | `save_dir` |
+| `/odin backups` | Admin | Newest backup copies, with size and age | [`backups`](#world-backup-copies) |
+| `/odin update-check` | Admin | Check for a Valheim update now | [host helper](host/README.md) |
+| `/odin restart [minutes] [reason]` | Admin | Restart (installs any waiting update); warns players at N/5/1 min, early if everyone leaves | [host helper](host/README.md) |
+| `/odin restart-cancel` | Admin | Stop a restart countdown | — |
+| `/odin setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-odin-setup)) | Manage Channels, Manage Roles (Manage Webhooks for Huginn's webhook, Manage Server for Discord's join messages) |
+| `/odin settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
+| `/odin modifier <name> <value>` | Admin | Change a modifier, e.g. `raids more`; `normal` resets it | world settings |
+| `/odin preset <name>` | Admin | Change the preset; `default` removes it | world settings |
+| `/odin setkey <key> on\|off` | Admin | Turn nomap, playerevents, passivemobs or nobuildcost on or off | world settings |
 
 Player IDs look like `V_76561198…` (Steam), `X_…`, `S_…` or `N_…`. World-setting changes
 apply at the next restart; the bot offers a "Restart in 5 min" button.
@@ -612,8 +624,8 @@ permissions; it doesn't add a second bot.
 | Send Messages | Admin notices, game nights, the channel guide, the titles post |
 | Embed Links | Every notice and stat post is an embed |
 | Read Message History | Finding and editing its own earlier messages (guide, signups, status board) |
-| Manage Channels | [Stat channels](#stat-channels), the [status channel](#status-voice-channel), [`/valheim setup`](#server-setup-valheim-setup) |
-| Manage Roles | ["In Valheim", Odin and the title roles](#roles--names); channel permissions in `/valheim setup` |
+| Manage Channels | [Stat channels](#stat-channels), the [status channel](#status-voice-channel), [`/odin setup`](#server-setup-odin-setup) |
+| Manage Roles | ["In Valheim", Odin and the title roles](#roles--names); channel permissions in `/odin setup` |
 | Manage Webhooks | Creating Huginn's webhook, or moving it to #huginns-watch |
 | Manage Server | Moving Discord's "Yay you made it" join messages (optional) |
 | Manage Events | Discord Events for game nights, with `lfg.discord_event` (optional) |
@@ -668,7 +680,8 @@ and **Copy ID** on each of these:
 **6. Start.** Run `docker compose up -d --build --force-recreate`, or
 `pip install -r requirements.txt` and restart the monitor if you don't use Docker.
 - The log shows `admin_bot: connected as …` and the bot turns online in Discord.
-- With `guild_id` set, `/valheim` commands appear immediately; without it, they can take up
+- With `guild_id` set, the commands (`/valheim`, `/muninn`, `/warcouncil`, `/odin`) appear
+  immediately; without it, they can take up
   to an hour.
 
 A player who keeps retrying triggers only one notice per `repeat_cooldown_seconds`
@@ -787,7 +800,7 @@ voice channels or categories.
 | `hours_week` | Hours played this week (since Monday), all players together |
 | `deaths_week` | Deaths this week |
 | `last_raid` | The most recent raid and its day |
-| `next_plan` | The next game night from `/valheim plan` |
+| `next_plan` | The next game night from `/warcouncil plan` |
 | `vikings` | Characters that have ever played |
 | `achievements` | Steam achievements unlocked, all players together |
 | `title_owner` | Odin: the Discord server's owner |
@@ -821,7 +834,7 @@ within a minute.
 - The live channels (`players`, `server`, `join_code`, `uptime`, `day`, `saved`, `backup`,
   `disk`, `last_raid`) and Odin don't need the stats database; the rest do.
 
-### Server setup: `/valheim setup`
+### Server setup: `/odin setup`
 
 Organises your Discord server (new or existing) into Valheim- and Norse-themed categories
 and channels, in one command. Admins only.
@@ -837,7 +850,7 @@ and channels, in one command. Admins only.
   # 🪶┃muninns-roost    bot commands (talk to Muninn)
 ⚔️ THE WILDS
   # 🐦┃huginns-watch    Huginn's feed: logins, deaths, raids  ← your webhook's channel
-  # 🗺️┃war-council      raids & game nights (/valheim plan)
+  # 🗺️┃war-council      raids & game nights (/warcouncil plan)
   # 🔮┃seers-stone      seeds, maps, tips
 🔊 THE LONGHOUSES
   🔊 🍺 The Longhouse                                        ← your "General" voice
@@ -849,11 +862,11 @@ and channels, in one command. Admins only.
 The [stat channels](#stat-channels) stay on top.
 
 **How it works:**
-1. **`/valheim setup preview`** lists every category and channel and what would happen to
+1. **`/odin setup preview`** lists every category and channel and what would happen to
    it: ✨ new, ← renamed from, or ✓ already right. Nothing changes yet.
-2. **`/valheim setup apply`** shows the same list with **Apply** and **Cancel** buttons.
+2. **`/odin setup apply`** shows the same list with **Apply** and **Cancel** buttons.
    Only the admin who ran it can confirm.
-3. **`/valheim setup undo`** puts every renamed or moved channel back: names, categories,
+3. **`/odin setup undo`** puts every renamed or moved channel back: names, categories,
    topics, permissions and order. Channels the setup created are listed rather than
    deleted, since they may have messages by then; delete the ones you don't want.
 
@@ -901,13 +914,13 @@ Messages** to pin the guide; without them you're told what to do by hand.
 
 These need the stats database (`database.path`), which the bot and the monitor share.
 
-- **Stats in Discord.** `/valheim stats Ingrid` shows play time, rank, visits, longest
+- **Stats in Discord.** `/muninn stats Ingrid` shows play time, rank, visits, longest
   session, deaths (and deaths per hour), first and last seen, and Steam achievements
-  ([below](#steam-achievements-in-discord)). `/valheim top` has five leaderboards.
+  ([below](#steam-achievements-in-discord)). `/muninn top` has five leaderboards.
   Character names autocomplete.
 - **Linking.** `/valheim link Ingrid` ties a character to your Discord account, which lets
   you:
-  - run `/valheim stats` with no name;
+  - run `/muninn stats` with no name;
   - get an @mention in your welcome and milestone posts;
   - get the "In Valheim" role (below).
 
@@ -957,14 +970,14 @@ These need the stats database (`database.path`), which the bot and the monitor s
   - the admin channel gets a heads-up;
   - when that character is refused, the notice says **Requested by @them**;
   - clicking **Permit** links the character to them and DMs "you're in, try again".
-- **Game nights.** `/valheim plan "Bonemass run" "sat 20:00"` posts a signup in the channel
+- **Game nights.** `/warcouncil plan "Bonemass run" "sat 20:00"` posts a signup in the channel
   with **✅ Going / ❔ Maybe / ❌ Can't** buttons.
   - Times are read in the container's time zone (`TZ`), and shown to everyone in their own
     time zone. It accepts `20:00`, `8pm`, `tomorrow 8pm`, `sat 20:00` and `in 2h`.
   - **A thread** opens on the signup ("🗺️ Bonemass run") for planning who brings what.
   - Everyone going or maybe is pinged `lfg.reminder_minutes` (15) before it starts, in the
     thread (or the channel, if the thread is gone).
-  - **Can't agree on a time?** Give several: `/valheim plan "Bonemass run" "sat 20:00, sun 18:00"`
+  - **Can't agree on a time?** Give several: `/warcouncil plan "Bonemass run" "sat 20:00, sun 18:00"`
     posts a Discord poll instead. It closes an hour before the earliest option (at most a
     week), and the most-voted time becomes the signup automatically; a tie goes to the
     earlier time. Nobody voting means nothing is planned.
@@ -990,7 +1003,7 @@ These need the stats database (`database.path`), which the bot and the monitor s
 
 ### Title roles
 
-The leader of each `/valheim top` board gets a role named after a figure from Norse
+The leader of each `/muninn top` board gets a role named after a figure from Norse
 mythology:
 
 | Role | Leaderboard | Why |
@@ -1017,9 +1030,9 @@ the Odin role goes to the server owner. See [roles & names](#roles--names) for t
   waits: the post says so, and the role is given as soon as they link.
 - **Ties** keep the current holder, so a title doesn't flip back and forth.
 - **All time or weekly.** By default the titles follow the same all-time numbers as
-  `/valheim top`. With `"period": "week"`, only the last 7 days count, so the titles move
+  `/muninn top`. With `"period": "week"`, only the last 7 days count, so the titles move
   around more.
-- **`/valheim titles`** shows the current holders. Admins can run `/valheim titles
+- **`/muninn titles`** shows the current holders. Admins can run `/muninn titles
   refresh:True` to reassign them right away.
 
 **Setup:**
@@ -1053,7 +1066,7 @@ at the top of the member list. Options:
 ### Roles & names
 
 Everything the bot adds to your Discord server follows one theme from Norse mythology.
-The channels have themed names too: see [server setup](#server-setup-valheim-setup) and
+The channels have themed names too: see [server setup](#server-setup-odin-setup) and
 [stat channels](#stat-channels).
 
 | Name | What it is | Why the name | Turned on with |
@@ -1068,7 +1081,7 @@ The channels have themed names too: see [server setup](#server-setup-valheim-set
 | **Thor** | Title role: longest single session | Drank from a horn linked to the sea and lowered the ocean | 〃 |
 | **Bragi** | Title role: most Steam achievements | Sings the great deeds of heroes in Valhalla | 〃 (plus the Steam key) |
 
-Title roles go to whoever leads that `/valheim top` board at the weekly check
+Title roles go to whoever leads that `/muninn top` board at the weekly check
 ([details](#title-roles)).
 
 **All of it at once**, in the `admin_bot` block of `config.json` (plus `"username":
@@ -1097,7 +1110,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 
 **Renaming and recolouring:**
 - The bot remembers its roles by ID, so you can rename, recolour or reorder them in
-  Discord. The exception: the title posts and `/valheim titles` use the names above.
+  Discord. The exception: the title posts and `/muninn titles` use the names above.
 - **Display role members separately** is on for the Odin and In Valheim roles when the bot
   creates them. Turn it on for a title role to list its holder near the top of the member
   list too.
@@ -1106,7 +1119,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 
 ### Testing it
 
-1. **Can the bot read the lists?** In Discord, run `/valheim lists`. You should get a private
+1. **Can the bot read the lists?** In Discord, run `/odin lists`. You should get a private
    reply showing `permittedlist.txt`, `bannedlist.txt` and `adminlist.txt`.
 2. **Fake a refused join.** Append a made-up log line; the ID is fake, so no real player is
    affected:
@@ -1121,7 +1134,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
    ```bash
    sudo cat /home/valheim/valheim_save_data/permittedlist.txt
    ```
-   Undo it with `/valheim unpermit player_id:V_76561190000000001` (or `/valheim unban …`).
+   Undo it with `/odin unpermit player_id:V_76561190000000001` (or `/odin unban …`).
    Use a different fake ID for each test, because of the 10-minute cooldown.
 4. **For real.** Have someone who isn't on the list try to join, click **Permit**, and have
    them try again.
@@ -1135,7 +1148,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `admin_bot stopped: Improper token has been passed.` | The token Discord got is wrong: an old token after a reset, the Client Secret instead of the bot token, or placeholder text left in `.env` | See the length check below |
 | `discord.py isn't installed` | The image wasn't rebuilt | `docker compose up -d --build` |
 | `admin_bot disabled: …` | A required setting is missing; the message names it | Add it to the `admin_bot` block |
-| `/valheim` commands don't show up | `guild_id` isn't set (global commands take up to an hour), or the bot was invited without `applications.commands` | Set `guild_id`, or re-invite the bot with both scopes |
+| The commands don't show up | `guild_id` isn't set (global commands take up to an hour), or the bot was invited without `applications.commands` | Set `guild_id`, or re-invite the bot with both scopes |
 | "Only the server admins can do that." | Your Discord user ID isn't in `admin_user_ids`, and you have none of the `admin_role_ids` roles | Add your ID and recreate the container |
 | Status channel never changes; log says `no permission to rename the status channel` | The bot lacks **Manage Channels** on that channel | Add it in the channel's permissions (the bot can't rename a channel it can't manage) |
 | Status channel lags behind | Discord's limit of 2 renames per 10 minutes | Expected: it catches up within 5 minutes |
@@ -1149,15 +1162,15 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/valheim join` says the join code isn't known | Nobody has joined since the server's last restart, so the new code isn't in the log yet | It appears at the next join. Meanwhile, players can use the address, or ask someone in-game (pause menu) |
 | World setting: "the settings file didn't change within 20 s" | The host helper isn't updated, or `/valheim_home` isn't mounted | Re-run the two `install` commands in [host/README.md](host/README.md#one-time-setup); check the mount with `docker compose config` |
 | `can't give the Hel title role` (or another title) | The bot lacks Manage Roles, or a title role was moved above the bot's role | Give it Manage Roles and keep the bot's role above the title roles |
-| `/valheim titles` says title roles are off | `titles.enabled` isn't true, or `guild_id` / the stats database is missing (the log says which) | Fix the config and recreate the container |
+| `/muninn titles` says title roles are off | `titles.enabled` isn't true, or `guild_id` / the stats database is missing (the log says which) | Fix the config and recreate the container |
 | Stat channels don't appear; log says `can't create the stat channels` | The bot lacks Manage Channels | Give its role Manage Channels (Server Settings → Roles) |
 | A stat channel shows an old value | Discord's limit of 2 renames per channel per 10 minutes | Expected: it catches up within 5 minutes |
 | `can't give the owner role` | The bot lacks Manage Roles, or the Odin role was moved above the bot's role | Give it Manage Roles and keep the bot's role above Odin |
 | "In Valheim" stays on someone who quit | Before this version: they left while the monitor was restarting. Otherwise Valheim didn't log who left | Update; the bot's 5-minute check clears it. If it still happens, check `docker compose logs \| grep "didn't say who"` and share those lines in an issue |
-| Logins, deaths and other posts show up in the admin channel, not #huginns-watch | The webhook was created in the admin channel; a webhook always posts where it was made, whatever `config.json` says. The bot warns about this at start-up | `/valheim setup apply` moves it (needs Manage Webhooks), or channel settings → Integrations → Webhooks → Huginn → Channel |
-| Discord's "Yay you made it" join messages only show up in the admin channel | The server's System Messages Channel is the admin channel, which setup made private | Server Settings → Engagement → System Messages Channel → #the-gates. Or give the bot Manage Server and run `/valheim setup apply` again |
-| `/valheim setup` says some changes failed | The bot lacks Manage Channels or Manage Roles, or a channel's permissions deny it | Give its role both permissions (Server Settings → Roles), then run `/valheim setup apply` again; it only redoes what's missing |
-| `/valheim setup` picked the wrong channel for a slot | It matched by name | Run `/valheim setup undo`, rename that channel so it doesn't match (or give the right one the slot's name, e.g. `rules`), then preview and apply again |
+| Logins, deaths and other posts show up in the admin channel, not #huginns-watch | The webhook was created in the admin channel; a webhook always posts where it was made, whatever `config.json` says. The bot warns about this at start-up | `/odin setup apply` moves it (needs Manage Webhooks), or channel settings → Integrations → Webhooks → Huginn → Channel |
+| Discord's "Yay you made it" join messages only show up in the admin channel | The server's System Messages Channel is the admin channel, which setup made private | Server Settings → Engagement → System Messages Channel → #the-gates. Or give the bot Manage Server and run `/odin setup apply` again |
+| `/odin setup` says some changes failed | The bot lacks Manage Channels or Manage Roles, or a channel's permissions deny it | Give its role both permissions (Server Settings → Roles), then run `/odin setup apply` again; it only redoes what's missing |
+| `/odin setup` picked the wrong channel for a slot | It matched by name | Run `/odin setup undo`, rename that channel so it doesn't match (or give the right one the slot's name, e.g. `rules`), then preview and apply again |
 | `can't change the In-Valheim role` | The bot lacks Manage Roles, or its role is below the "In Valheim" role | Give it Manage Roles and drag the bot's role above that role in Server Settings → Roles |
 | A refused-join notice has no "Who this is" | The bot hasn't seen that account join before (platform IDs are recorded from this version on), and nobody used `/valheim request-access` for that name | Nothing to fix: it fills in once the player has joined, or has asked with `request-access` |
 | A refused or out-of-date player wasn't DMed | The bot doesn't know their Discord account, they're banned, they were DMed in the last 30 minutes, or their DMs are closed | Have them `/valheim request-access <character>`, or `/valheim link` once they're in |
@@ -1166,12 +1179,12 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | No thread on a game-night signup / no reactions on Huginn's posts / the guide isn't pinned | Missing Create Public Threads, Add Reactions or Pin Messages (in that channel too) | See [bot permissions](#bot-permissions); the log says `couldn't open a thread` / `couldn't pin` |
 | The weekly recap has no chart | Pillow isn't installed (an old image), or nobody played that week | `docker compose up -d --build --force-recreate` |
 | Handled refused-join notices aren't deleted | The bot lacks Manage Messages in the admin channel, or `tidy_notices_hours` is 0 | Grant it in the channel's permissions |
-| Members get "Run `/valheim stats` in #…" | That command belongs in its home channel since `/valheim setup` | Run it there, or change it with `admin_bot.command_channels` (`false` turns it off) |
-| A command's home channel is wrong or was deleted | It points at the channel setup remembered | Run `/valheim setup apply` again (it recreates missing channels), or set `"command_channels": {"stats": "<channel id>"}` |
+| Members get "Run `/muninn stats` in #…" | That command belongs in its home channel since `/odin setup` | Run it there, or change it with `admin_bot.command_channels` (`false` turns it off) |
+| A command's home channel is wrong or was deleted | It points at the channel setup remembered | Run `/odin setup apply` again (it recreates missing channels), or set `"command_channels": {"stats": "<channel id>"}` |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
 | `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |
 | No backups copied | `source_dir` isn't Valheim's `worlds_local`, or `dest_dir` isn't mounted | Check both, then see what the log says after `Backup created` (`Backups: copied N backup(s)`) |
-| No achievement posts | `"achievement"` isn't in `events`; the player hasn't joined since the key was added (that's when their Steam ID is learned); their first check only records what they have; or their profile or game details are private | Check `events` and `docker compose logs \| grep -i steam`; `/valheim stats <player>` shows whether it's private |
+| No achievement posts | `"achievement"` isn't in `events`; the player hasn't joined since the key was added (that's when their Steam ID is learned); their first check only records what they have; or their profile or game details are private | Check `events` and `docker compose logs \| grep -i steam`; `/muninn stats <player>` shows whether it's private |
 | `Steam rejected the API key` | The key in `.env` is wrong, revoked or rotated | Get a new one at <https://steamcommunity.com/dev/apikey>, set `STEAM_API_KEY` in `.env`, recreate |
 | Times in the log are off by hours | The container runs in UTC | Set `TZ=America/Los_Angeles` (etc.) in `.env` and recreate |
 | `No Discord webhook URL configured` | Neither `.env` nor `config.json` has a webhook URL, or `.env` wasn't loaded | Set `DISCORD_WEBHOOK_URL` in `.env` (next to `docker-compose.yml`) and recreate the container |
@@ -1266,8 +1279,8 @@ the glanceable version, and the board has the details.
   - the in-game steps (Join Game → Add server);
   - if you use a permitted list, a note that a refused player should ask an admin, who
     then gets the Permit button.
-- **`/valheim online`** (anyone): who's on right now, and since when.
-- **`/valheim backups`** (admins): the newest copied world backups, with sizes and ages.
+- **`/muninn online`** (anyone): who's on right now, and since when.
+- **`/odin backups`** (admins): the newest copied world backups, with sizes and ages.
 
 ### World backup copies
 
@@ -1338,10 +1351,10 @@ small helper on the host lets the monitor:
 - **give the updater a reliable player count:** it writes `status.json`, because the
   script's own guess from the console log reads 0 right after a log rotation;
 - **take admin commands:**
-  - `/valheim update-check` checks for an update now;
-  - `/valheim restart [minutes] [reason]` restarts after a warning countdown in the public
+  - `/odin update-check` checks for an update now;
+  - `/odin restart [minutes] [reason]` restarts after a warning countdown in the public
     channel, early if everyone leaves, and installs any waiting update;
-  - `/valheim restart-cancel` stops a countdown.
+  - `/odin restart-cancel` stops a countdown.
 
 The container gets no host privileges. It drops a request file into a shared folder, and a
 systemd path unit on the host runs a small handler as the `valheim` user. **Setup,
@@ -1349,8 +1362,8 @@ including the change to `check_update.sh`: [host/README.md](host/README.md).**
 
 **World settings from Discord.** The same link lets admins change the world's preset,
 modifiers and setkeys:
-- `/valheim settings` shows what's set and every allowed value.
-- `/valheim modifier raids more`, `/valheim preset hard` and `/valheim setkey passivemobs on`
+- `/odin settings` shows what's set and every allowed value.
+- `/odin modifier raids more`, `/odin preset hard` and `/odin setkey passivemobs on`
   make a change.
 
 Changes apply at the next restart; the bot offers a "Restart in 5 min" button.
@@ -1405,9 +1418,9 @@ You don't need the web page for this.
 - **Unlock posts.** When a player unlocks an achievement, Huginn posts "🏅 Ingrid unlocked
   Elder slayer" with the achievement's icon, what it's for, and their total (e.g. 23/45).
   Several at once become one post. Add `"achievement"` to `events` to turn this on.
-- **`/valheim stats`** shows the player's achievement count and latest unlock, or says
+- **`/muninn stats`** shows the player's achievement count and latest unlock, or says
   that their Steam profile is private.
-- **`/valheim top achievements`**: the "Most achievements (Steam)" leaderboard.
+- **`/muninn top achievements`**: the "Most achievements (Steam)" leaderboard.
 - **Bragi** title role for the leader, with the [other titles](#title-roles).
 
 **Setup:**
@@ -1428,7 +1441,7 @@ You don't need the web page for this.
   achievements API, so Xbox support would need a third-party service such as OpenXBL.
   PlayStation has no public trophy API, and Nintendo consoles have no achievements at all.
 - Players need a **public Steam profile with public game details**. Otherwise
-  `/valheim stats` says it's private.
+  `/muninn stats` says it's private.
 
 ### Achievements on the stats web page
 
@@ -1597,7 +1610,7 @@ or run it in a terminal.
 | `admin_bot.enabled` | false | Post refused join attempts to a private channel with Permit / Ban buttons. |
 | `admin_bot.token` | — | Discord bot token. Prefer the `DISCORD_BOT_TOKEN` env var (`.env`), which takes precedence. |
 | `admin_bot.guild_id` / `channel_id` | — | Your Discord server, and the admin channel for notices. |
-| `admin_bot.admin_user_ids` / `admin_role_ids` | — | Who may press the buttons and use `/valheim`. |
+| `admin_bot.admin_user_ids` / `admin_role_ids` | — | Who may press the buttons and use `/odin`. |
 | `admin_bot.save_dir` | — | Folder holding `permittedlist.txt` / `bannedlist.txt` (must be writable). |
 | `admin_bot.repeat_cooldown_seconds` | 600 | One notice per player per this many seconds. |
 | `admin_bot.status_channel.channel_id` | — | Voice channel whose name shows the server status. |
@@ -1628,9 +1641,9 @@ or run it in a terminal.
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
 | `admin_bot.map.seed` | "" | Use this seed instead of reading it from the world file. |
 | `admin_bot.link_nickname` | false | `/valheim link` sets the member's server nickname to their character, if they have no nickname yet (needs Manage Nicknames; the server owner's can't be changed). |
-| `admin_bot.command_channels` | true | Send `stats`, `top`, `titles`, `online` and `plan` to their home channel (from `/valheim setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
+| `admin_bot.command_channels` | true | Send `stats`, `top`, `titles`, `online` and `plan` to their home channel (from `/odin setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
 | `admin_bot.tidy_notices_hours` | 24 | Delete refused-join notices this long after someone pressed Permit, Ban or Ignore (needs Manage Messages). `0` keeps them. |
-| `admin_bot.titles.enabled` | false | Weekly title roles for the `/valheim top` leaders. |
+| `admin_bot.titles.enabled` | false | Weekly title roles for the `/muninn top` leaders. |
 | `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |
 | `admin_bot.titles.day` / `hour` | sunday / 18 | When to reassign the titles (container time zone). |
 | `admin_bot.titles.channel_id` | — | Where to post title changes; empty = the webhook channel. |
@@ -1644,7 +1657,7 @@ or run it in a terminal.
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |
 | `state_file` | `monitor_state.json` | Where the read offset is remembered. |
 | `parser_state_file` | `parser_state.json` (next to `state_file`) | Who's online and which player IDs are whose, so a restart doesn't lose track of them. |
-| `webhook_file` | `webhook.json` (next to `state_file`) | The webhook the bot created with `/valheim setup`, used when `DISCORD_WEBHOOK_URL` isn't set. |
+| `webhook_file` | `webhook.json` (next to `state_file`) | The webhook the bot created with `/odin setup`, used when `DISCORD_WEBHOOK_URL` isn't set. |
 
 ## Notes
 - Names come from the character, not the Steam account.
@@ -1674,7 +1687,7 @@ Things that come up running a vanilla dedicated server, learned setting this one
 
 Put one ID per line in the `V_<SteamID64>` form (Valheim 1.0+). To find your SteamID64:
 Steam → your name → **Account details**, or the number at the end of your profile URL.
-After editing `adminlist.txt`, restart the server. The admin bot's `/valheim lists` shows
+After editing `adminlist.txt`, restart the server. The admin bot's `/odin lists` shows
 all three files.
 
 **Looking at them** needs `sudo`, because the folder belongs to the `valheim` user. Wrap
@@ -1718,21 +1731,22 @@ This is a fork of
 [justin7jones/valheim-discord-monitor](https://github.com/justin7jones/valheim-discord-monitor).
 Added here:
 - **Admin bot:** refused-join alerts with Permit / Ban / Ignore buttons and who the player
-  is, DMs telling refused or out-of-date players why, `/valheim` commands, and support for
+  is, DMs telling refused or out-of-date players why, slash commands in four groups
+  (`/valheim`, `/muninn`, `/warcouncil`, `/odin`), and support for
   Valheim 1.0's `V_…` player IDs on every platform.
 - **Status voice channel**, bot-created **stat channels**, and a live **status board**,
   filled in from the existing log at start-up.
-- **`/valheim setup`:** organises a Discord server into themed channels, with preview and
+- **`/odin setup`:** organises a Discord server into themed channels, with preview and
   undo.
 - **`/valheim join`:** the current join code (tracked across restarts), address and how
   to connect.
 - **Extras:** raid alerts, version-mismatch alerts, session summaries, first-visit
-  welcomes, milestones, a weekly recap, `/valheim online`, and copies of Valheim's world
+  welcomes, milestones, a weekly recap, `/muninn online`, and copies of Valheim's world
   backups to another disk (including Valheim 1.0's backup folders).
 - **Auto-update integration:** update posts, a reliable player count for the host's
-  update script, and `/valheim restart` with a countdown (`host/`).
+  update script, and `/odin restart` with a countdown (`host/`).
 - **World settings from Discord:** preset, modifiers and setkeys, validated on the host.
-- **Community:** `/valheim stats`, `top`, `notify` (DMs), `link` with an "In Valheim" role,
+- **Community:** `/muninn stats`, `top`, `notify` (DMs), `link` with an "In Valheim" role,
   `request-access`, `plan` (game nights with RSVPs, a planning thread, reminders and time
   polls), `map` (reads the seed from Valheim 1.0 world folders), weekly title roles
   (`titles`), the bot-created "In Valheim" and Odin (owner) roles, and optional nicknames
@@ -1740,8 +1754,8 @@ Added here:
 - **Command channels:** commands with public replies go to their home channel; used
   elsewhere, the member gets a private pointer instead.
 - **Polish:** reactions on Huginn's posts, a chart in the weekly recap, a pinned channel
-  guide, the AFK channel set by `/valheim setup`, and handled admin notices tidied away.
-- **Steam achievements in Discord:** unlock posts, achievements in `/valheim stats`, a
+  guide, the AFK channel set by `/odin setup`, and handled admin notices tidied away.
+- **Steam achievements in Discord:** unlock posts, achievements in `/muninn stats`, a
   "Most achievements" leaderboard, and the Bragi title.
 - **Server health:** low-disk and slow-save warnings, an optional daily restart, and
   exploration in the weekly recap.

@@ -10,7 +10,7 @@ through one shared folder, `/home/valheim/bot/`:
 | File | Written by | Read by | Purpose |
 |---|---|---|---|
 | `status.json` | monitor, every poll | `check_update.sh` | The live player count, so the updater never restarts on people |
-| `request` | monitor (`/valheim restart`, `/valheim update-check`) | `valheim-bot-request.sh` | Ask the host to check now or restart |
+| `request` | monitor (`/odin restart`, `/odin update-check`) | `valheim-bot-request.sh` | Ask the host to check now or restart |
 
 The monitor also reads `update_check.log` to post "update available", "installing" and
 checker errors, and it posts "✅ Valheim updated: l-1.0.16 → l-1.0.17" when the server
@@ -106,14 +106,14 @@ Add `"update"` to `events` for the public update posts. Then:
 
 ## Discord commands (admins)
 
-- **`/valheim update-check`** runs the check now. The result goes to the admin channel.
-- **`/valheim restart [minutes] [reason]`** restarts the server, which installs any waiting
+- **`/odin update-check`** runs the check now. The result goes to the admin channel.
+- **`/odin restart [minutes] [reason]`** restarts the server, which installs any waiting
   update.
   - With people online it warns the public channel ("restarts in 5 minutes"), again at
     5 and 1 minutes, then restarts.
   - It restarts early if everyone leaves.
   - With nobody online it restarts immediately.
-- **`/valheim restart-cancel`** stops a countdown.
+- **`/odin restart-cancel`** stops a countdown.
 
 If a request isn't picked up within 30 seconds, the admin channel is told to check
 `systemctl status valheim-bot-request.path`.
@@ -124,8 +124,8 @@ Keep the cron job: it still does the checking every 15 minutes. The commands jus
 ## World settings from Discord (preset, modifiers, setkeys)
 
 The same request handler can change the world's **preset**, **modifiers** and **setkeys**.
-Admins use `/valheim settings`, `/valheim preset`, `/valheim modifier` and
-`/valheim setkey`.
+Admins use `/odin settings`, `/odin preset`, `/odin modifier` and
+`/odin setkey`.
 
 **How it stays safe:**
 - The service file (root-owned) is edited once, by you, to read the settings from a small
@@ -175,16 +175,16 @@ Run these from the repo folder, after `git pull`.
    The last command should list the same modifiers as before.
 
 The monitor reads the settings file through the read-only `/valheim_home` mount you
-already set up for the updater. `/valheim settings` shows what's in it.
+already set up for the updater. `/odin settings` shows what's in it.
 
 ### Using it
 
 | Command | Example |
 |---|---|
-| `/valheim settings` | Shows the current preset, modifiers and setkeys, and every allowed value |
-| `/valheim modifier <name> <value>` | `raids` → `more`. Set `normal` to go back to the default |
-| `/valheim preset <name>` | `hard`. `default` removes the preset |
-| `/valheim setkey <key> on\|off` | `passivemobs` → `on` |
+| `/odin settings` | Shows the current preset, modifiers and setkeys, and every allowed value |
+| `/odin modifier <name> <value>` | `raids` → `more`. Set `normal` to go back to the default |
+| `/odin preset <name>` | `hard`. `default` removes the preset |
+| `/odin setkey <key> on\|off` | `passivemobs` → `on` |
 
 After a change the bot confirms once the file has been written, e.g. "✅ Saved: modifier
 raids → more. It takes effect at the next server restart", and offers a **Restart in 5 min

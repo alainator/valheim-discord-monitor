@@ -1,5 +1,5 @@
 """
-/valheim setup: organise a Discord server into Valheim/Norse-themed categories and
+/odin setup: organise a Discord server into Valheim/Norse-themed categories and
 channels.
 
 This module only plans (plain functions, testable without Discord): given a snapshot
@@ -45,7 +45,8 @@ TEMPLATE = [
          ("builds", "text", "🔨┃the-forge", "Builds, bases and base tours.",
           ["builds", "building", "bases", "base-tours", "creations"], set()),
          ("bots", "text", "🪶┃muninns-roost",
-          "Ask Muninn: /valheim stats, top, titles, link, notify, map and more.",
+          "Ask Muninn: /muninn stats, top, titles and online. /valheim join, link, notify and map "
+          "work in any channel.",
           ["bot-commands", "bots", "commands", "bot", "bot-spam", "botspam"], set()),
      ]},
     {"key": "wilds", "name": "⚔️ The Wilds", "aliases": ["Gaming", "Valheim", "Game", "Games"],
@@ -54,7 +55,7 @@ TEMPLATE = [
           "Huginn reports from the server: logins, deaths, raids, achievements and titles.",
           ["valheim", "server-feed", "server-status", "status", "game-feed", "valheim-feed", "server-log",
            "activity"], {"feed"}),
-         ("plans", "text", "🗺️┃war-council", "Plan raids and game nights with /valheim plan.",
+         ("plans", "text", "🗺️┃war-council", "Plan raids and game nights with /warcouncil plan.",
           ["lfg", "looking-for-group", "plans", "events", "game-nights", "planning", "raids"], set()),
          ("lore", "text", "🔮┃seers-stone", "Seeds, maps, tips and questions.",
           ["tips", "help", "guides", "questions", "seeds", "valheim-help", "strategy"], set()),
@@ -77,6 +78,13 @@ TEMPLATE = [
 ]
 
 
+# Earlier default topics: a channel still showing one of these gets the current topic.
+OLD_TOPICS = {
+    "bots": ("Ask Muninn: /valheim stats, top, titles, link, notify, map and more.",),
+    "plans": ("Plan raids and game nights with /valheim plan.",),
+}
+
+
 def norm(name: str) -> str:
     """Compare names without emoji, separators or case: "📜┃Run-estone" -> "runestone"."""
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
@@ -97,7 +105,7 @@ def _match(items: list, used: set, want_id=None, names=()) -> Optional[dict]:
 
 def plan(snapshot: dict, known: Optional[dict] = None, remembered: Optional[dict] = None,
          exclude: Optional[set] = None) -> dict:
-    """What /valheim setup would do.
+    """What /odin setup would do.
 
     snapshot: {"categories": [{"id", "name", "position"}],
                "channels": [{"id", "name", "kind": "text"|"voice", "category_id", "position", "topic"}]}

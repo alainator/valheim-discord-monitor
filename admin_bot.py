@@ -13,14 +13,14 @@ admin channel with buttons, and edits the server's list files when an admin clic
     Ban     - add the id to bannedlist.txt (and take it off permittedlist.txt)
     Ignore  - just close the notice
 
-The same actions are available as slash commands (/valheim permit|unpermit|ban|
+The same actions are available as slash commands (/odin permit|unpermit|ban|
 unban|lists), for ids you already know.
 
 Optionally it also keeps a (locked) voice channel's name showing the server's status,
 e.g. "🟢 Valheim: 3 online" / "🟢 Valheim: empty" / "🔴 Valheim: offline"
 (`admin_bot.status_channel`), and a live status-board message listing who's on, the
 version, last save/backup and last raid (`admin_bot.status_board`). Anyone can use
-/valheim online; /valheim backups is for admins.
+/muninn online; /odin backups is for admins.
 
 It needs write access to the server's save dir (where the list files live), so it
 suits the self-hosted `file` source, where the monitor runs next to the server.
@@ -42,7 +42,7 @@ import threading
 import time
 from typing import Optional
 
-# Commands with public replies, and the /valheim setup channel they belong in. Others (their
+# Commands with public replies, and the /odin setup channel they belong in. Others (their
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "plan": "plans"}
 
@@ -310,7 +310,7 @@ class AdminBot:
         self.backups = None                  # extras.BackupCopier, from attach()
         self.updater = None                  # updater.UpdateWatcher, from attach()
         self.announce = None                 # posts a line to the public webhook channel
-        self._countdown = None               # running /valheim restart countdown task
+        self._countdown = None               # running /odin restart countdown task
         self._countdown_cancel = None
         # Community features (community.py), stored in the stats database.
         self.db_path = None                  # from attach()
@@ -344,7 +344,7 @@ class AdminBot:
         self._owner_name: Optional[str] = None
         self._stats_task = None
         self._stat_ids: dict = {}            # channel IDs when there's no database to keep them in
-        self.webhook_url = ""                # from attach(): /valheim setup finds Huginn's channel with it
+        self.webhook_url = ""                # from attach(): /odin setup finds Huginn's channel with it
         self.set_webhook = None
         self._webhook_checked = False
         lfg = cfg.get("lfg") or {}
@@ -355,14 +355,14 @@ class AdminBot:
         # /valheim link sets a member's server nickname to the character (only if they have none).
         self.link_nickname = bool(cfg.get("link_nickname", False))
         # Commands used in the wrong channel get a private "run it in #…" instead. true: the
-        # channels /valheim setup made; false: off; {"stats": "<channel id>", …}: overrides.
+        # channels /odin setup made; false: off; {"stats": "<channel id>", …}: overrides.
         cc = cfg.get("command_channels", True)
         self.command_channels_on = cc is not False
         self.command_channel_ids = {k: int(v) for k, v in cc.items() if str(v).isdigit()} \
             if isinstance(cc, dict) else {}
         # Handled refused-join notices are deleted this many hours later (0 keeps them).
         self.tidy_hours = float(cfg.get("tidy_notices_hours", 24))
-        # Weekly title roles for the /valheim top leaders (community.TITLES).
+        # Weekly title roles for the /muninn top leaders (community.TITLES).
         tc = cfg.get("titles") or {}
         self.titles_on = bool(tc.get("enabled", False))
         self.titles_period = "week" if str(tc.get("period", "all")).lower() == "week" else "all"
@@ -777,7 +777,7 @@ class AdminBot:
         """Start a restart countdown (command or button). Returns the reply for the admin."""
         minutes = max(0, min(int(minutes), 60))
         if self._countdown and not self._countdown.done():
-            return "A restart is already counting down. `/valheim restart-cancel` stops it."
+            return "A restart is already counting down. `/odin restart-cancel` stops it."
         if self.updater is None:
             return ("Restarting needs the updater link (`updater` in config.json and the host helper, "
                     "see host/README.md).")
@@ -786,7 +786,7 @@ class AdminBot:
         self._countdown_cancel = asyncio.Event()
         self._countdown = asyncio.ensure_future(self._restart_countdown(minutes, reason.strip()[:100], by))
         return ("Restarting now (nobody is online)." if minutes == 0 else
-                f"Restart in {minutes} min, or sooner if everyone leaves. `/valheim restart-cancel` stops it.")
+                f"Restart in {minutes} min, or sooner if everyone leaves. `/odin restart-cancel` stops it.")
 
     async def _change_setting(self, it, kind: str, key: str, value: str = "") -> None:
         """Validate, ask the host to write world-settings.env, and confirm once it has."""
@@ -1181,7 +1181,7 @@ class AdminBot:
                 log.warning("admin_bot: owner role failed: %s", e)
             await asyncio.sleep(6 * 3600)
 
-    # -- /valheim setup (server_layout.py) ------------------------------------------
+    # -- /odin setup (server_layout.py) ------------------------------------------
     def _feed_channel_id(self) -> Optional[int]:
         """The channel Huginn's webhook posts to: a webhook URL answers GET with its channel."""
         if not self.webhook_url.startswith("https://"):
@@ -1250,7 +1250,7 @@ class AdminBot:
             return
         try:
             if action == "create":
-                hook = await feed.create_webhook(name="Huginn", reason="/valheim setup")
+                hook = await feed.create_webhook(name="Huginn", reason="/odin setup")
                 self.webhook_url = hook.url
                 if self.set_webhook:
                     self.set_webhook(hook.url)
@@ -1258,7 +1258,7 @@ class AdminBot:
             else:
                 hook = await self.client.fetch_webhook(self._webhook_id())
                 undo.setdefault("webhook_channel", hook.channel_id)
-                await hook.edit(channel=feed, reason="/valheim setup")
+                await hook.edit(channel=feed, reason="/odin setup")
                 log.info("admin_bot: moved Huginn's webhook to #%s", feed.name)
         except discord.Forbidden:
             problems.append("Huginn's webhook: the bot needs Manage Webhooks to "
@@ -1273,7 +1273,7 @@ class AdminBot:
         feed = await asyncio.get_running_loop().run_in_executor(None, self._feed_channel_id)
         if feed and feed == self.channel_id:
             text = ("⚠️ Huginn's webhook posts into this admin channel, so logins, deaths and the other "
-                    "public posts only show up here. Run `/valheim setup apply` to move it to "
+                    "public posts only show up here. Run `/odin setup apply` to move it to "
                     "#huginns-watch (the bot needs Manage Webhooks), or move it yourself: this channel's "
                     "settings → Integrations → Webhooks → Channel.")
             log.warning("admin_bot: Huginn's webhook posts into the admin channel; public posts are hidden")
@@ -1327,8 +1327,9 @@ class AdminBot:
 
     async def _layout_apply(self, guild, p: dict) -> list:
         """Create, rename and move to match the plan. Remembers each object's original
-        state (the first time it's touched) for /valheim setup undo. Returns problems."""
+        state (the first time it's touched) for /odin setup undo. Returns problems."""
         import discord
+        import server_layout
         undo = self._layout_undo_state()
         undo.setdefault("before", {})
         undo.setdefault("created", [])
@@ -1346,7 +1347,7 @@ class AdminBot:
             try:
                 if c["id"] is None:
                     ow = await self._layout_overwrites(guild, {"private"}) if c["private"] else {}
-                    cat = await guild.create_category(c["name"], overwrites=ow or {}, reason="/valheim setup")
+                    cat = await guild.create_category(c["name"], overwrites=ow or {}, reason="/odin setup")
                     undo["created"].append(cat.id)
                 else:
                     cat = guild.get_channel(c["id"])
@@ -1357,7 +1358,7 @@ class AdminBot:
                         changes["overwrites"] = await self._layout_overwrites(guild, {"private"}, cat.overwrites)
                     if changes:
                         remember(cat)
-                        await cat.edit(**changes, reason="/valheim setup")
+                        await cat.edit(**changes, reason="/odin setup")
                 cats[c["key"]] = cat
                 self._meta(f"layout:cat:{c['key']}", cat.id)
             except discord.HTTPException as e:
@@ -1372,7 +1373,7 @@ class AdminBot:
                     ow = await self._layout_overwrites(guild, ch["flags"], cat.overwrites) or cat.overwrites
                     make = guild.create_text_channel if ch["kind"] == "text" else guild.create_voice_channel
                     extra = {"topic": ch["topic"]} if ch["kind"] == "text" and ch["topic"] else {}
-                    obj = await make(ch["name"], category=cat, overwrites=ow, reason="/valheim setup", **extra)
+                    obj = await make(ch["name"], category=cat, overwrites=ow, reason="/odin setup", **extra)
                     undo["created"].append(obj.id)
                 else:
                     obj = guild.get_channel(ch["id"])
@@ -1382,14 +1383,16 @@ class AdminBot:
                         changes["name"] = ch["name"]
                     if obj.category_id != cat.id:
                         changes["category"] = cat
-                    if ch["kind"] == "text" and ch["topic"] and not getattr(obj, "topic", None):
+                    old_topic = getattr(obj, "topic", None)
+                    if ch["kind"] == "text" and ch["topic"] and old_topic != ch["topic"] and (
+                            not old_topic or old_topic in server_layout.OLD_TOPICS.get(ch["key"], ())):
                         changes["topic"] = ch["topic"]
                     ow = await self._layout_overwrites(guild, ch["flags"], obj.overwrites)
                     if ow is not None:
                         changes["overwrites"] = ow
                     if changes:
                         remember(obj)
-                        await obj.edit(**changes, reason="/valheim setup")
+                        await obj.edit(**changes, reason="/odin setup")
                 self._meta(f"layout:ch:{ch['key']}", obj.id)
             except discord.HTTPException as e:
                 problems.append(f"{ch['name']}: {e}")
@@ -1407,7 +1410,7 @@ class AdminBot:
                     cid = self._meta(f"layout:ch:{slot['key']}")
                     if cid:
                         payload.append({"id": int(cid), "position": i})
-            await guild._state.http.bulk_channel_update(guild.id, payload, reason="/valheim setup")
+            await guild._state.http.bulk_channel_update(guild.id, payload, reason="/odin setup")
         except Exception as e:  # noqa: BLE001
             problems.append(f"ordering the categories: {e}")
         await self._layout_webhook(guild, p, undo, problems)
@@ -1416,7 +1419,7 @@ class AdminBot:
         if afk and getattr(guild, "afk_channel", None) is None:
             try:
                 undo.setdefault("afk_channel", None)
-                await guild.edit(afk_channel=guild.get_channel(int(afk)), afk_timeout=900, reason="/valheim setup")
+                await guild.edit(afk_channel=guild.get_channel(int(afk)), afk_timeout=900, reason="/odin setup")
             except discord.Forbidden:
                 problems.append("The Fishing Hut isn't the AFK channel yet: the bot needs Manage Server. Set it in "
                                 "Server Settings → Overview → Inactive Channel.")
@@ -1427,7 +1430,7 @@ class AdminBot:
         if (p.get("system") or {}).get("move") and welcome:
             try:
                 undo.setdefault("system_channel", p["system"]["current"])
-                await guild.edit(system_channel=guild.get_channel(int(welcome)), reason="/valheim setup")
+                await guild.edit(system_channel=guild.get_channel(int(welcome)), reason="/odin setup")
             except discord.Forbidden:
                 problems.append("Discord's join messages still go to the old channel: the bot needs Manage "
                                 "Server to change that. Set it in Server Settings → Engagement → System "
@@ -1478,7 +1481,7 @@ class AdminBot:
                 self._meta("layout:guide", msg.id)
             if not getattr(msg, "pinned", False):
                 try:
-                    await msg.pin(reason="/valheim setup: channel guide")
+                    await msg.pin(reason="/odin setup: channel guide")
                 except discord.HTTPException as e:
                     log.info("admin_bot: couldn't pin the channel guide (needs Pin Messages): %s", e)
         except discord.HTTPException as e:
@@ -1502,35 +1505,35 @@ class AdminBot:
                     changes["category"] = cat
                 if obj.type == discord.ChannelType.text:
                     changes["topic"] = old.get("topic")
-                await obj.edit(**changes, reason="/valheim setup undo")
+                await obj.edit(**changes, reason="/odin setup undo")
                 positions.append({"id": obj.id, "position": old["position"]})
                 restored += 1
             except discord.HTTPException as e:
                 problems.append(f"{obj.name}: {e}")
         if positions:
             try:
-                await guild._state.http.bulk_channel_update(guild.id, positions, reason="/valheim setup undo")
+                await guild._state.http.bulk_channel_update(guild.id, positions, reason="/odin setup undo")
             except Exception as e:  # noqa: BLE001
                 problems.append(f"positions: {e}")
         if undo.get("webhook_channel") and self._webhook_id():
             try:
                 hook = await self.client.fetch_webhook(self._webhook_id())
                 await hook.edit(channel=guild.get_channel(int(undo["webhook_channel"])),
-                                reason="/valheim setup undo")
+                                reason="/odin setup undo")
             except (discord.HTTPException, AttributeError, TypeError) as e:
                 problems.append(f"Huginn's webhook: {e}")
         if "afk_channel" in undo:
             try:
                 old = undo["afk_channel"]
                 await guild.edit(afk_channel=guild.get_channel(int(old)) if old else None,
-                                 reason="/valheim setup undo")
+                                 reason="/odin setup undo")
             except discord.HTTPException as e:
                 problems.append(f"AFK channel: {e}")
         if "system_channel" in undo:
             try:
                 old = undo["system_channel"]
                 await guild.edit(system_channel=guild.get_channel(int(old)) if old else None,
-                                 reason="/valheim setup undo")
+                                 reason="/odin setup undo")
             except discord.HTTPException as e:
                 problems.append(f"system messages channel: {e}")
         created = [guild.get_channel(i) for i in undo.get("created", [])]
@@ -1941,7 +1944,15 @@ class AdminBot:
         import discord
         from discord import app_commands
         bot = self
-        group = app_commands.Group(name="valheim", description="Manage who can join the Valheim server")
+        # Four command groups, one per place they're used, so each can be limited to its channel in
+        # Server Settings → Integrations (Discord only does that per top-level command):
+        #   /valheim     anywhere (private replies)   /muninn     stats, in #muninns-roost
+        #   /warcouncil  game nights, #war-council    /odin       admins; hidden from members
+        valheim = app_commands.Group(name="valheim", description="Join the Valheim server: join code, map, link, notify")
+        muninn = app_commands.Group(name="muninn", description="Ask Muninn: stats, leaderboards, titles, who's online")
+        warcouncil = app_commands.Group(name="warcouncil", description="Plan raids and game nights")
+        odin = app_commands.Group(name="odin", description="Server admin: access lists, restarts, settings, setup",
+                                  default_permissions=discord.Permissions(manage_guild=True), guild_only=True)
 
         async def guard(it: discord.Interaction) -> bool:
             if not bot._is_admin(it.user):
@@ -1966,27 +1977,27 @@ class AdminBot:
             log.info("admin_bot: /%s %s by %s: %s", verb, pid, it.user, changes)
             await it.response.send_message(f"`{pid}`: " + (", ".join(changes) or "no change needed"), ephemeral=True)
 
-        @group.command(name="permit", description="Let a player in (unban; add to the permitted list if one is used)")
+        @odin.command(name="permit", description="Let a player in (unban; add to the permitted list if one is used)")
         @app_commands.describe(player_id="Platform ID, e.g. V_76561198000000000")
         async def permit(it: discord.Interaction, player_id: str):
             await run(it, bot.lists.permit, player_id, "permit")
 
-        @group.command(name="ban", description="Ban a player (and remove them from the permitted list)")
+        @odin.command(name="ban", description="Ban a player (and remove them from the permitted list)")
         @app_commands.describe(player_id="Platform ID, e.g. V_76561198000000000")
         async def ban(it: discord.Interaction, player_id: str):
             await run(it, bot.lists.ban, player_id, "ban")
 
-        @group.command(name="unban", description="Remove a player from the ban list")
+        @odin.command(name="unban", description="Remove a player from the ban list")
         async def unban(it: discord.Interaction, player_id: str):
             await run(it, lambda p: ["removed from bannedlist.txt"] if bot.lists.remove("banned", p) else [],
                       player_id, "unban")
 
-        @group.command(name="unpermit", description="Remove a player from the permitted list")
+        @odin.command(name="unpermit", description="Remove a player from the permitted list")
         async def unpermit(it: discord.Interaction, player_id: str):
             await run(it, lambda p: ["removed from permittedlist.txt"] if bot.lists.remove("permitted", p) else [],
                       player_id, "unpermit")
 
-        @group.command(name="online", description="Who's on the Valheim server right now")
+        @muninn.command(name="online", description="Who's on the Valheim server right now")
         async def online(it: discord.Interaction):
             import extras
             if bot.live is None:
@@ -2003,7 +2014,7 @@ class AdminBot:
 
         import world_settings as ws
 
-        @group.command(name="settings", description="Show the world settings (preset, modifiers) and what can change")
+        @odin.command(name="settings", description="Show the world settings (preset, modifiers) and what can change")
         async def settings(it: discord.Interaction):
             if not await guard(it):
                 return
@@ -2014,11 +2025,11 @@ class AdminBot:
             embed = discord.Embed(title="🌍 World settings", color=0x5865F2,
                                   description="\n".join(ws.describe(st)))
             embed.add_field(name="What can change", value="\n".join(opts)[:1024], inline=False)
-            embed.add_field(name="How", value="`/valheim preset`, `/valheim modifier`, `/valheim setkey`. "
-                            "Changes apply at the next restart (`/valheim restart`).", inline=False)
+            embed.add_field(name="How", value="`/odin preset`, `/odin modifier`, `/odin setkey`. "
+                            "Changes apply at the next restart (`/odin restart`).", inline=False)
             await it.response.send_message(embed=embed, ephemeral=True)
 
-        @group.command(name="modifier", description="Change a world modifier (applies at the next restart)")
+        @odin.command(name="modifier", description="Change a world modifier (applies at the next restart)")
         @app_commands.describe(name="Which modifier", value="New value (normal = default)")
         @app_commands.choices(name=[app_commands.Choice(name=f"{k}: {ws.DESCRIPTIONS[k]}"[:100], value=k)
                                     for k in ws.MODIFIERS])
@@ -2031,12 +2042,12 @@ class AdminBot:
             values = ws.MODIFIERS.get(key) or sorted({v for vs in ws.MODIFIERS.values() for v in vs})
             return [app_commands.Choice(name=v, value=v) for v in values if current.lower() in v][:25]
 
-        @group.command(name="preset", description="Change the world preset (applies at the next restart)")
+        @odin.command(name="preset", description="Change the world preset (applies at the next restart)")
         @app_commands.choices(name=[app_commands.Choice(name=p, value=p) for p in ws.PRESETS])
         async def preset(it: discord.Interaction, name: str):
             await bot._change_setting(it, "preset", name)
 
-        @group.command(name="setkey", description="Turn a world option on or off (applies at the next restart)")
+        @odin.command(name="setkey", description="Turn a world option on or off (applies at the next restart)")
         @app_commands.choices(key=[app_commands.Choice(name=f"{k}: {ws.DESCRIPTIONS[k]}"[:100], value=k)
                                    for k in ws.SETKEYS],
                               state=[app_commands.Choice(name="on", value="on"),
@@ -2058,7 +2069,7 @@ class AdminBot:
                 return []
             return [app_commands.Choice(name=n[:100], value=n[:100]) for n in community.player_names(bot.db, current)]
 
-        @group.command(name="stats", description="Play time, deaths and more for a character (yours if linked)")
+        @muninn.command(name="stats", description="Play time, deaths and more for a character (yours if linked)")
         @app_commands.describe(player="Character name (leave empty for your linked character)")
         async def stats(it: discord.Interaction, player: str = ""):
             if not await need_db(it):
@@ -2081,7 +2092,7 @@ class AdminBot:
             await it.response.send_message(embed=discord.Embed.from_dict(embed))
         stats.autocomplete("player")(player_choices)
 
-        @group.command(name="top", description="Leaderboards: time played, deaths, visits, longest session, achievements")
+        @muninn.command(name="top", description="Leaderboards: time played, deaths, visits, longest session, achievements")
         @app_commands.choices(category=[app_commands.Choice(name=v[0], value=k) for k, v in community.TOP.items()])
         async def top(it: discord.Interaction, category: str = "time"):
             if not await need_db(it):
@@ -2089,7 +2100,7 @@ class AdminBot:
             embed = community.render_top(category, community.top(bot.db, category, 10))
             await it.response.send_message(embed=discord.Embed.from_dict(embed))
 
-        @group.command(name="titles", description="Who holds Heimdall, Hel, Sleipnir, Thor and Bragi (the top of each board)")
+        @muninn.command(name="titles", description="Who holds Heimdall, Hel, Sleipnir, Thor and Bragi (the top of each board)")
         @app_commands.describe(refresh="Admins: reassign the titles now instead of waiting for the weekly run")
         async def titles(it: discord.Interaction, refresh: bool = False):
             if not await need_db(it):
@@ -2115,7 +2126,7 @@ class AdminBot:
                 community.render_titles(holders, changed, bot.titles_period)),
                 allowed_mentions=discord.AllowedMentions.none())
 
-        @group.command(name="notify", description="Get a DM when someone joins the server")
+        @valheim.command(name="notify", description="Get a DM when someone joins the server")
         @app_commands.describe(when="What to be told about", player="For follow/unfollow: which character")
         @app_commands.choices(when=[app_commands.Choice(name="First player joins an empty server", value="first"),
                                     app_commands.Choice(name="A specific character joins (follow)", value="follow"),
@@ -2149,7 +2160,7 @@ class AdminBot:
             await it.response.send_message(text, ephemeral=True)
         notify.autocomplete("player")(player_choices)
 
-        @group.command(name="link", description="Link your Discord account to your character")
+        @valheim.command(name="link", description="Link your Discord account to your character")
         @app_commands.describe(character="Your character's name, as it appears in-game")
         async def link(it: discord.Interaction, character: str):
             if not await need_db(it):
@@ -2161,7 +2172,7 @@ class AdminBot:
                     "Join once, then link.", ephemeral=True)
                 return
             err = community.link_player(bot.db, name, it.user.id)
-            await it.response.send_message(err or f"✅ **{name}** is now linked to you. `/valheim stats` shows "
+            await it.response.send_message(err or f"✅ **{name}** is now linked to you. `/muninn stats` shows "
                                                    "your stats, and milestones will mention you.", ephemeral=True)
             if not err:
                 bot._titles_relink()
@@ -2173,7 +2184,7 @@ class AdminBot:
                         log.info("admin_bot: couldn't set %s's nickname (needs Manage Nicknames): %s", it.user, e)
         link.autocomplete("character")(player_choices)
 
-        @group.command(name="unlink", description="Unlink a character from your Discord account")
+        @valheim.command(name="unlink", description="Unlink a character from your Discord account")
         @app_commands.describe(character="Leave empty to unlink all of yours. Admins can unlink anyone's.")
         async def unlink(it: discord.Interaction, character: str = ""):
             if not await need_db(it):
@@ -2199,7 +2210,7 @@ class AdminBot:
                 bot._titles_relink()
         unlink.autocomplete("character")(player_choices)
 
-        @group.command(name="request-access", description="New here? Tell the admins which character you'll join as")
+        @valheim.command(name="request-access", description="New here? Tell the admins which character you'll join as")
         @app_commands.describe(character="The character name you'll use in Valheim")
         async def request_access(it: discord.Interaction, character: str):
             if not await need_db(it):
@@ -2217,7 +2228,7 @@ class AdminBot:
                 "(`/valheim join` has the code). If you're turned away, the admins see it's you and "
                 "can let you in with one click, and you'll get a DM.", ephemeral=True)
 
-        @group.command(name="plan", description="Plan a game night: a signup with a reminder, or a poll for the time")
+        @warcouncil.command(name="plan", description="Plan a game night: a signup with a reminder, or a poll for the time")
         @app_commands.describe(title="What's happening, e.g. 'Bonemass run'",
                                when="e.g. 20:00, 8pm, sat 20:00, in 2h. Several ('sat 20:00, sun 18:00') "
                                     "start a poll for the time")
@@ -2243,7 +2254,7 @@ class AdminBot:
                                             "becomes a signup automatically.", ephemeral=True)
             await bot._post_time_poll(it.channel, title, times[:10], it.user.id)
 
-        @group.command(name="map", description="The world seed and a link to a map of it (spoilers!)")
+        @valheim.command(name="map", description="The world seed and a link to a map of it (spoilers!)")
         async def map_(it: discord.Interaction):
             if not bot.map_enabled:
                 await it.response.send_message("The map link is turned off on this server.", ephemeral=True)
@@ -2262,12 +2273,12 @@ class AdminBot:
                 f"🗺️ **{world}**: seed `{seed}`\n[Open the world map]({community.map_url(seed)}): "
                 "**spoilers**, it shows the whole world, including places nobody has found yet.", ephemeral=True)
 
-        @group.command(name="join", description="How to join the Valheim server: join code, address, password")
+        @valheim.command(name="join", description="How to join the Valheim server: join code, address, password")
         async def join(it: discord.Interaction):
             embed = discord.Embed.from_dict(bot.join_embed())
             await it.response.send_message(embed=embed, ephemeral=True)
 
-        @group.command(name="backups", description="List the copied world backups")
+        @odin.command(name="backups", description="List the copied world backups")
         async def backups(it: discord.Interaction):
             if not await guard(it):
                 return
@@ -2283,7 +2294,7 @@ class AdminBot:
                     f"• `{stem}` · {size / 1e6:.0f} MB · <t:{int(mtime)}:R>" for mtime, size, stem in rows)
             await it.response.send_message(text[:2000], ephemeral=True)
 
-        @group.command(name="update-check", description="Ask the server to check for a Valheim update now")
+        @odin.command(name="update-check", description="Ask the server to check for a Valheim update now")
         async def update_check(it: discord.Interaction):
             if not await guard(it):
                 return
@@ -2293,7 +2304,7 @@ class AdminBot:
                 "Asked the server to check for an update. The result posts in the admin channel within a "
                 "minute or two, and if an update is found, in the public channel too.", ephemeral=True)
 
-        @group.command(name="restart", description="Restart the server (installs any waiting update), with a warning")
+        @odin.command(name="restart", description="Restart the server (installs any waiting update), with a warning")
         @app_commands.describe(minutes="Minutes of warning, 0-60 (0 = now). It happens early if everyone leaves.",
                                reason="Shown to players, e.g. 'installing the update'")
         async def restart(it: discord.Interaction, minutes: int = 5, reason: str = ""):
@@ -2303,7 +2314,7 @@ class AdminBot:
                 return
             await it.response.send_message(bot.start_restart(minutes, reason, str(it.user)), ephemeral=True)
 
-        @group.command(name="restart-cancel", description="Cancel a restart countdown")
+        @odin.command(name="restart-cancel", description="Cancel a restart countdown")
         async def restart_cancel(it: discord.Interaction):
             if not await guard(it):
                 return
@@ -2313,7 +2324,7 @@ class AdminBot:
             else:
                 await it.response.send_message("No restart is counting down.", ephemeral=True)
 
-        @group.command(name="lists", description="Show the permitted, banned and admin lists")
+        @odin.command(name="lists", description="Show the permitted, banned and admin lists")
         async def lists(it: discord.Interaction):
             if not await guard(it):
                 return
@@ -2328,7 +2339,7 @@ class AdminBot:
                 text = f"Couldn't read the list files: {e}"
             await it.response.send_message(text[:1990], ephemeral=True)
 
-        @group.command(name="setup", description="Admins: organise this Discord into Valheim-themed channels")
+        @odin.command(name="setup", description="Admins: organise this Discord into Valheim-themed channels")
         @app_commands.describe(action="preview: show what would change · apply: do it (asks first) · "
                                       "undo: put renamed channels back")
         @app_commands.choices(action=[app_commands.Choice(name="preview", value="preview"),
@@ -2359,7 +2370,7 @@ class AdminBot:
                                   else "🛠️ Server layout: apply this?",
                                   description=server_layout.render(p), color=0xC27C0E)
             if action == "preview":
-                embed.set_footer(text="Run /valheim setup apply to do it. Undo with /valheim setup undo.")
+                embed.set_footer(text="Run /odin setup apply to do it. Undo with /odin setup undo.")
                 await it.followup.send(embed=embed, ephemeral=True)
                 return
             view = discord.ui.View(timeout=600)
@@ -2374,9 +2385,9 @@ class AdminBot:
                                                embed=None, view=None)
                 problems = await bot._layout_apply(guild, p)
                 await bot._layout_guide(guild, p)
-                log.info("admin_bot: /valheim setup applied by %s (%d problem(s))", it.user, len(problems))
+                log.info("admin_bot: /odin setup applied by %s (%d problem(s))", it.user, len(problems))
                 text = ("✅ Done. A guide to every channel is posted in the welcome channel. "
-                        "Undo with `/valheim setup undo`.")
+                        "Undo with `/odin setup undo`.")
                 if problems:
                     text += "\n⚠️ Some changes failed (the bot needs Manage Channels and Manage Roles):\n" + \
                         "\n".join(problems[:10])
@@ -2389,7 +2400,8 @@ class AdminBot:
             view.add_item(stop)
             await it.followup.send(embed=embed, view=view, ephemeral=True)
 
-        tree.add_command(group)
+        for g in (valheim, muninn, warcouncil, odin):
+            tree.add_command(g)
 
 
 def build_admin_bot(cfg: dict, server_name: str) -> Optional[AdminBot]:
