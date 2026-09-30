@@ -64,6 +64,9 @@
     },
     "online_role": true,
     "owner_role": true,
+    "stat_channels": {
+      "enabled": false
+    },
     "lfg": {
       "reminder_minutes": 15,
       "discord_event": false

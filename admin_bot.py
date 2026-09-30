@@ -314,6 +314,14 @@ class AdminBot:
         self.owner_role_name = (owner.strip() if isinstance(owner, str) and owner.strip()
                                 else "Odin" if owner is True else None)
         self._owner_task = None
+        # Stat channels (stat_channels.py): locked voice channels the bot creates and renames.
+        stc = cfg.get("stat_channels") or {}
+        self.stats_on = bool(stc.get("enabled", False))
+        self.stats_category = str(stc.get("category") or "📊 Valheim")[:100]
+        self._stats_show_cfg = stc.get("show")
+        self.stats_show: list = []           # set in _start_tasks, once the rest of the config is read
+        self._stats_task = None
+        self._stat_ids: dict = {}            # channel IDs when there's no database to keep them in
         lfg = cfg.get("lfg") or {}
         self.remind_minutes = int(lfg.get("reminder_minutes", 15))
         self.discord_events = bool(lfg.get("discord_event", False))
@@ -419,6 +427,26 @@ class AdminBot:
                                              if not ok))
             else:
                 self._titles_task = asyncio.ensure_future(self._titles_loop())
+        if self.stats_on and self._stats_task is None:
+            import stat_channels
+            show = self._stats_show_cfg
+            if show is None:                 # everything that makes sense with this config
+                show = [k for k in stat_channels.STATS
+                        if not (k == "players" and self.status) and not (k == "titles" and not self.titles_on)]
+            unknown = [k for k in show if k not in stat_channels.STATS]
+            if unknown:
+                log.warning("admin_bot: unknown stat_channels.show entries %s; known: %s",
+                            unknown, ", ".join(stat_channels.STATS))
+            self.stats_show = [k for k in show if k in stat_channels.STATS]
+            if not self.guild_id:
+                log.warning("admin_bot: stat_channels need guild_id; stat channels off")
+            else:
+                if not self.db_path:
+                    dropped = [k for k in self.stats_show if k in stat_channels.NEEDS_DB]
+                    if dropped:
+                        log.warning("admin_bot: stat channels %s need the stats database; skipped", dropped)
+                    self.stats_show = [k for k in self.stats_show if k not in stat_channels.NEEDS_DB]
+                self._stats_task = asyncio.ensure_future(self._stats_loop())
         if self.owner_role_name and self._owner_task is None:
             if not (self.db_path and self.guild_id):
                 log.warning("admin_bot: owner_role needs guild_id and the stats database; owner role off")
@@ -911,6 +939,106 @@ class AdminBot:
             except Exception as e:  # noqa: BLE001
                 log.warning("admin_bot: owner role failed: %s", e)
             await asyncio.sleep(6 * 3600)
+
+    # -- stat channels -----------------------------------------------------------
+    def _stat_name(self, key: str) -> Optional[str]:
+        import community
+        import stat_channels
+        db = self.db if self.db_path else None
+        titles = [(name, (community.title_holder(db, cat) or {}).get("player"))
+                  for cat, (name, _, _) in community.TITLES.items()] if (db and self.titles_on) else []
+        name = stat_channels.name_for(
+            key, self.live.snapshot() if self.live else {}, db,
+            offset=community.log_clock_offset(db) if db else 0,
+            update_waiting=bool(self.updater and self.updater.new), titles=titles)
+        return name[:100] if name else None
+
+    def _meta(self, key: str, value=None):
+        import community
+        if not self.db_path:
+            return self._stat_ids.get(key) if value is None else self._stat_ids.__setitem__(key, str(value))
+        if value is None:
+            return community.get_meta(self.db, key)
+        community.set_meta(self.db, key, value)
+
+    async def _ensure_stat_channels(self) -> dict:
+        """Find or create the category and one locked voice channel per stat. They're
+        remembered by ID, so they can be renamed, moved or reordered in Discord."""
+        import discord
+        guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+        locked = {guild.default_role: discord.PermissionOverwrite(view_channel=True, connect=False)}
+        me = getattr(guild, "me", None)
+        if me is not None:
+            locked[me] = discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True)
+
+        async def known(meta_key):
+            cid = self._meta(meta_key)
+            if not cid:
+                return None
+            ch = guild.get_channel(int(cid))
+            if ch is None:
+                try:
+                    ch = await self.client.fetch_channel(int(cid))
+                except discord.NotFound:
+                    return None
+            return ch
+
+        category = await known("statchan:category") or             next((c for c in guild.categories if c.name == self.stats_category), None)
+        if category is None:
+            category = await guild.create_category(self.stats_category, overwrites=locked, position=0,
+                                                   reason="Valheim stat channels")
+            log.info("admin_bot: created the %s category", self.stats_category)
+        self._meta("statchan:category", category.id)
+        out = {}
+        for i, key in enumerate(self.stats_show):
+            ch = await known(f"statchan:{key}")
+            if ch is None:
+                ch = await guild.create_voice_channel(self._stat_name(key) or f"… {key}", category=category,
+                                                      overwrites=locked, position=i,
+                                                      reason="Valheim stat channel")
+                self._meta(f"statchan:{key}", ch.id)
+                log.info("admin_bot: created the stat channel %s", ch.name)
+            out[key] = ch
+        return out
+
+    async def _stats_loop(self) -> None:
+        """Keep the stat channels' names current, within Discord's rename limit."""
+        import discord
+        import stat_channels
+        await asyncio.sleep(10)
+        pace = stat_channels.Renamer()
+        channels: dict = {}
+        warned = False
+        while True:
+            try:
+                if not channels:
+                    channels = await self._ensure_stat_channels()
+                    for key, ch in channels.items():
+                        pace.current[key] = ch.name
+                for key, ch in list(channels.items()):
+                    name = self._stat_name(key)
+                    if not pace.due(key, name):
+                        continue
+                    try:
+                        await ch.edit(name=name, reason="Valheim stats")
+                        pace.renamed(key, name)
+                    except discord.NotFound:          # deleted: make it again next time round
+                        self._meta(f"statchan:{key}", "")
+                        channels = {}
+                        break
+                    except discord.Forbidden:
+                        if not warned:
+                            warned = True
+                            log.warning("admin_bot: no permission to rename the stat channels (the bot needs "
+                                        "Manage Channels)")
+                        pace.renamed(key, ch.name)     # back off for one interval
+            except discord.Forbidden:
+                log.warning("admin_bot: can't create the stat channels: the bot needs Manage Channels; "
+                            "trying again in 10 min")
+                await asyncio.sleep(600)
+            except Exception as e:  # noqa: BLE001
+                log.warning("admin_bot: stat channels failed: %s", e)
+            await asyncio.sleep(30)
 
     async def _title_role(self, guild, category: str):
         """The Discord role for a title: configured, remembered, found by name, or created.
