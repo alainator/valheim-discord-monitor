@@ -1272,7 +1272,7 @@ def main():
     server_name = cfg.get("server_name", "the server")
     events = set(cfg.get("events", ["login", "logout", "death"]))
     d = cfg["discord"]
-    # A webhook the admin bot created (/valheim setup) is kept in webhook.json, used when
+    # A webhook the admin bot created (/odin setup) is kept in webhook.json, used when
     # neither DISCORD_WEBHOOK_URL nor discord.webhook_url is set.
     webhook_file = cfg.get("webhook_file") or os.path.join(
         os.path.dirname(cfg.get("state_file", "monitor_state.json")) or ".", "webhook.json")
@@ -1390,7 +1390,7 @@ def main():
         if not (cfg.get("admin_bot") or {}).get("enabled"):
             sys.exit("No Discord webhook URL configured (config discord.webhook_url or DISCORD_WEBHOOK_URL)")
         log.warning("No Discord webhook URL yet: public posts are skipped until you set DISCORD_WEBHOOK_URL, "
-                    "or run /valheim setup apply and the bot creates Huginn's webhook")
+                    "or run /odin setup apply and the bot creates Huginn's webhook")
 
     interval = float(cfg.get("poll_interval_seconds", 10))
 

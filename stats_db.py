@@ -113,7 +113,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             user_id      TEXT NOT NULL,
             requested_at INTEGER
         );
-        -- /valheim plan: game nights with RSVPs
+        -- /warcouncil plan: game nights with RSVPs
         CREATE TABLE IF NOT EXISTS plans (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             title      TEXT NOT NULL,

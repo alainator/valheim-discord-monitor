@@ -33,7 +33,7 @@ GROUPS = [
         "hours_week": "hours played this week, all players together",
         "deaths_week": "deaths this week",
         "last_raid": "the most recent raid",
-        "next_plan": "the next game night (/valheim plan)",
+        "next_plan": "the next game night (/warcouncil plan)",
         "vikings": "characters that have ever played",
         "achievements": "Steam achievements unlocked, all players together",
     }),

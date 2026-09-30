@@ -26,17 +26,24 @@ class BotCommandsTest(unittest.TestCase):
             async def build():
                 client = bot._build_client()
                 bot._register_commands(client.tree)
-                group = client.tree.get_commands()[0]
-                # to_dict() resolves every parameter type, like the sync to Discord does.
-                payload = group.to_dict(client.tree)
-                return group.name, sorted(c["name"] for c in payload["options"])
-            name, commands = asyncio.run(build())
-        self.assertEqual(name, "valheim")
-        self.assertEqual(commands, sorted(["permit", "ban", "unban", "unpermit", "online", "backups",
-                                           "update-check", "restart", "restart-cancel", "lists", "join",
-                                           "settings", "modifier", "preset", "setkey",
-                                           "stats", "top", "notify", "link", "unlink", "request-access",
-                                           "plan", "map", "titles", "setup"]))
+                out = {}
+                for group in client.tree.get_commands():
+                    # to_dict() resolves every parameter type, like the sync to Discord does.
+                    payload = group.to_dict(client.tree)
+                    out[group.name] = (sorted(c["name"] for c in payload["options"]),
+                                       payload.get("default_member_permissions"))
+                return out
+            groups = asyncio.run(build())
+        self.assertEqual({k: v[0] for k, v in groups.items()}, {
+            "valheim": sorted(["join", "map", "link", "unlink", "notify", "request-access"]),
+            "muninn": sorted(["stats", "top", "titles", "online"]),
+            "warcouncil": ["plan"],
+            "odin": sorted(["permit", "ban", "unban", "unpermit", "lists", "settings", "modifier", "preset",
+                            "setkey", "backups", "update-check", "restart", "restart-cancel", "setup"]),
+        })
+        # /odin is hidden from members without Manage Server; the others are for everyone.
+        self.assertEqual(int(groups["odin"][1]), 1 << 5)
+        self.assertIsNone(groups["muninn"][1])
 
     def test_database_tasks_start_after_attach(self):
         """start() waits for on_ready, and attach() hands over the database only after that,

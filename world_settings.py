@@ -11,7 +11,7 @@ server's systemd unit reads:
     WORLD_ARGS=-modifier raids less
 
 This one file is both:
-  * a library for the Discord bot (the allowed values, parsing, the /valheim settings view), and
+  * a library for the Discord bot (the allowed values, parsing, the /odin settings view), and
   * the host-side writer, installed as /home/valheim/valheim-world-settings.py and run as
     the valheim user by valheim-bot-request.sh. It only ever writes the WORLD_ARGS line,
     and only with values from the tables below, so a request can't smuggle in other
@@ -165,7 +165,7 @@ def write_file(path: str, st: State) -> str:
     fd, tmp = tempfile.mkstemp(prefix=".world-settings.", dir=folder)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write("# Valheim world settings, read by valheimserver.service (EnvironmentFile).\n"
-                "# Changed from Discord with /valheim modifier, /valheim preset, /valheim setkey.\n"
+                "# Changed from Discord with /odin modifier, /odin preset, /odin setkey.\n"
                 f"WORLD_ARGS={args}\n")
     os.chmod(tmp, 0o644)
     os.replace(tmp, path)

@@ -1,6 +1,6 @@
 """
 Extras built on the parsed log: live server state (for the status board and
-/valheim online), session summaries, milestones, the weekly recap, and copying
+/muninn online), session summaries, milestones, the weekly recap, and copying
 Valheim's own world backups to a second disk.
 
 Everything here is fed by the monitor's main loop and needs no mods: it only uses

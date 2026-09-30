@@ -68,7 +68,7 @@ class UpdateWatcher:
             if self.check_requested:
                 self.check_requested = False
                 out.append(("admin", f"Update check: build {self.new} is waiting for {m2.group('n')} "
-                                     f"player(s) to leave. `/valheim restart` installs it sooner."))
+                                     f"player(s) to leave. `/odin restart` installs it sooner."))
         elif RE_RESTARTING.search(msg):
             if self.new:
                 self.announced.add(self.new)

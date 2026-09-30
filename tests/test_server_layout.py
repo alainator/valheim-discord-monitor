@@ -235,6 +235,28 @@ class ApplyUndoTest(unittest.TestCase):
             self.assertGreaterEqual(len(created), 10)             # listed, not deleted
 
 
+    def test_old_default_topics_are_updated_and_own_topics_kept(self):
+        import admin_bot
+        guild = self.fake_guild()
+        with tempfile.TemporaryDirectory() as d:
+            bot = admin_bot.AdminBot({"token": "x", "channel_id": "41", "guild_id": "9", "admin_user_ids": [5],
+                                      "save_dir": d}, "S")
+            bot.attach(db_path=os.path.join(d, "s.db"), webhook_url="https://discord.com/api/webhooks/1/x")
+            bot._feed_channel_id = lambda: None
+
+            def apply():
+                async def run():
+                    return await bot._layout_apply(guild, await bot._layout_plan(guild))
+                return asyncio.run(run())
+            apply()
+            roost = next(c for c in guild.all if c.name == "🪶┃muninns-roost")
+            general = next(c for c in guild.all if c.id == 40)
+            roost.topic = "Ask Muninn: /valheim stats, top, titles, link, notify, map and more."
+            general.topic = "Our own words"
+            apply()
+        self.assertTrue(roost.topic.startswith("Ask Muninn: /muninn stats"))
+        self.assertEqual(general.topic, "Our own words")
+
     def test_webhook_in_the_admin_channel_moves_and_undo_moves_it_back(self):
         import admin_bot
         guild = self.fake_guild()
