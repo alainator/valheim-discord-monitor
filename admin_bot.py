@@ -314,6 +314,8 @@ class AdminBot:
         self.title_role_ids = {k: int(v) for k, v in (tc.get("roles") or {}).items() if str(v).isdigit()}
         self._titles_task = None
         self._titles_lock = None
+        self._titles_warned = False
+        self._attached = False               # attach() has run
         self.post_embed = None               # posts an embed to the public webhook channel
         self._refused: dict = {}             # platform id -> character name, for Permit follow-ups
         self._dm_sent: dict = {}             # (user, reason) -> time, so a rejoin doesn't spam DMs
@@ -373,6 +375,33 @@ class AdminBot:
         self.live, self.backups, self.updater, self.announce = live, backups, updater, announce
         self.db_path = db_path
         self.post_embed = post_embed
+        self._attached = True
+        # start() waits for the connection, so on_ready usually ran before this: start the
+        # tasks that need the database now.
+        if self.loop and self.ready.is_set():
+            self.loop.call_soon_threadsafe(self._start_tasks)
+
+    def _start_tasks(self) -> None:
+        """Start the background loops that aren't running yet. Called on every on_ready
+        (it repeats after reconnects) and once attach() has handed over the database."""
+        if self.status and self._status_task is None:
+            self._status_task = asyncio.ensure_future(self._status_loop())
+        if self.board_channel and self._board_task is None:
+            self._board_task = asyncio.ensure_future(self._board_loop())
+        if not self._attached:
+            return                            # the rest need the database from attach()
+        if self.db_path and self._plan_task is None:
+            self._plan_task = asyncio.ensure_future(self._plan_loop())
+        if self.titles_on and self._titles_task is None:
+            if not (self.db_path and self.guild_id):
+                if not self._titles_warned:
+                    self._titles_warned = True
+                    log.warning("admin_bot: titles need %s; titles off",
+                                " and ".join(n for n, ok in (("guild_id", self.guild_id),
+                                                             ("the stats database (database.path)", self.db_path))
+                                             if not ok))
+            else:
+                self._titles_task = asyncio.ensure_future(self._titles_loop())
 
     @property
     def db(self):
@@ -932,17 +961,7 @@ class AdminBot:
             async def on_ready(self):
                 log.info("admin_bot: connected as %s; posting join notices to channel %s", self.user, bot.channel_id)
                 bot.ready.set()
-                if bot.status and bot._status_task is None:     # on_ready repeats after reconnects
-                    bot._status_task = asyncio.ensure_future(bot._status_loop())
-                if bot.board_channel and bot._board_task is None:
-                    bot._board_task = asyncio.ensure_future(bot._board_loop())
-                if bot.db_path and bot._plan_task is None:
-                    bot._plan_task = asyncio.ensure_future(bot._plan_loop())
-                if bot.titles_on and bot._titles_task is None:
-                    if not (bot.db_path and bot.guild_id):
-                        log.warning("admin_bot: titles need guild_id and the stats database; titles off")
-                    else:
-                        bot._titles_task = asyncio.ensure_future(bot._titles_loop())
+                bot._start_tasks()
 
             async def on_interaction(self, it: discord.Interaction):
                 cid = (it.data or {}).get("custom_id", "") if it.type == discord.InteractionType.component else ""
