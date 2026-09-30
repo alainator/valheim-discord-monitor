@@ -160,6 +160,13 @@ def plan(snapshot: dict, known: Optional[dict] = None, remembered: Optional[dict
                 "old_name": hit and hit["name"], "old_category_id": hit and hit.get("category_id"),
                 "old_topic": hit and hit.get("topic")})
     out["notes"] = notes
+    # Discord's own join greetings ("Yay you made it, …") go to the server's System Messages
+    # Channel. Point them at the welcome channel when they'd otherwise go nowhere, or into a
+    # channel this layout makes private, where only admins would see them.
+    system = snapshot.get("system_channel_id")
+    private = {c["id"] for c in out["channels"] if "private" in c["flags"] and c["id"]}
+    out["system"] = {"current": system, "move": system is None or system in private,
+                     "current_name": next((c["name"] for c in chans if c["id"] == system), None)}
     return out
 
 
@@ -209,6 +216,12 @@ def render(p: dict, limit: int = 3900) -> str:
             lines.append(f"  {icon} {shown}{extra}  {note}")
     n = changes(p)
     lines.append("")
+    sysmsg = p.get("system") or {}
+    if sysmsg.get("move"):
+        where = f"#{sysmsg['current_name']}, which only admins will see" if sysmsg.get("current_name") \
+            else "no channel"
+        lines.append(f"📣 Discord's join messages (\"Yay you made it…\") go to {where}; they'll go to "
+                     f"#{_discord_name(next(c for c in p['channels'] if c['key'] == 'welcome'))}.")
     for note in p.get("notes", []):
         lines.append(f"⚠️ {note}")
     lines.append(f"{n['create']} new · {n['rename']} renamed · {n['move']} moved · {n['same']} already right. "

@@ -1101,6 +1101,7 @@ class AdminBot:
             if kind:
                 snap["channels"].append({"id": ch.id, "name": ch.name, "kind": kind, "position": ch.position,
                                          "category_id": ch.category_id, "topic": getattr(ch, "topic", None)})
+        snap["system_channel_id"] = getattr(guild, "system_channel_id", None)
         feed = await asyncio.get_running_loop().run_in_executor(None, self._feed_channel_id)
         return server_layout.plan(snap, known={"admin": self.channel_id, "feed": feed},
                                   remembered=self._layout_remembered(), exclude=self._stat_ids_in_use())
@@ -1236,6 +1237,18 @@ class AdminBot:
             await guild._state.http.bulk_channel_update(guild.id, payload, reason="/valheim setup")
         except Exception as e:  # noqa: BLE001
             problems.append(f"ordering the categories: {e}")
+        # Discord's join greetings: into the welcome channel if they'd be hidden or go nowhere.
+        welcome = self._meta("layout:ch:welcome")
+        if (p.get("system") or {}).get("move") and welcome:
+            try:
+                undo.setdefault("system_channel", p["system"]["current"])
+                await guild.edit(system_channel=guild.get_channel(int(welcome)), reason="/valheim setup")
+            except discord.Forbidden:
+                problems.append("Discord's join messages still go to the old channel: the bot needs Manage "
+                                "Server to change that. Set it in Server Settings → Engagement → System "
+                                "Messages Channel.")
+            except discord.HTTPException as e:
+                problems.append(f"system messages channel: {e}")
         self._meta("layout:undo", json.dumps(undo))
         return problems
 
@@ -1308,6 +1321,13 @@ class AdminBot:
                 await guild._state.http.bulk_channel_update(guild.id, positions, reason="/valheim setup undo")
             except Exception as e:  # noqa: BLE001
                 problems.append(f"positions: {e}")
+        if "system_channel" in undo:
+            try:
+                old = undo["system_channel"]
+                await guild.edit(system_channel=guild.get_channel(int(old)) if old else None,
+                                 reason="/valheim setup undo")
+            except discord.HTTPException as e:
+                problems.append(f"system messages channel: {e}")
         created = [guild.get_channel(i) for i in undo.get("created", [])]
         created = [c for c in created if c is not None]
         self._meta("layout:undo", "")

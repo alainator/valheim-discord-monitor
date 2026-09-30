@@ -82,6 +82,14 @@ class PlanTest(unittest.TestCase):
         self.assertNotIn(3, [c["id"] for c in p["categories"]])
         self.assertIsNone(self.slots(p)["vc_main"])
 
+    def test_system_messages(self):
+        snap = fresh_server()
+        self.assertFalse(sl.plan({**snap, "system_channel_id": 10}, known={"admin": 11})["system"]["move"])
+        p = sl.plan({**snap, "system_channel_id": 11}, known={"admin": 11})
+        self.assertTrue(p["system"]["move"])
+        self.assertIn("go to #valheim-admin, which only admins will see; they'll go to #🚪┃the-gates", sl.render(p))
+        self.assertIn("go to no channel", sl.render(sl.plan(snap)))
+
     def test_names_compare_loosely(self):
         self.assertEqual(sl.norm("📜┃Run-estone"), "runestone")
         self.assertEqual(sl.norm("Voice Channels"), "voicechannels")
@@ -117,6 +125,10 @@ class ApplyUndoTest(unittest.TestCase):
 
         class Guild:
             id = 9
+            system_channel_id = 41             # Discord's join messages go to the admin channel
+
+            async def edit(self, system_channel=None, reason=None):
+                self.system_channel_id = system_channel.id if system_channel else None
 
             def __init__(self):
                 self.default_role = discord.Object(1, type=discord.Role)
@@ -189,6 +201,10 @@ class ApplyUndoTest(unittest.TestCase):
             self.assertTrue(guild._state.http.calls)             # categories and channels ordered
             undo = json.loads(bot._meta("layout:undo"))
             self.assertEqual(set(undo["before"]), {"30", "31", "40", "41", "50"})
+            # The admin channel became private, so Discord's join messages moved to the welcome channel.
+            welcome = next(c for c in guild.all if c.name == "🚪┃the-gates")
+            self.assertEqual(guild.system_channel_id, welcome.id)
+            self.assertIn("Discord's join messages", __import__("server_layout").render(p))
 
             restored, created, problems = asyncio.run(bot._layout_undo(guild))
             self.assertEqual(problems, [])
@@ -197,6 +213,7 @@ class ApplyUndoTest(unittest.TestCase):
                              ["Text Channels", "Voice Channels", "general", "valheim-admin", "General"])
             self.assertEqual(byid[40].category_id, 30)
             self.assertEqual(byid[41].overwrites, {})             # permissions back as they were
+            self.assertEqual(guild.system_channel_id, 41)
             self.assertGreaterEqual(len(created), 10)             # listed, not deleted
 
 
