@@ -883,6 +883,9 @@ The [stat channels](#stat-channels) stay on top.
 - **It posts a "📖 A guide to the realm" message** in #the-gates listing every channel and
   what it's for, and pins it. Running setup again updates that message instead of posting
   a new one.
+- **It gives commands a home.** From then on `stats`, `top`, `titles` and `online` belong
+  in #🪶┃muninns-roost and `plan` in #🗺️┃war-council; used elsewhere, the member gets a
+  private pointer instead of a post ([command channels](#discord-commands)).
 - **It makes 🎣 Fishing Hut the AFK channel** if the server has none: Discord itself then
   moves anyone idle in voice for 15 minutes there. Undo clears it again.
 - **Run it again any time,** for example after a bot update adds channels. It remembers
@@ -1163,6 +1166,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | No thread on a game-night signup / no reactions on Huginn's posts / the guide isn't pinned | Missing Create Public Threads, Add Reactions or Pin Messages (in that channel too) | See [bot permissions](#bot-permissions); the log says `couldn't open a thread` / `couldn't pin` |
 | The weekly recap has no chart | Pillow isn't installed (an old image), or nobody played that week | `docker compose up -d --build --force-recreate` |
 | Handled refused-join notices aren't deleted | The bot lacks Manage Messages in the admin channel, or `tidy_notices_hours` is 0 | Grant it in the channel's permissions |
+| Members get "Run `/valheim stats` in #…" | That command belongs in its home channel since `/valheim setup` | Run it there, or change it with `admin_bot.command_channels` (`false` turns it off) |
+| A command's home channel is wrong or was deleted | It points at the channel setup remembered | Run `/valheim setup apply` again (it recreates missing channels), or set `"command_channels": {"stats": "<channel id>"}` |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
 | `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |
 | No backups copied | `source_dir` isn't Valheim's `worlds_local`, or `dest_dir` isn't mounted | Check both, then see what the log says after `Backup created` (`Backups: copied N backup(s)`) |
@@ -1732,6 +1737,8 @@ Added here:
   polls), `map` (reads the seed from Valheim 1.0 world folders), weekly title roles
   (`titles`), the bot-created "In Valheim" and Odin (owner) roles, and optional nicknames
   on link.
+- **Command channels:** commands with public replies go to their home channel; used
+  elsewhere, the member gets a private pointer instead.
 - **Polish:** reactions on Huginn's posts, a chart in the weekly recap, a pinned channel
   guide, the AFK channel set by `/valheim setup`, and handled admin notices tidied away.
 - **Steam achievements in Discord:** unlock posts, achievements in `/valheim stats`, a
