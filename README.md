@@ -21,7 +21,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
 - **Alert you when someone is refused** by your ban or permitted list, with **Permit** /
   **Ban** buttons ([join-attempt alerts](#join-attempt-alerts--discord-admin-bot)).
 - Show **who's online**: in a voice channel's name ([status
-  channel](#status-voice-channel)), and in a live message with the join code, uptime,
+  channel](#status-voice-channel)), in a column of [stat channels](#stat-channels) (join code,
+  uptime, deaths this week, next game night…), and in a live message with the join code, uptime,
   version, last save, backup and raid ([status board](#status-board)).
 - Answer **`/valheim join`** for anyone: the current join code, the address and how to
   connect ([commands](#discord-commands)).
@@ -52,6 +53,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Stat channels:** locked voice channels showing the join code, uptime, last backup,
+  peak today, hours and deaths this week, the last raid, the next game night, title holders
+  and more. The bot creates them itself: `"stat_channels": {"enabled": true}`
+  ([stat channels](#stat-channels)).
 - **Steam achievements in Discord:** unlock posts from Huginn, achievements in
   `/valheim stats`, a "Most achievements" board in `/valheim top`, and a fifth title role,
   **Bragi**. No web page needed ([details](#steam-achievements-in-discord)).
@@ -87,6 +92,7 @@ And without the bot:
   [Count mode](#count-mode-quick-start) · [Log mode](#log-mode)
 - **Admin bot:** [Join alerts & setup](#join-attempt-alerts--discord-admin-bot) ·
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
+  [Stat channels](#stat-channels) ·
   [Players & community](#players--community) · [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
@@ -503,7 +509,8 @@ This takes about five minutes in Discord's developer portal.
 2. Under scopes, tick **`bot`** and **`applications.commands`**.
 3. Under bot permissions, tick **View Channels**, **Send Messages**, **Embed Links** and
    **Read Message History**. Also tick:
-   - **Manage Channels**, for the [status voice channel](#status-voice-channel);
+   - **Manage Channels**, for the [status voice channel](#status-voice-channel) and the
+     [stat channels](#stat-channels);
    - **Manage Roles**, for the ["In Valheim", Odin and title roles](#roles--names);
    - **Manage Events**, only if game nights should create Discord Events.
 4. Open the generated URL, pick your Discord server, and click **Authorize**.
@@ -599,6 +606,62 @@ won't rename a text channel: it logs a warning and skips it.
 - **Offline** shows as soon as the server logs a shutdown, or once the log has been silent
   for `stale_after_seconds` (15 min), which catches a crash.
 - **Log times are UTC** unless you set `TZ` in `.env`, e.g. `TZ=America/Los_Angeles`.
+
+### Stat channels
+
+A column of locked voice channels at the top of your channel list whose names show the
+server's numbers. The bot creates and updates them; members can see them but not join.
+
+```
+📊 VALHEIM
+  🟢 Server online · l-1.0.16
+  🔑 Join code: 482913
+  ⏱ Up 3 d
+  💾 Backup: today 04:10
+  📈 Peak today: 4
+  ⏳ This week: 38 h played
+  💀 Deaths this week: 14
+  ⚔️ Last raid: The Elder's army (Tue)
+  🧭 23 Vikings have visited
+  📅 Bonemass run · Sat 20:00
+  👑 Heimdall: Ingrid
+  🏅 312 achievements unlocked
+```
+
+| Key | Shows |
+|---|---|
+| `players` | Players online (skipped if you already have a [status channel](#status-voice-channel)) |
+| `server` | Online / offline and the version; ⬆️ when the updater has found an update |
+| `join_code` | The crossplay join code (known after the first join since the last restart) |
+| `uptime` | Time since the server started |
+| `backup` | When Valheim last made a world backup |
+| `peak_today` | Most players online at once today |
+| `hours_week` | Hours played this week (since Monday), all players together |
+| `deaths_week` | Deaths this week |
+| `last_raid` | The most recent raid and its day |
+| `vikings` | Characters that have ever played |
+| `next_plan` | The next game night from `/valheim plan` |
+| `titles` | The [title](#title-roles) holders, a different one every 10 minutes (only with titles on) |
+| `achievements` | Steam achievements unlocked, all players together |
+
+**Setup:** add this to the `admin_bot` block, then `docker compose up -d --force-recreate`:
+```json
+"stat_channels": { "enabled": true }
+```
+The bot needs **Manage Channels** and `guild_id`. It creates a "📊 Valheim" category and
+the channels within a minute.
+
+- **Choosing channels:** `"show": ["server", "join_code", "deaths_week"]` lists the ones
+  you want, in order. Without `show` you get all of them.
+- **Removing one:** take it out of `show` first, then delete the channel. If you delete a
+  channel that's still in `show`, the bot recreates it.
+- **Renaming the category** or moving the channels in Discord is fine; the bot remembers them
+  by ID. Use `"category": "Server stats"` for a different category name at creation.
+- **Update speed:** Discord allows each channel 2 renames per 10 minutes, so a channel lags
+  a change by up to 5 minutes. Values are kept coarse (hours, days) so they don't hit the
+  limit.
+- Most channels need the stats database; the live ones (`server`, `join_code`, `uptime`,
+  `backup`, `last_raid`, `players`) don't.
 
 ### Players & community
 
@@ -831,6 +894,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | World setting: "the settings file didn't change within 20 s" | The host helper isn't updated, or `/valheim_home` isn't mounted | Re-run the two `install` commands in [host/README.md](host/README.md#one-time-setup); check the mount with `docker compose config` |
 | `can't give the Hel title role` (or another title) | The bot lacks Manage Roles, or a title role was moved above the bot's role | Give it Manage Roles and keep the bot's role above the title roles |
 | `/valheim titles` says title roles are off | `titles.enabled` isn't true, or `guild_id` / the stats database is missing (the log says which) | Fix the config and recreate the container |
+| Stat channels don't appear; log says `can't create the stat channels` | The bot lacks Manage Channels | Give its role Manage Channels (Server Settings → Roles) |
+| A stat channel shows an old value | Discord's limit of 2 renames per channel per 10 minutes | Expected: it catches up within 5 minutes |
 | `can't give the owner role` | The bot lacks Manage Roles, or the Odin role was moved above the bot's role | Give it Manage Roles and keep the bot's role above Odin |
 | `can't change the In-Valheim role` | The bot lacks Manage Roles, or its role is below the "In Valheim" role | Give it Manage Roles and drag the bot's role above that role in Server Settings → Roles |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
@@ -1274,6 +1339,9 @@ or run it in a terminal.
 | `updater.bot_dir` | — | Folder shared with the host: `status.json` out, `request` for restart/check/settings. |
 | `admin_bot.online_role` | — | `true` (or a role name): the bot creates the "In Valheim" role, given to linked players while they're in-game. |
 | `admin_bot.online_role_id` | — | Use this existing role instead (takes precedence over `online_role`). |
+| `admin_bot.stat_channels.enabled` | false | Locked voice channels showing the server's numbers ([stat channels](#stat-channels)). |
+| `admin_bot.stat_channels.show` | all | Which ones, in order: `players`, `server`, `join_code`, `uptime`, `backup`, `peak_today`, `hours_week`, `deaths_week`, `last_raid`, `vikings`, `next_plan`, `titles`, `achievements`. |
+| `admin_bot.stat_channels.category` | 📊 Valheim | Name of the category the bot creates for them. |
 | `admin_bot.owner_role` | — | `true` (or a role name): an "Odin" role for the Discord server's owner. |
 | `admin_bot.lfg.reminder_minutes` | 15 | Ping game-night signups this long before the start. |
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
@@ -1363,8 +1431,8 @@ This is a fork of
 Added here:
 - **Admin bot:** refused-join alerts with Permit / Ban / Ignore buttons, `/valheim`
   commands, and support for Valheim 1.0's `V_…` player IDs.
-- **Status voice channel** and a live **status board**, filled in from the existing log
-  at start-up.
+- **Status voice channel**, bot-created **stat channels**, and a live **status board**,
+  filled in from the existing log at start-up.
 - **`/valheim join`:** the current join code (tracked across restarts), address and how
   to connect.
 - **Extras:** raid alerts, version-mismatch alerts, session summaries, first-visit
