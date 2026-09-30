@@ -36,6 +36,9 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   ([players & community](#players--community), [roles & names](#roles--names)).
 - **Server health:** warnings before the save disk fills up or saves get slow, and an
   optional daily restart while nobody's on ([server health](#server-health)).
+- **Steam achievements in Discord:** unlock posts, achievements in `/valheim stats`, a
+  leaderboard and the Bragi title, with a free Steam API key
+  ([achievements](#steam-achievements-in-discord)).
 
 And without the bot:
 - **Raid alerts, version-mismatch alerts, session summaries, first-visit welcomes,
@@ -93,7 +96,7 @@ And without the bot:
   [Server health](#server-health) ·
   [Auto-updates, restarts & world settings](#auto-updates-and-restarts-from-discord)
 - **Stats & LOW.MS:** [Stats page](#player-stats--public-web-page) ·
-  [Steam achievements](#steam-achievements) ·
+  [Steam achievements](#steam-achievements) ([in Discord](#steam-achievements-in-discord)) ·
   [Updates & backups (LOW.MS)](#unattended-updates--nightly-backups-lowms)
 - **Reference:** [Running it permanently](#running-it-permanently) · [Options](#options) ·
   [Server admin tips](#server-admin-tips) · [Development](#development) ·
@@ -451,7 +454,7 @@ in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visib
 |---|---|---|---|
 | `/valheim join` | Anyone | Join code, address, password (spoiler) and how to connect; only the asker sees it | The bot; `admin_bot.join` for the address |
 | `/valheim online` | Anyone | Who's on right now, and since when | The bot |
-| `/valheim stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen. No name = your linked character | Stats database |
+| `/valheim stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen, Steam achievements. No name = your linked character | Stats database |
 | `/valheim top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, or Steam achievements | Stats database |
 | `/valheim titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
 | `/valheim notify <when> [player]` | Anyone | DM me when the first player joins an empty server, or when a given character joins; `off` / `list` | Stats database |
@@ -833,6 +836,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
 | `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |
 | No backups copied | `source_dir` isn't Valheim's `worlds_local`, or `dest_dir` isn't mounted | Check both, then see what the log says after `Backup created` (`Backups: copied N backup(s)`) |
+| No achievement posts | `"achievement"` isn't in `events`; the player hasn't joined since the key was added (that's when their Steam ID is learned); their first check only records what they have; or their profile or game details are private | Check `events` and `docker compose logs \| grep -i steam`; `/valheim stats <player>` shows whether it's private |
+| `Steam rejected the API key` | The key in `.env` is wrong, revoked or rotated | Get a new one at <https://steamcommunity.com/dev/apikey>, set `STEAM_API_KEY` in `.env`, recreate |
 | Times in the log are off by hours | The container runs in UTC | Set `TZ=America/Los_Angeles` (etc.) in `.env` and recreate |
 | `No Discord webhook URL configured` | Neither `.env` nor `config.json` has a webhook URL, or `.env` wasn't loaded | Set `DISCORD_WEBHOOK_URL` in `.env` (next to `docker-compose.yml`) and recreate the container |
 | Posts stopped after replacing the webhook; the log shows `Discord HTTP 404` | The old webhook URL is still in use | Put the new URL in `.env` as `DISCORD_WEBHOOK_URL` and recreate the container (`.env` wins over `config.json`) |
@@ -1229,9 +1234,9 @@ or run it in a terminal.
 | `discord.username` | Valheim | Name the webhook posts under (the examples use **Huginn**, see [roles & names](#roles--names)). |
 | `source.offline_after` | 3 | Count mode: failed queries in a row before "offline". |
 | `source.api_key` | — | `steamapi` only; or `STEAM_API_KEY` env var. |
-| `steam.enabled` | false | Pull public Steam achievements onto the page. |
-| `steam.api_key` | — | Steam Web API key; or `STEAM_API_KEY` env var. |
-| `steam.refresh_seconds` | 1800 | How often to refresh Steam data. |
+| `steam.enabled` | on when a key is set | Fetch public Steam achievements (for Discord and the page). `false` turns it off even with a key. |
+| `steam.api_key` | — | Steam Web API key; better as the `STEAM_API_KEY` env var in `.env`. |
+| `steam.refresh_seconds` | 1800 | How often to check Steam, so unlock posts can lag an unlock by up to this long. |
 | `steam.top_n` | 25 | Most-recently-seen linked players to refresh. |
 | `maintenance.enabled` | false | Unattended updates + nightly backups (LOW.MS). |
 | `maintenance.api_key` | — | `lowms_` key; or `LOWMS_API_KEY` env var. |
@@ -1372,6 +1377,8 @@ Added here:
   `request-access`, `plan` (game nights with RSVPs and reminders), `map` (reads the
   seed from Valheim 1.0 world folders), weekly title roles (`titles`), and the
   bot-created "In Valheim" and Odin (owner) roles.
+- **Steam achievements in Discord:** unlock posts, achievements in `/valheim stats`, a
+  "Most achievements" leaderboard, and the Bragi title.
 - **Server health:** low-disk and slow-save warnings, an optional daily restart, and
   exploration in the weekly recap.
 - **Docker setup:** `Dockerfile`, `docker-compose.yml`, `.env.example` and a self-hosted
