@@ -41,6 +41,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from ftplib import FTP, FTP_TLS, error_perm
@@ -87,6 +88,9 @@ RE_SERVERNAME = re.compile(r"server \"(?P<server>[^\"]*)\"")
 # prints it. The code changes every time the server restarts.
 RE_JOINCODE = re.compile(r"join code (?P<code>\d+)(?: and IP (?P<ip>\d{1,3}(?:\.\d{1,3}){3}:\d+))?")
 RE_READY = re.compile(_TS + r"Game server connected")
+# Any line that sounds like a connection ending. Used only together with a connection id we
+# already paired with a character, so an unrelated line can't log anyone out.
+RE_GONE = re.compile(r"disconnect|lost|clos|dispos|timed? ?out|timeout|kick", re.IGNORECASE)
 RE_TIMEOUT = re.compile(_TS + r"ZRpc timeout detected")
 # Server shutting down (scheduled restart, backup, update, crash). A graceful stop
 # prints these but NOT per-player "Destroying" lines or "now 0 player(s)", so anyone
@@ -165,6 +169,11 @@ class ValheimLogParser:
     def __init__(self):
         self.s = ParserState()
         self.last_ts: Optional[int] = None      # epoch of the most recent timestamped log line
+        # Diagnostics for a leave we couldn't attribute (the server's count dropped below
+        # the players we track): the lines around it go to the monitor's own log.
+        self.recent: deque = deque(maxlen=12)
+        self.watch: Optional[dict] = None
+        self.last_diag = 0.0
 
     def _count(self) -> dict:
         return {"count": self.s.server_count} if self.s.server_count is not None else {}
@@ -180,6 +189,29 @@ class ValheimLogParser:
             if self.last_ts is not None:
                 ev.extra.setdefault("ts", self.last_ts)
             yield ev
+        self._diagnose(line.rstrip("\r\n"))
+
+    def _diagnose(self, line: str) -> None:
+        """If the server says fewer players are on than we track, and 15 lines later that's
+        still so, someone left without a line we recognise. Log the lines around it once
+        (at most every 10 minutes), so the pattern can be added to the parser."""
+        if self.watch is not None:
+            self.watch["after"].append(line)
+            if len(self.watch["after"]) >= 15:
+                count, tracked = self.s.server_count, len(self.s.online)
+                if count is not None and 0 < count < tracked and time.time() - self.last_diag > 600:
+                    self.last_diag = time.time()
+                    log.warning("Someone left but the log didn't say who: the server counts %d player(s), the "
+                                "monitor still tracks %s. Their 'In Valheim' role and session stay until the "
+                                "server is empty. Please report these log lines:\n%s", count,
+                                ", ".join(sorted(self.s.online)),
+                                "\n".join(self.watch["before"] + self.watch["after"]))
+                self.watch = None
+        elif line and self.s.server_count is not None and 0 < self.s.server_count < len(self.s.online) \
+                and RE_COUNT.search(line):
+            self.watch = {"before": list(self.recent), "after": []}
+        if line:
+            self.recent.append(line)
 
     def _logout(self, name: str) -> Event:
         owner = self.s.online.pop(name, None)
@@ -355,6 +387,15 @@ class ValheimLogParser:
             if name and name in self.s.online:
                 yield self._logout(name)
             return
+
+        # A connection we paired with a character is ending ("… socket <id> closed",
+        # "… <id> disconnected", "… <id> timed out"): that character has left.
+        if self.s.id_to_name and RE_GONE.search(line):
+            for cid, name in list(self.s.id_to_name.items()):
+                if len(cid) >= 8 and cid in line and name in self.s.online:
+                    self.s.id_to_name.pop(cid, None)
+                    yield self._logout(name)
+                    return
 
         if RE_READY.search(line):
             # A new server session is starting.

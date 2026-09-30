@@ -319,6 +319,7 @@ class AdminBot:
         self.owner_role_name = (owner.strip() if isinstance(owner, str) and owner.strip()
                                 else "Odin" if owner is True else None)
         self._owner_task = None
+        self._role_task = None                # keeps the "In Valheim" role in step with who's online
         # Stat channels (stat_channels.py): locked voice channels the bot creates and renames.
         stc = cfg.get("stat_channels") or {}
         self.stats_on = bool(stc.get("enabled", False))
@@ -442,6 +443,9 @@ class AdminBot:
                                              if not ok))
             else:
                 self._titles_task = asyncio.ensure_future(self._titles_loop())
+        if (self.online_role or self.online_role_name) and self.db_path and self.guild_id \
+                and self._role_task is None:
+            self._role_task = asyncio.ensure_future(self._online_role_loop())
         if self.stats_on and self._stats_task is None:
             import stat_channels
             show = self._stats_show_cfg
@@ -512,28 +516,75 @@ class AdminBot:
 
     async def _set_role(self, player: str, on: bool) -> None:
         """Give or take the "In Valheim" role from the Discord user linked to a character."""
-        import discord
         import community
         uid = community.linked_user(self.db, player)
-        if not uid or not self.guild_id:
-            return
+        if uid and self.guild_id:
+            await self._online_role_member(uid, on, f"Playing Valheim as {player}" if on else f"Left Valheim ({player})")
+
+    def _role_holders(self) -> set:
+        """Discord users the bot has given the "In Valheim" role to (kept in the database,
+        because listing a role's members needs a privileged intent)."""
+        try:
+            return set(json.loads(self._meta("online_role:holders") or "[]"))
+        except ValueError:
+            return set()
+
+    async def _online_role_member(self, uid, on: bool, reason: str) -> bool:
+        import discord
         try:
             guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
-            member = await guild.fetch_member(int(uid))
             if self.online_role:
                 role = guild.get_role(self.online_role) or discord.Object(id=self.online_role)
             else:
                 role = await self._ensure_role(guild, "online_role", None, self.online_role_name, 0x57F287,
                                                hoist=True, reason="Shows who's playing Valheim right now")
-            if on:
-                await member.add_roles(role, reason=f"Playing Valheim as {player}")
-            else:
-                await member.remove_roles(role, reason=f"Left Valheim ({player})")
+            holders = self._role_holders()
+            try:
+                member = await guild.fetch_member(int(uid))
+                await (member.add_roles if on else member.remove_roles)(role, reason=reason)
+            except discord.NotFound:                 # left the Discord server
+                pass
+            (holders.add if on else holders.discard)(str(uid))
+            self._meta("online_role:holders", json.dumps(sorted(holders)))
+            return True
         except discord.Forbidden:
             log.warning("admin_bot: can't change the In-Valheim role: the bot needs Manage Roles, and its own "
                         "role must be above that role in Server Settings -> Roles")
         except discord.HTTPException as e:
-            log.info("admin_bot: role change for %s failed: %s", player, e)
+            log.info("admin_bot: role change for %s failed: %s", uid, e)
+        return False
+
+    async def _sync_online_role(self) -> None:
+        """Make the "In Valheim" role match who's online: take it from anyone the bot gave
+        it to who isn't in the game (a missed logout, a failed removal, the bot restarted
+        while they left), and give it to linked players who are."""
+        import community
+        if not self.live:
+            return
+        snap = self.live.snapshot()
+        if not snap.get("known") and not snap.get("down"):
+            return                                   # just started: don't guess
+        online = {n for n, _ in snap.get("online") or []}
+        want = {str(u) for u in (community.linked_user(self.db, n) for n in online) if u}
+        if self._meta("online_role:holders") is None:
+            # First run with this version: anyone linked may still have the role from before.
+            have = {str(r[0]) for r in self.db.execute("SELECT DISTINCT user_id FROM discord_links")}
+            self._meta("online_role:holders", json.dumps(sorted(have)))
+        else:
+            have = self._role_holders()
+        for uid in have - want:
+            await self._online_role_member(uid, False, "Not in Valheim any more")
+        for uid in want - have:
+            await self._online_role_member(uid, True, "Playing Valheim")
+
+    async def _online_role_loop(self) -> None:
+        await asyncio.sleep(30)
+        while True:
+            try:
+                await self._sync_online_role()
+            except Exception as e:  # noqa: BLE001
+                log.warning("admin_bot: In-Valheim role check failed: %s", e)
+            await asyncio.sleep(300)
 
     def post_admin(self, text: str) -> None:
         """Thread-safe: a plain message to the admin channel."""
