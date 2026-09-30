@@ -123,8 +123,9 @@ class TitlesTest(DB):
             self.st.death("Bjorn", t)
         self.st.death("Ingrid", 1300)
         lead = community.title_leaders(self.c)
-        self.assertEqual({k: v["player"] for k, v in lead.items()},
-                         {"time": "Ingrid", "deaths": "Bjorn", "sessions": "Bjorn", "longest": "Ingrid"})
+        self.assertEqual({k: v and v["player"] for k, v in lead.items()},
+                         {"time": "Ingrid", "deaths": "Bjorn", "sessions": "Bjorn", "longest": "Ingrid",
+                          "achievements": None})
         self.assertEqual(lead["time"]["v"], 7200)
         # A tie keeps the current holder instead of flipping to the first name.
         self.st.death("Ingrid", 1400)
@@ -149,6 +150,79 @@ class TitlesTest(DB):
         self.assertIn("/valheim link Bjorn", e["description"])
         self.assertIn("**Sleipnir**: nobody yet", e["description"])
         self.assertIn("all time", e["footer"]["text"])
+
+
+class SteamAchievementsTest(DB):
+    def setUp(self):
+        super().setUp()
+        import steam
+        self.steam = steam
+        self.st.login("Ingrid", 1000)
+        self.st.link_steam("Ingrid", "7656", 1000)
+        self.st.save_schema([{"name": "boss1", "displayName": "Eikthyr slayer", "description": "Kill Eikthyr",
+                              "icon": "https://x/a.jpg"},
+                             {"name": "boss2", "displayName": "Elder slayer", "description": "Kill the Elder"}])
+
+    def refresh(self, unlocks, now):
+        """What steam.update_all does for one player: find what's new, then store it."""
+        fresh = self.steam.new_unlocks(self.st, "7656", unlocks)
+        with mock.patch("time.time", return_value=now):
+            self.st.save_unlocks("7656", unlocks)
+            self.st.save_profile("7656", unlocked=len(unlocks), total=40, error=None)
+        return fresh
+
+    def test_only_new_unlocks_are_announced(self):
+        self.assertEqual(self.refresh([("boss1", 5000)], now=6000), [])        # first fetch: baseline
+        self.assertEqual(self.refresh([("boss1", 5000), ("boss2", 7000)], now=8000), [("boss2", 7000)])
+        self.assertEqual(self.refresh([("boss1", 5000), ("boss2", 7000)], now=9000), [])
+        # Unlocked long before the last refresh (e.g. while private): not news.
+        self.assertEqual(self.refresh([("boss1", 5000), ("boss2", 7000), ("old", 100)], now=20000), [])
+
+    def test_update_all_collects_new_unlocks(self):
+        steam = self.steam
+        got = {"unlocks": [("boss1", 5000)]}
+        with mock.patch.object(steam, "check_key"), \
+                mock.patch.object(steam, "fetch_schema", return_value=[]), \
+                mock.patch.object(steam, "fetch_summaries", return_value={}), \
+                mock.patch.object(steam, "fetch_achievements",
+                                  side_effect=lambda k, sid: (len(got["unlocks"]), 40, got["unlocks"], None)), \
+                mock.patch.object(steam.time, "sleep"):
+            first = []
+            steam.update_all(self.st, "key", announce=first)
+            got["unlocks"] = [("boss1", 5000), ("boss2", int(__import__("time").time()))]
+            second = []
+            steam.update_all(self.st, "key", announce=second)
+        self.assertEqual(first, [])
+        self.assertEqual([(x["steam_id"], [a for a, _ in x["unlocks"]]) for x in second], [("7656", ["boss2"])])
+
+    def test_zero_achievements_is_a_baseline(self):
+        self.refresh([], now=6000)
+        self.assertEqual(self.refresh([("boss1", 7000)], now=8000), [("boss1", 7000)])
+
+    def test_render_board_stats_and_title(self):
+        self.refresh([("boss1", 5000), ("boss2", 7000)], now=8000)
+        community.link_player(self.c, "Ingrid", 42)
+        e = community.render_unlocks(self.c, "7656", [("boss2", 7000)])
+        self.assertEqual(e["title"], "🏅 Ingrid unlocked Elder slayer")
+        self.assertIn("<@42>", e["description"])
+        self.assertIn("Kill the Elder", e["description"])
+        self.assertEqual(e["footer"]["text"], "2/40 Valheim achievements on Steam")
+        many = community.render_unlocks(self.c, "7656", [("boss1", 5000), ("boss2", 7000)])
+        self.assertEqual(many["title"], "🏅 Ingrid unlocked 2 achievements")
+        self.assertEqual(many["thumbnail"]["url"], "https://x/a.jpg")
+        self.assertEqual(community.top(self.c, "achievements"), [{"player": "Ingrid", "v": 2}])
+        self.assertIn("Ingrid**: 2", community.render_top("achievements", community.top(self.c, "achievements"))
+                      ["description"])
+        self.assertEqual(community.title_leaders(self.c)["achievements"]["player"], "Ingrid")
+        self.assertEqual(community.title_leaders(self.c, since=6000)["achievements"]["v"], 1)
+        stats = community.render_stats(community.player_stats(self.c, "Ingrid"), 0)
+        field = next(f for f in stats["fields"] if "Achievements" in f["name"])
+        self.assertEqual(field["value"], "2/40")
+
+    def test_private_profile_in_stats(self):
+        self.st.save_profile("7656", unlocked=None, total=None, error="private")
+        stats = community.render_stats(community.player_stats(self.c, "Ingrid"), 0)
+        self.assertIn("private", next(f for f in stats["fields"] if "Achievements" in f["name"])["value"])
 
 
 class SeedTest(unittest.TestCase):

@@ -152,6 +152,11 @@ def clear_access_request(conn, player: str) -> None:
 # ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------
+# Each Steam unlock, attributed to the character its Steam account played most recently.
+_STEAM_UNLOCKS = ("SELECT (SELECT ps.player FROM player_steam ps WHERE ps.steam_id = u.steam_id "
+                  "ORDER BY ps.updated_at DESC LIMIT 1) AS player FROM steam_unlock u "
+                  "WHERE u.unlocktime >= {since}")
+
 TOP = {
     "time": ("Most time played", "SELECT player, SUM(duration_seconds) AS v FROM play_sessions "
                                  "GROUP BY player ORDER BY v DESC LIMIT ?"),
@@ -160,6 +165,11 @@ TOP = {
                                 "ORDER BY v DESC LIMIT ?"),
     "longest": ("Longest single session", "SELECT player, MAX(duration_seconds) AS v FROM play_sessions "
                                           "GROUP BY player ORDER BY v DESC LIMIT ?"),
+    # Steam only: achievements belong to a Steam account, shown under the character that
+    # account played most recently.
+    "achievements": ("Most achievements (Steam)",
+                     "SELECT player, COUNT(*) AS v FROM (" + _STEAM_UNLOCKS.format(since="0") + ") "
+                     "WHERE player IS NOT NULL GROUP BY player ORDER BY v DESC LIMIT ?"),
 }
 
 
@@ -176,6 +186,7 @@ TITLES = {
     "deaths": ("Hel", "keeper of the dead: most deaths", 0x71368A),
     "sessions": ("Sleipnir", "carries riders between the worlds and always comes back: most visits", 0x95A5A6),
     "longest": ("Thor", "drank from the sea and lowered it: longest single session", 0x3498DB),
+    "achievements": ("Bragi", "sings the great deeds of heroes: most Steam achievements", 0xE67E22),
 }
 # Earlier names of the title roles: a role the bot made under one of these is renamed.
 TITLE_OLD_NAMES = {"sessions": ("Huginn",)}
@@ -184,6 +195,8 @@ _TITLE_SQL = {
     "deaths": "SELECT player, COUNT(*) AS v FROM deaths WHERE died_at >= ? GROUP BY player",
     "sessions": "SELECT player, COUNT(*) AS v FROM play_sessions WHERE login_at >= ? GROUP BY player",
     "longest": "SELECT player, MAX(duration_seconds) AS v FROM play_sessions WHERE login_at >= ? GROUP BY player",
+    "achievements": "SELECT player, COUNT(*) AS v FROM (" + _STEAM_UNLOCKS.format(since="?") + ") "
+                    "WHERE player IS NOT NULL GROUP BY player",
 }
 
 
@@ -247,7 +260,7 @@ def render_titles(holders: dict, changed: set = frozenset(), period: str = "all"
         if not h:
             lines.append(f"**{role}**: nobody yet\n*{why}*")
             continue
-        value = str(h["v"]) if cat in ("deaths", "sessions") else _dur(h["v"])
+        value = str(h["v"]) if cat in ("deaths", "sessions", "achievements") else _dur(h["v"])
         who = f"<@{h['user_id']}> ({h['player']})" if h.get("user_id") else \
             f"**{h['player']}** (not linked: `/valheim link {h['player']}` to get the role)"
         new = " 🆕" if cat in changed else ""
@@ -270,7 +283,48 @@ def player_stats(conn, player: str) -> Optional[dict]:
     s["rank"] = 1 + _one(conn, "SELECT COUNT(*) AS c FROM (SELECT SUM(duration_seconds) AS t FROM play_sessions "
                                "GROUP BY player) WHERE t > ?", (s["seconds"],))["c"]
     s["players"] = _one(conn, "SELECT COUNT(DISTINCT player) AS c FROM play_sessions")["c"]
+    s["steam"] = steam_achievements(conn, player)
     return s
+
+
+def steam_achievements(conn, player: str) -> Optional[dict]:
+    """{"unlocked", "total", "last_unlock_name", "error"} for a character's Steam account,
+    or None when the character isn't linked to Steam (console players, or not seen yet)."""
+    try:
+        return _one(conn, "SELECT p.unlocked, p.total, p.last_unlock_name, p.error FROM player_steam ps "
+                          "JOIN steam_profile p ON p.steam_id = ps.steam_id WHERE ps.player = ? COLLATE NOCASE",
+                    (player,))
+    except Exception:  # noqa: BLE001  (an old database without the Steam tables)
+        return None
+
+
+def render_unlocks(conn, steam_id: str, unlocks: list) -> dict:
+    """Embed for new Steam achievements: "🏅 Ingrid unlocked Bonemass slayer"."""
+    who = _one(conn, "SELECT player FROM player_steam WHERE steam_id = ? ORDER BY updated_at DESC LIMIT 1",
+               (steam_id,))
+    name = who["player"] if who else (_one(conn, "SELECT persona FROM steam_profile WHERE steam_id = ?",
+                                           (steam_id,)) or {}).get("persona") or "Someone"
+    user = linked_user(conn, name) if who else None
+    info = {r["apiname"]: r for r in _rows(conn, "SELECT apiname, name, description, icon FROM steam_schema")}
+    prof = _one(conn, "SELECT unlocked, total FROM steam_profile WHERE steam_id = ?", (steam_id,)) or {}
+    items = [info.get(a) or {"apiname": a, "name": a, "description": "", "icon": None} for a, _ in unlocks]
+    if len(items) == 1:
+        a = items[0]
+        title = f"🏅 {name} unlocked {a['name']}"
+        desc = a.get("description") or ""
+    else:
+        title = f"🏅 {name} unlocked {len(items)} achievements"
+        desc = "\n".join(f"**{a['name']}**" + (f": {a['description']}" if a.get("description") else "")
+                         for a in items[:10]) + (f"\n… and {len(items) - 10} more" if len(items) > 10 else "")
+    if user:
+        desc = f"<@{user}>" + (f"\n{desc}" if desc else "")
+    out = {"title": title[:256], "description": desc[:4000] or None}
+    if prof.get("total"):
+        out["footer"] = {"text": f"{prof.get('unlocked') or 0}/{prof['total']} Valheim achievements on Steam"}
+    icon = next((a["icon"] for a in reversed(items) if a.get("icon")), None)   # the latest with an icon
+    if icon:
+        out["thumbnail"] = {"url": icon}
+    return {k: v for k, v in out.items() if v is not None}
 
 
 # ---------------------------------------------------------------------------
@@ -513,6 +567,17 @@ def render_stats(s: dict, offset: int, linked: Optional[str] = None) -> dict:
         {"name": "Deaths per hour", "value": f"{s['deaths'] / max(s['seconds'] / 3600, 1e-9):.1f}"
                                               if s["seconds"] >= 600 else "-", "inline": True},
     ]
+    st = s.get("steam")
+    if st:
+        if st.get("total"):
+            value = f"{st.get('unlocked') or 0}/{st['total']}"
+            if st.get("last_unlock_name"):
+                value += f" · latest: {st['last_unlock_name']}"
+        elif st.get("error") == "private":
+            value = "🔒 Steam profile or game details are private"
+        else:
+            value = "Not fetched yet"
+        fields.append({"name": "🏅 Achievements (Steam)", "value": value[:1024], "inline": False})
     if s.get("first_seen"):
         fields.append({"name": "First seen", "value": f"<t:{int(s['first_seen']) + offset}:D>", "inline": True})
     if s.get("open"):
@@ -531,7 +596,7 @@ def render_top(category: str, rows: list) -> dict:
     medals = ("🥇", "🥈", "🥉")
     lines = []
     for i, r in enumerate(rows):
-        value = str(r["v"]) if category in ("deaths", "sessions") else _dur(r["v"])
+        value = str(r["v"]) if category in ("deaths", "sessions", "achievements") else _dur(r["v"])
         lines.append(f"{medals[i] if i < 3 else f'`{i + 1:>2}.`'} **{r['player']}**: {value}")
     return {"title": f"🏆 {title}", "color": 0xF1C40F, "description": "\n".join(lines) or "No data yet."}
 

@@ -392,7 +392,7 @@ class Discord:
               "maintenance_failed": 0xED4245, "maintenance_pending": 0xE0A13C, "join_refused": 0xE67E22,
               "raid": 0xED4245, "version_mismatch": 0xE0A13C, "logout_summary": 0x95A5A6, "welcome": 0x57F287,
               "milestone": 0xF1C40F, "weekly_recap": 0x5865F2, "update": 0x5865F2,
-              "titles": 0xF1C40F}
+              "titles": 0xF1C40F, "achievement": 0xE67E22}
     EMOJI = {"login": "🟢", "logout": "🔴", "death": "💀", "respawn": "🔥", "server_up": "🛡️",
              "player_joined": "🟢", "player_left": "🔴", "server_online": "🟢", "server_offline": "🔴",
              "server_restart": "🔻", "maintenance_start": "🛠️", "maintenance_done": "✅",
@@ -1282,7 +1282,7 @@ def main():
         tailer = OffsetTailer(source, cfg.get("state_file", "monitor_state.json"), start_at_end=not args.from_start)
     parser = ValheimLogParser()
     extra_events = {"raid", "version_mismatch", "session_summary", "welcome", "milestone", "weekly_recap",
-                    "update"}
+                    "update", "achievement"}
     log_events = {"login", "logout", "death", "respawn", "server_up",
                   "server_restart", "server_online", "server_offline", "join_refused"} | extra_events
     default_log_events = {"login", "logout", "death", "server_restart", "server_online", "server_offline"}
@@ -1309,8 +1309,16 @@ def main():
             import steam
             st = open_store()
             try:
-                if steam.update_all(st, steam_key, limit=steam_limit):
+                # "achievement" in events: post Steam achievements unlocked since the last refresh.
+                fresh = [] if "achievement" in events else None
+                if steam.update_all(st, steam_key, limit=steam_limit, announce=fresh):
                     steam_done.set()
+                if fresh:
+                    import community
+                    for item in fresh:
+                        discord.post_embed("achievement",
+                                           community.render_unlocks(st.conn, item["steam_id"], item["unlocks"]),
+                                           events)
             finally:
                 st.close()
         except Exception as e:

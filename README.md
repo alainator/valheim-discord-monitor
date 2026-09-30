@@ -31,7 +31,7 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   server before anything is written ([world settings](#auto-updates-and-restarts-from-discord)).
 - **Community:** `/valheim stats` and `/valheim top`, DMs when friends come online, an
   "In Valheim" role, weekly **title roles** for the leaderboard leaders (Heimdall, Hel,
-  Sleipnir, Thor), an **Odin** role for the server owner, game-night signups with
+  Sleipnir, Thor, Bragi), an **Odin** role for the server owner, game-night signups with
   reminders, a world map link, and a smoother first join
   ([players & community](#players--community), [roles & names](#roles--names)).
 - **Server health:** warnings before the save disk fills up or saves get slow, and an
@@ -49,6 +49,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Steam achievements in Discord:** unlock posts from Huginn, achievements in
+  `/valheim stats`, a "Most achievements" board in `/valheim top`, and a fifth title role,
+  **Bragi**. No web page needed ([details](#steam-achievements-in-discord)).
 - **[Roles & names](#roles--names):** one overview of the bot (Muninn), the announcer
   (Huginn), and every role the bot hands out.
 - **Sleipnir replaces Huginn** as the "most visits" title. The bot renames the existing
@@ -58,7 +61,7 @@ And without the bot:
 - **Odin, the server owner's role:** `"owner_role": true` gives the Discord server's owner
   an "Odin" role near the top of the member list ([players & community](#players--community)).
 - **Title roles:** the leader of each `/valheim top` board gets a Norse role (Heimdall,
-  Hel, Sleipnir, Thor), reassigned weekly. Turn on with `"titles": {"enabled": true}`
+  Hel, Sleipnir, Thor, Bragi), reassigned weekly. Turn on with `"titles": {"enabled": true}`
   ([title roles](#title-roles)).
 - **`/valheim map` works with Valheim 1.0 worlds.** It reads the seed from the world
   folder (`worlds_local/<world>/_main.<N>.fwl2`); set `admin_bot.map.seed` if it can't
@@ -449,7 +452,7 @@ in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visib
 | `/valheim join` | Anyone | Join code, address, password (spoiler) and how to connect; only the asker sees it | The bot; `admin_bot.join` for the address |
 | `/valheim online` | Anyone | Who's on right now, and since when | The bot |
 | `/valheim stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen. No name = your linked character | Stats database |
-| `/valheim top [category]` | Anyone | Leaderboard: time played, deaths, visits or longest session | Stats database |
+| `/valheim top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, or Steam achievements | Stats database |
 | `/valheim titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
 | `/valheim notify <when> [player]` | Anyone | DM me when the first player joins an empty server, or when a given character joins; `off` / `list` | Stats database |
 | `/valheim link <character>` / `unlink` | Anyone | Link your Discord account to your character (stats, role, mentions) | Stats database |
@@ -599,8 +602,9 @@ won't rename a text channel: it logs a warning and skips it.
 These need the stats database (`database.path`), which the bot and the monitor share.
 
 - **Stats in Discord.** `/valheim stats Ingrid` shows play time, rank, visits, longest
-  session, deaths (and deaths per hour), and first and last seen. `/valheim top` has four
-  leaderboards. Character names autocomplete.
+  session, deaths (and deaths per hour), first and last seen, and Steam achievements
+  ([below](#steam-achievements-in-discord)). `/valheim top` has five leaderboards.
+  Character names autocomplete.
 - **Linking.** `/valheim link Ingrid` ties a character to your Discord account, which lets
   you:
   - run `/valheim stats` with no name;
@@ -675,6 +679,7 @@ mythology:
 | **Hel** | Most deaths | Ruler of the realm of the dead: everyone who dies ends up with her |
 | **Sleipnir** | Most visits | Odin's eight-legged horse carries riders between the worlds, and always comes back |
 | **Thor** | Longest single session | Drank from a horn linked to the sea and lowered the ocean |
+| **Bragi** | Most Steam achievements | God of poetry, who sings the great deeds of heroes in Valhalla |
 
 **Naming tip:** to keep the theme, call the announcement webhook **Huginn** (`"discord":
 {"username": "Huginn"}`) and the bot **Muninn** (developer portal → Bot → Username). They're
@@ -700,7 +705,7 @@ the Odin role goes to the server owner. See [roles & names](#roles--names) for t
 **Setup:**
 1. Add `"titles": { "enabled": true }` to the `admin_bot` block. It needs `guild_id` and the
    stats database.
-2. The bot needs **Manage Roles**. It creates the four roles itself the first time it gives
+2. The bot needs **Manage Roles**. It creates the title roles itself the first time it gives
    them out. New roles go at the bottom of the role list, below the bot's own role, so it can
    manage them.
 3. `docker compose up -d --force-recreate`.
@@ -716,7 +721,7 @@ at the top of the member list. Options:
   "day": "sunday",
   "hour": 18,
   "channel_id": "",
-  "roles": { "time": "", "deaths": "", "sessions": "", "longest": "" }
+  "roles": { "time": "", "deaths": "", "sessions": "", "longest": "", "achievements": "" }
 }
 ```
 - **`period`:** `all` (default) or `week`.
@@ -739,6 +744,7 @@ Everything the bot adds to your Discord server follows one theme from Norse myth
 | **Hel** | Title role: most deaths | Ruler of the realm of the dead | 〃 |
 | **Sleipnir** | Title role: most visits | Odin's horse, always carrying riders between the worlds and back | 〃 |
 | **Thor** | Title role: longest single session | Drank from a horn linked to the sea and lowered the ocean | 〃 |
+| **Bragi** | Title role: most Steam achievements | Sings the great deeds of heroes in Valhalla | 〃 (plus the Steam key) |
 
 Title roles go to whoever leads that `/valheim top` board at the weekly check
 ([details](#title-roles)).
@@ -762,7 +768,7 @@ time it hands each one out. None of them grant any permissions.
 1. **Muninn**, the bot's own role (it has the bot icon). It must stay **above** every role
    it hands out.
 2. **Odin**. The bot moves it here when it creates it.
-3. **Heimdall, Hel, Sleipnir, Thor, In Valheim**, in any order.
+3. **Heimdall, Hel, Sleipnir, Thor, Bragi, In Valheim**, in any order.
 
 Roles the bot creates start at the bottom of the list, so they're below its own role and it
 can hand them out. If you drag one above Muninn, the log says `can't give the … role`.
@@ -1044,6 +1050,41 @@ URL hash so a refresh keeps you where you were.
 
 ## Steam achievements
 
+### Steam achievements in Discord
+
+With a Steam Web API key, the bot brings your players' Valheim achievements into Discord.
+You don't need the web page for this.
+
+- **Unlock posts.** When a player unlocks an achievement, Huginn posts "🏅 Ingrid unlocked
+  Elder slayer" with the achievement's icon, what it's for, and their total (e.g. 23/45).
+  Several at once become one post. Add `"achievement"` to `events` to turn this on.
+- **`/valheim stats`** shows the player's achievement count and latest unlock, or says
+  that their Steam profile is private.
+- **`/valheim top achievements`**: the "Most achievements (Steam)" leaderboard.
+- **Bragi** title role for the leader, with the [other titles](#title-roles).
+
+**Setup:**
+1. Get a free key at <https://steamcommunity.com/dev/apikey>. Any domain name works for
+   the form.
+2. Put it in `.env` as `STEAM_API_KEY=…`, not in `config.json`. That's enough to turn the
+   Steam refresh on.
+3. Add `"achievement"` to `events` in `config.json`, then run
+   `docker compose up -d --force-recreate`.
+
+**Good to know:**
+- Achievements are checked every 30 minutes (`steam.refresh_seconds`), so a post can
+  arrive up to half an hour after the unlock.
+- The first check for a player only records what they already have, so nobody gets a
+  flood of old achievements. Only achievements unlocked after that are posted.
+- A Steam account is shown under the character it played most recently.
+- **Steam only.** Xbox and Game Pass players have no Steam ID. Microsoft has no free public
+  achievements API, so Xbox support would need a third-party service such as OpenXBL.
+  PlayStation has no public trophy API, and Nintendo consoles have no achievements at all.
+- Players need a **public Steam profile with public game details**. Otherwise
+  `/valheim stats` says it's private.
+
+### Achievements on the stats web page
+
 For players who connect through **Steam** (not Xbox/GamePass), the monitor can
 show their public Valheim achievement progress on the page — an Achievements tab
 with a card per player (avatar, unlocked/total, a progress bar, their latest
@@ -1183,7 +1224,7 @@ or run it in a terminal.
 
 | Config key | Default | Meaning |
 |---|---|---|
-| `events` | mode default | Log mode: `login`, `logout`, `death`, `respawn`, `server_up`, `join_refused`, and the [extras](#extras-raids-summaries-milestones-recap-board-backups) `raid`, `version_mismatch`, `session_summary`, `welcome`, `milestone`, `weekly_recap`. Count mode: `player_joined`, `player_left`, `server_online`, `server_offline`. |
+| `events` | mode default | Log mode: `login`, `logout`, `death`, `respawn`, `server_up`, `join_refused`, and the [extras](#extras-raids-summaries-milestones-recap-board-backups) `raid`, `version_mismatch`, `session_summary`, `welcome`, `milestone`, `weekly_recap`, `update`, `achievement` (Steam unlock posts). Count mode: `player_joined`, `player_left`, `server_online`, `server_offline`. |
 | `poll_interval_seconds` | 15 | How often to poll. |
 | `discord.username` | Valheim | Name the webhook posts under (the examples use **Huginn**, see [roles & names](#roles--names)). |
 | `source.offline_after` | 3 | Count mode: failed queries in a row before "offline". |
@@ -1237,7 +1278,7 @@ or run it in a terminal.
 | `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |
 | `admin_bot.titles.day` / `hour` | sunday / 18 | When to reassign the titles (container time zone). |
 | `admin_bot.titles.channel_id` | — | Where to post title changes; empty = the webhook channel. |
-| `admin_bot.titles.roles` | — | Existing role IDs per category (`time`, `deaths`, `sessions`, `longest`); otherwise the bot creates them. |
+| `admin_bot.titles.roles` | — | Existing role IDs per category (`time`, `deaths`, `sessions`, `longest`, `achievements`); otherwise the bot creates them. |
 | `health.low_disk_gb` | 10 | Warn when the save disk has less free space than this. |
 | `health.slow_save_seconds` | 5 | Warn when a world save takes longer than this. |
 | `daily_restart.time` / `window_minutes` | — / 120 | Restart once a day in this window while nobody's on (needs the host helper). |

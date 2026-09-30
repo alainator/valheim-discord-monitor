@@ -16,7 +16,8 @@
     "welcome",
     "milestone",
     "weekly_recap",
-    "update"
+    "update",
+    "achievement"
   ],
   "database": {
     "path": "valheim_stats.db",

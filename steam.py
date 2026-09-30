@@ -123,8 +123,25 @@ def fetch_achievements(key: str, steam_id: str):
     return len(unlocks), len(ach), unlocks, None
 
 
-def update_all(store, key: str, limit: int = 25, schema_ttl: int = SCHEMA_TTL) -> int:
-    """Refresh Steam data for the known SteamIDs. Returns how many profiles updated."""
+def new_unlocks(store, steam_id: str, unlocks: list) -> list:
+    """The unlocks in `unlocks` that are new since this player's last refresh, as
+    (apiname, unlocktime). Empty on a player's first refresh (their existing
+    achievements are the baseline, not news), and anything unlocked before the last
+    refresh (e.g. while the profile was private) is skipped too."""
+    prev = store.conn.execute("SELECT unlocked, updated_at FROM steam_profile WHERE steam_id=?",
+                              (steam_id,)).fetchone()
+    known = {r[0] for r in store.conn.execute("SELECT apiname FROM steam_unlock WHERE steam_id=?", (steam_id,))}
+    if prev is None or (not known and prev["unlocked"] != 0):
+        return []
+    since = int(prev["updated_at"] or 0) - 3600      # an hour of slack for clock differences
+    return [(a, t) for a, t in unlocks if a not in known and t >= since]
+
+
+def update_all(store, key: str, limit: int = 25, schema_ttl: int = SCHEMA_TTL,
+               announce: list = None) -> int:
+    """Refresh Steam data for the known SteamIDs. Returns how many profiles updated.
+    With `announce` (a list), appends {"steam_id", "unlocks": [(apiname, unlocktime)]}
+    for each player with achievements unlocked since their last refresh."""
     if not key:
         return 0
     steam_ids = store.steam_ids_to_update(limit=limit)
@@ -171,6 +188,10 @@ def update_all(store, key: str, limit: int = 25, schema_ttl: int = SCHEMA_TTL) -
         if unlocks:
             a, last_at = max(unlocks, key=lambda x: x[1])
             last_name = name_by_api.get(a, a)
+            if announce is not None:
+                fresh = new_unlocks(store, sid, unlocks)
+                if fresh:
+                    announce.append({"steam_id": sid, "unlocks": sorted(fresh, key=lambda x: x[1])})
             store.save_unlocks(sid, unlocks)
         fields = dict(unlocked=unlocked, total=total, last_unlock_at=last_at,
                       last_unlock_name=last_name, error=err)
