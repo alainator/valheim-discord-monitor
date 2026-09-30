@@ -241,6 +241,13 @@ class ValheimLogParser:
         if line:
             self.recent.append(line)
 
+    def _set_owner(self, name: str, owner: str) -> None:
+        old = self.s.online.get(name)
+        if old and old != owner and self.s.owner_to_name.get(old) == name:
+            del self.s.owner_to_name[old]
+        self.s.online[name] = owner
+        self.s.owner_to_name[owner] = name
+
     def _logout(self, name: str) -> Event:
         owner = self.s.online.pop(name, None)
         self.s.owner_to_name.pop(owner, None)
@@ -365,15 +372,14 @@ class ValheimLogParser:
                 self.s.dead.discard(name)
                 # Register the owner id so a later logout can be matched, even for a
                 # player who was already online when the monitor started.
-                self.s.online[name] = owner
-                self.s.owner_to_name[owner] = name
+                self._set_owner(name, owner)
                 yield Event("respawn", name)
                 return
             if name in self.s.online:
-                # Character re-spawn for an already-known player (portal, etc.); refresh
-                # the owner id in case it changed this session.
-                self.s.online[name] = owner
-                self.s.owner_to_name[owner] = name
+                # Character re-spawn for an already-known player (portal, a reconnect we
+                # didn't see the end of); take the new owner id and forget the old one,
+                # whose leftover objects are cleaned up later without meaning they left.
+                self._set_owner(name, owner)
                 return
             self.s.online[name] = owner
             self.s.owner_to_name[owner] = name
@@ -394,7 +400,9 @@ class ValheimLogParser:
         m = RE_ABANDONED.search(line)
         if m:
             name = self.s.owner_to_name.get(m.group("owner"))
-            if name:
+            # Only the player's current owner id: objects left over from an earlier
+            # connection of theirs are cleaned up while they're still here.
+            if name and self.s.online.get(name) == m.group("owner"):
                 yield self._logout(name)
             return
 
@@ -431,6 +439,12 @@ class ValheimLogParser:
         # A connection we paired with a character is ending ("… socket <id> closed",
         # "… <id> disconnected", "… <id> timed out"): that character has left.
         if self.s.id_to_name and RE_GONE.search(line):
+            # A second connection from someone already in (e.g. joining through Steam while
+            # connected) ending is not them leaving.
+            for cid in list(self.s.pending_ids):
+                if len(cid) >= 8 and cid in line:
+                    self.s.pending_ids.remove(cid)
+                    return
             for cid, name in list(self.s.id_to_name.items()):
                 if len(cid) >= 8 and cid in line and name in self.s.online:
                     self.s.id_to_name.pop(cid, None)
