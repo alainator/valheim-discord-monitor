@@ -57,6 +57,12 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Join-to-create voice:** join **➕ Raise a longship** and the bot makes you your own
+  voice channel ("⛵ Ingrid's longship"), deleted once everyone leaves
+  ([join-to-create](#join-to-create-voice-channels)).
+- **Bounties:** admins post challenges with `/odin bounty` ("Kill Moder without dying");
+  members press **🎯 I did it**, an admin confirms, and the winner is **Skadi** for a week
+  ([bounties](#bounties)).
 - **A calmer, friendlier feed:** **quiet hours** hold joins and leaves overnight and post
   them as one summary in the morning, a **digest** groups a burst of joins into one post,
   and milestones now include **play streaks** ("5-day streak 🔥") and **anniversaries**
@@ -537,8 +543,8 @@ The commands are in four groups, one per place they're used:
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access` | Anywhere: the replies are private |
 | **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime` | #🪶┃muninns-roost |
-| **`/warcouncil`** | `plan` | #🗺️┃war-council and its game-night threads |
-| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce` | Admins, anywhere: replies are private |
+| **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
+| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close` | Admins, anywhere: replies are private |
 
 **Admins:** `/odin` only works for the users and roles in `admin_user_ids` /
 `admin_role_ids`. Discord also hides it from anyone without **Manage Server**. If one of
@@ -574,6 +580,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/valheim link <character>` / `unlink` | Anyone | Link your Discord account to your character (stats, role, mentions) | Stats database |
 | `/valheim request-access <character>` | Anyone | New player: "I'll join as …". The admins' refused-join notice then says who it is | Stats database |
 | `/warcouncil plan <title> <when>` | Anyone | Game night with Going / Maybe / Can't buttons, a planning thread and a reminder ping. Several times (`sat 20:00, sun 18:00`) start a poll for the time | Stats database |
+| `/warcouncil bounties` | Anyone | Open bounties with their rewards and deadlines, and the top bounty hunters | Stats database |
 | `/valheim map` | Anyone | World seed and a map link (spoilers; only the asker sees it) | `save_dir` |
 | `/odin permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
 | `/odin ban <id>` | Admin | Ban, and remove from the permitted list | `save_dir` |
@@ -583,6 +590,8 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/odin update-check` | Admin | Check for a Valheim update now | [host helper](host/README.md) |
 | `/odin restart [minutes] [reason]` | Admin | Restart (installs any waiting update); warns players at N/5/1 min, early if everyone leaves | [host helper](host/README.md) |
 | `/odin restart-cancel` | Admin | Stop a restart countdown | — |
+| `/odin bounty <challenge> [reward] [days]` | Admin | Post a [bounty](#bounties) with an **I did it** button; open 7 days by default | Stats database |
+| `/odin bounty-close <bounty>` | Admin | Close an open bounty without a winner | Stats database |
 | `/odin announce <message> [title] [ping]` | Admin | Post an announcement as Huginn in the feed channel; `ping` adds @everyone. `\n` starts a new line | Huginn's webhook |
 | `/odin setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-odin-setup)) | Manage Channels, Manage Roles (Manage Webhooks for Huginn's webhook, Manage Server for Discord's join messages) |
 | `/odin settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
@@ -627,7 +636,7 @@ Or skip the ticking and use a ready-made link. Replace `YOUR_APP_ID` with the
 - Everything (needed now plus future features):
   `https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot+applications.commands&permissions=2832677918338160`
 - Only what's needed now:
-  `https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot+applications.commands&permissions=9395326000`
+  `https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot+applications.commands&permissions=9413151792`
 
 Opening an invite link again for a bot that's already in your server just updates its
 permissions; it doesn't add a second bot.
@@ -643,10 +652,11 @@ permissions; it doesn't add a second bot.
 | Embed Links | Every notice and stat post is an embed |
 | Read Message History | Finding and editing its own earlier messages (guide, signups, status board) |
 | Manage Channels | [Stat channels](#stat-channels), the [status channel](#status-voice-channel), [`/odin setup`](#server-setup-odin-setup) |
-| Manage Roles | ["In Valheim", Odin and the title roles](#roles--names); channel permissions in `/odin setup` |
+| Manage Roles | ["In Valheim", Odin, the title roles and the bounty role](#roles--names); channel permissions in `/odin setup` and join-to-create channels |
 | Manage Webhooks | Creating Huginn's webhook, or moving it to #huginns-watch |
 | Manage Server | Moving Discord's "Yay you made it" join messages (optional) |
 | Manage Events | Discord Events for game nights, with `lfg.discord_event` (optional) |
+| Connect, Move Members | [Join-to-create voice](#join-to-create-voice-channels): moving people into their new channel (optional) |
 
 **Used by the optional extras** (game-night threads, polls, reactions, the recap chart,
 pinning, tidying, nicknames), and harmless to grant now:
@@ -660,7 +670,6 @@ pinning, tidying, nicknames), and harmless to grant now:
 | Pin Messages | Pinning the channel guide |
 | Manage Messages | Tidying handled refused-join notices |
 | Create Events | The newer half of the events permission |
-| Connect, Move Members | Not used yet: Discord moves idle voice users to the AFK channel by itself |
 | Manage Nicknames | Setting a member's nickname to their character on `/valheim link` (opt-in) |
 
 **Don't grant:**
@@ -1029,6 +1038,44 @@ These need the stats database (`database.path`), which the bot and the monitor s
 }
 ```
 
+### Join-to-create voice channels
+
+```json
+"voice_lobby": true
+```
+
+- The bot makes a **➕ Raise a longship** voice channel, in 🔊 The Longhouses if you ran
+  `/odin setup`. Move it wherever you like; it's remembered.
+- Join it and the bot makes you your own channel, **⛵ Ingrid's longship** (your Discord
+  display name), right next to it, and moves you in. You can rename it, set a user limit
+  and move people.
+- When the last person leaves, the channel is deleted. Channels left empty while the bot
+  was offline are deleted when it starts.
+- Options: `{"name": "➕ Raise a longship", "template": "⛵ {name}'s longship", "limit": 0}`.
+  `limit` caps each new channel's users (0 = no limit).
+- Needs **Manage Channels**, **Connect** and **Move Members**, plus **Manage Roles** so the
+  maker can manage their channel. Without Manage Roles it still works, but only admins
+  can rename the channel.
+
+### Bounties
+
+Admins post a challenge; whoever does it gets the glory and a role for a week.
+
+1. **`/odin bounty "Kill Moder without dying" "10 black metal" 7`** posts it in
+   #🗺️┃war-council (or `bounties.channel_id`) with a **🎯 I did it** button.
+2. A member presses it. The admin channel gets their claim with **Confirm** and
+   **Reject**.
+3. **Confirm**: the bounty closes, its post shows the winner, and #war-council gets
+   "🏆 @Ingrid claimed the bounty **Kill Moder without dying**!". The winner gets the
+   **Skadi** role (the Norse goddess of the hunt) for `role_days`; a second bounty extends
+   it. **Reject** DMs them that it wasn't confirmed, and the bounty stays open.
+
+- Bounties nobody claims close by themselves at the deadline.
+- `/warcouncil bounties` lists the open ones and the top bounty hunters;
+  `/odin bounty-close` ends one early.
+- Config (all optional): `"bounties": {"channel_id": "…", "role": "Skadi", "role_days": 7}`.
+  `"role": false` gives no role.
+
 ### Title roles
 
 The leader of each `/muninn top` board gets a role named after a figure from Norse
@@ -1108,6 +1155,7 @@ The channels have themed names too: see [server setup](#server-setup-odin-setup)
 | **Sleipnir** | Title role: most visits | Odin's horse, always carrying riders between the worlds and back | 〃 |
 | **Thor** | Title role: longest single session | Drank from a horn linked to the sea and lowered the ocean | 〃 |
 | **Bragi** | Title role: most Steam achievements | Sings the great deeds of heroes in Valhalla | 〃 (plus the Steam key) |
+| **Skadi** | Role for a week after claiming a [bounty](#bounties) | Goddess of the hunt, on skis with her bow | `/odin bounty` (on by default) |
 
 Title roles go to whoever leads that `/muninn top` board at the weekly check
 ([details](#title-roles)).
@@ -1131,7 +1179,7 @@ time it hands each one out. None of them grant any permissions.
 1. **Muninn**, the bot's own role (it has the bot icon). It must stay **above** every role
    it hands out.
 2. **Odin**. The bot moves it here when it creates it.
-3. **Heimdall, Hel, Sleipnir, Thor, Bragi, In Valheim**, in any order.
+3. **Heimdall, Hel, Sleipnir, Thor, Bragi, Skadi, In Valheim**, in any order.
 
 Roles the bot creates start at the bottom of the list, so they're below its own role and it
 can hand them out. If you drag one above Muninn, the log says `can't give the … role`.
@@ -1698,7 +1746,7 @@ or run it in a terminal.
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
 | `admin_bot.map.seed` | "" | Use this seed instead of reading it from the world file. |
 | `admin_bot.link_nickname` | false | `/valheim link` sets the member's server nickname to their character, if they have no nickname yet (needs Manage Nicknames; the server owner's can't be changed). |
-| `admin_bot.command_channels` | true | Send `stats`, `top`, `titles`, `online`, `compare`, `uptime` and `plan` to their home channel (from `/odin setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
+| `admin_bot.command_channels` | true | Send `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `plan` and `bounties` to their home channel (from `/odin setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
 | `admin_bot.tidy_notices_hours` | 24 | Delete refused-join notices this long after someone pressed Permit, Ban or Ignore (needs Manage Messages). `0` keeps them. |
 | `admin_bot.titles.enabled` | false | Weekly title roles for the `/muninn top` leaders. |
 | `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |
@@ -1713,6 +1761,9 @@ or run it in a terminal.
 | `discord.show_player_count` | true | Footer with the current online count. |
 | `discord.quiet_hours` | — | `{"from": "23:00", "to": "08:00", "timezone": …, "events": […]}`: hold those posts and summarise them when it ends ([quiet hours](#quiet-hours-and-digests)). |
 | `discord.digest_seconds` | 0 | Group joins and leaves within this many seconds into one post. |
+| `admin_bot.voice_lobby` | — | `true` or `{"name", "template", "limit"}`: [join-to-create voice](#join-to-create-voice-channels). |
+| `admin_bot.bounties.channel_id` | #war-council | Where `/odin bounty` posts. |
+| `admin_bot.bounties.role` / `role_days` | Skadi / 7 | The bounty winner's role and how long they keep it; `false` for no role. |
 | `admin_bot.welcome_dm` | false | `true` or your own text: DM people who join the Discord server (needs the Server Members Intent). |
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |
 | `state_file` | `monitor_state.json` | Where the read offset is remembered. |

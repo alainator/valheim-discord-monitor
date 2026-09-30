@@ -469,6 +469,72 @@ def uptime(conn, since: int, until: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Bounties
+# ---------------------------------------------------------------------------
+def create_bounty(conn, title: str, reward: str, days: float, creator_id, now: Optional[float] = None) -> int:
+    now = int(time.time() if now is None else now)
+    cur = conn.execute("INSERT INTO bounties(title, reward, created_at, expires_at, creator_id) VALUES (?,?,?,?,?)",
+                       (title, reward or None, now, now + int(days * 86400), str(creator_id)))
+    conn.commit()
+    return cur.lastrowid
+
+
+def set_bounty_message(conn, bounty_id: int, channel_id, message_id) -> None:
+    conn.execute("UPDATE bounties SET channel_id = ?, message_id = ? WHERE id = ?",
+                 (str(channel_id), str(message_id), bounty_id))
+    conn.commit()
+
+
+def get_bounty(conn, bounty_id: int) -> Optional[dict]:
+    return _one(conn, "SELECT * FROM bounties WHERE id = ?", (bounty_id,))
+
+
+def open_bounties(conn, prefix: str = "") -> list:
+    return _rows(conn, "SELECT * FROM bounties WHERE status = 'open' AND title LIKE ? ORDER BY expires_at",
+                 (f"%{prefix.strip()}%",))
+
+
+def finish_bounty(conn, bounty_id: int, status: str, winner_id=None, now: Optional[float] = None) -> bool:
+    """Close an open bounty: 'done' (with a winner), 'expired' or 'closed'. False if it
+    wasn't open any more (someone else got there first)."""
+    cur = conn.execute("UPDATE bounties SET status = ?, winner_id = ?, done_at = ? WHERE id = ? AND status = 'open'",
+                       (status, str(winner_id) if winner_id else None, int(time.time() if now is None else now),
+                        bounty_id))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def expired_bounties(conn, now: Optional[float] = None) -> list:
+    return _rows(conn, "SELECT * FROM bounties WHERE status = 'open' AND expires_at <= ?",
+                 (int(time.time() if now is None else now),))
+
+
+def bounty_hunters(conn, since: int = 0) -> list:
+    """[{"user_id", "n"}]: who claimed the most bounties since `since`."""
+    return _rows(conn, "SELECT winner_id AS user_id, COUNT(*) AS n FROM bounties WHERE status = 'done' "
+                       "AND done_at >= ? GROUP BY winner_id ORDER BY n DESC, MIN(done_at)", (since,))
+
+
+def render_bounty(b: dict) -> dict:
+    """The bounty post: the challenge, reward, deadline and how it ended."""
+    lines = []
+    if b.get("reward"):
+        lines.append(f"**Reward:** {b['reward']}")
+    if b["status"] == "open":
+        lines.append(f"**Ends** <t:{b['expires_at']}:R>")
+        lines.append("Done it? Press **🎯 I did it** and an admin will confirm.")
+        color, head = 0xC27C0E, "🎯 Bounty"
+    elif b["status"] == "done":
+        lines.append(f"🏆 Claimed by <@{b['winner_id']}>")
+        color, head = 0x57F287, "🏆 Bounty claimed"
+    else:
+        lines.append("⌛ Nobody claimed it in time." if b["status"] == "expired" else "Closed by an admin.")
+        color, head = 0x95A5A6, "🎯 Bounty (closed)"
+    return {"title": f"{head}: {b['title']}"[:256], "description": "\n".join(lines), "color": color,
+            "footer": {"text": f"Bounty #{b['id']}"}}
+
+
+# ---------------------------------------------------------------------------
 # Game-night plans
 # ---------------------------------------------------------------------------
 _DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
