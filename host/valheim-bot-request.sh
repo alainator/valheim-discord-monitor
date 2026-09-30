@@ -1,24 +1,118 @@
 #!/bin/bash
 # Runs on the HOST as the valheim user, started by valheim-bot-request.path when the
-# Discord monitor drops a request file. It can only do three things:
+# Discord monitor drops a request file. It can only do four things:
 #   check                    -> run check_update.sh now
 #   restart                  -> restart the server (the one command valheim's sudoers
 #                               rule allows); the unit's ExecStartPre installs any update
 #   set <kind> <key> [value] -> change one world setting in world-settings.env, via
 #                               valheim-world-settings.py, which only accepts known
 #                               presets/modifiers/setkeys and values
+#   restore <14 digits>      -> put back one of Valheim's own world backups (named by
+#                               its date and time): stop the server, keep the current
+#                               world as <world>_backup_prerestore-<now>, copy the backup
+#                               in, start again. Needs sudoers to allow stop and start.
 set -euo pipefail
 
-BOT_DIR="/home/valheim/bot"
+# (The VDM_* variables only exist for the repository's tests; systemd never sets them.)
+BOT_DIR="${VDM_BOT_DIR:-/home/valheim/bot}"
 REQUEST="$BOT_DIR/request"
-LOG_FILE="/home/valheim/update_check.log"
+LOG_FILE="${VDM_LOG_FILE:-/home/valheim/update_check.log}"
 CHECK_SCRIPT="/home/valheim/check_update.sh"
 SETTINGS_SCRIPT="/home/valheim/valheim-world-settings.py"
 SETTINGS_FILE="/home/valheim/world-settings.env"
 SERVICE="valheimserver.service"
+WORLDS="${VDM_WORLDS:-/home/valheim/valheim_save_data/worlds_local}"
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG_FILE"
+}
+
+# The backup whose date and time (the digits after "_backup_") are $1, as a folder
+# name (Valheim 1.0) or a .db/.fwl stem (older servers). Prints nothing unless exactly one.
+find_backup() {
+    local found=() entry name stem digits
+    for entry in "$WORLDS"/*_backup_*; do
+        [ -e "$entry" ] || continue
+        name=$(basename "$entry")
+        stem="$name"
+        if [ -f "$entry" ]; then
+            case "$name" in *.db|*.fwl) stem="${name%.*}" ;; *) continue ;; esac
+        fi
+        digits=$(echo "${stem#*_backup_}" | tr -cd '0-9')
+        digits="${digits:0:14}"
+        if [ "$digits" = "$1" ] && [[ ! " ${found[*]:-} " == *" $stem "* ]]; then
+            found+=("$stem")
+        fi
+    done
+    [ "${#found[@]}" -eq 1 ] && echo "${found[0]}"
+    return 0
+}
+
+restore() {
+    local id="$1" stem world safe legacy=0 ext
+    if ! [[ "$id" =~ ^[0-9]{14}$ ]]; then
+        log "ERROR: restore: bad backup id '$id'"
+        return
+    fi
+    stem=$(find_backup "$id")
+    if [ -z "$stem" ]; then
+        log "ERROR: restore: no single backup in $WORLDS matches $id"
+        return
+    fi
+    world="${stem%%_backup_*}"
+    if [ -d "$WORLDS/$stem" ] && [ -d "$WORLDS/$world" ]; then
+        legacy=0
+    elif [ -f "$WORLDS/$stem.db" ] && [ -f "$WORLDS/$stem.fwl" ] && [ -f "$WORLDS/$world.db" ]; then
+        legacy=1
+    else
+        log "ERROR: restore: $stem doesn't match the live world $world in $WORLDS"
+        return
+    fi
+    safe="${world}_backup_prerestore-$(date '+%Y%m%d-%H%M%S')"
+    log "Restore requested from Discord: $stem. Stopping the server."
+    if ! sudo /bin/systemctl stop "$SERVICE"; then
+        log "ERROR: restore: couldn't stop the server (does sudoers allow 'systemctl stop $SERVICE'?); nothing changed"
+        return
+    fi
+    for _ in $(seq 1 60); do
+        systemctl is-active --quiet "$SERVICE" || break
+        sleep 2
+    done
+    if systemctl is-active --quiet "$SERVICE"; then
+        log "ERROR: restore: the server didn't stop; nothing changed"
+        return
+    fi
+    # Copy the backup next to the live world first: if that fails, nothing has changed.
+    # Then two renames swap it in, and the old world is kept as a backup of its own.
+    local ok=1
+    if [ "$legacy" -eq 0 ]; then
+        rm -rf "${WORLDS:?}/$world.restoring"
+        if cp -a "$WORLDS/$stem" "$WORLDS/$world.restoring"; then
+            mv "$WORLDS/$world" "$WORLDS/$safe" && mv "$WORLDS/$world.restoring" "$WORLDS/$world" || ok=0
+        else
+            ok=0
+            rm -rf "${WORLDS:?}/$world.restoring"
+        fi
+    else
+        if cp -a "$WORLDS/$stem.db" "$WORLDS/$world.db.restoring" &&
+                cp -a "$WORLDS/$stem.fwl" "$WORLDS/$world.fwl.restoring"; then
+            for ext in db fwl; do
+                if [ -f "$WORLDS/$world.$ext" ]; then
+                    mv "$WORLDS/$world.$ext" "$WORLDS/$safe.$ext" || ok=0
+                fi
+                mv "$WORLDS/$world.$ext.restoring" "$WORLDS/$world.$ext" || ok=0
+            done
+        else
+            ok=0
+            rm -f "$WORLDS/$world.db.restoring" "$WORLDS/$world.fwl.restoring"
+        fi
+    fi
+    if [ "$ok" -eq 1 ]; then
+        log "Restore done: $stem (the world before it is saved as $safe)"
+    else
+        log "ERROR: restore: couldn't copy $stem into place; check $WORLDS (the old world is $world or $safe)"
+    fi
+    sudo /bin/systemctl start "$SERVICE" || log "ERROR: restore: couldn't start the server again"
 }
 
 [ -f "$REQUEST" ] || exit 0
@@ -37,6 +131,9 @@ case "$ACTION" in
         log "Restart requested from Discord."
         sudo /bin/systemctl restart "$SERVICE"
         log "Restart issued."
+        ;;
+    restore)
+        restore "${ARG1:-}"
         ;;
     set)
         RESULT=$(python3 "$SETTINGS_SCRIPT" --file "$SETTINGS_FILE" set "${ARG1:-}" "${ARG2:-}" "${ARG3:-}" 2>&1 || true)

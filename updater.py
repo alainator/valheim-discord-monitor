@@ -30,9 +30,20 @@ RE_RESTARTING = re.compile(r"No players connected\. Restarting to apply update")
 RE_NONE = re.compile(r"No update available")
 RE_ERROR = re.compile(r"ERROR: (?P<err>.*)")
 RE_REQ_CHECK = re.compile(r"Update check requested from Discord")
+RE_RESTORE_DONE = re.compile(r"Restore done: (?P<name>\S+) \(the world before it is saved as (?P<safe>\S+)\)")
 
 REQUESTS = ("check", "restart")
 RE_SET_REQUEST = re.compile(r"^set (preset|modifier|setkey) [a-z]+( [a-z]+)?$")
+RE_RESTORE_REQUEST = re.compile(r"^restore \d{14}$")
+
+
+def backup_id(name: str) -> Optional[str]:
+    """The 14 digits (date and time) after "_backup_" in a backup's name, which is how a
+    restore request names it: "Alheim_backup_auto-20260928-170645" -> "20260928170645"."""
+    if "_backup_" not in name:
+        return None
+    digits = re.sub(r"\D", "", name.split("_backup_", 1)[1])
+    return digits[:14] if len(digits) >= 14 else None
 
 
 class UpdateWatcher:
@@ -84,6 +95,10 @@ class UpdateWatcher:
                                      + (f" (build {self.local})." if self.local else ".")))
         elif RE_REQ_CHECK.search(msg):
             self.check_requested = True
+        elif (m2 := RE_RESTORE_DONE.search(msg)):
+            out.append(("admin", f"✅ World restored from `{m2.group('name')}`. The world as it was before is kept "
+                                 f"as `{m2.group('safe')}`, so `/odin restore` can put it back."))
+            out.append(("public", "⏪ The world has been restored from a backup. The server is starting again."))
         elif (m2 := RE_ERROR.search(msg)):
             err, now = m2.group("err"), self.clock()
             if err not in self.error_posted or now - self.error_posted[err] > 6 * 3600:
@@ -114,7 +129,7 @@ class UpdateWatcher:
     def request(self, action: str) -> Optional[str]:
         """Ask the host helper to act: "check", "restart", or "set <kind> <key> [value]"
         (world settings; the host re-checks every value). Returns an error, or None."""
-        if action not in REQUESTS and not RE_SET_REQUEST.match(action):
+        if action not in REQUESTS and not RE_SET_REQUEST.match(action) and not RE_RESTORE_REQUEST.match(action):
             return f"unknown request {action!r}"
         if not self.bot_dir or not os.path.isdir(self.bot_dir):
             return "the shared bot folder isn't mounted (updater.bot_dir)"

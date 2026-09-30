@@ -10,7 +10,7 @@ through one shared folder, `/home/valheim/bot/`:
 | File | Written by | Read by | Purpose |
 |---|---|---|---|
 | `status.json` | monitor, every poll | `check_update.sh` | The live player count, so the updater never restarts on people |
-| `request` | monitor (`/odin restart`, `/odin update-check`) | `valheim-bot-request.sh` | Ask the host to check now or restart |
+| `request` | monitor (`/odin restart`, `update-check`, `restore`, world settings) | `valheim-bot-request.sh` | Ask the host to check now, restart, [restore a backup](#restoring-a-world-backup-from-discord) or change a world setting |
 
 The monitor also reads `update_check.log` to post "update available", "installing" and
 checker errors, and it posts "✅ Valheim updated: l-1.0.16 → l-1.0.17" when the server
@@ -69,10 +69,13 @@ sudo systemctl enable --now valheim-bot-request.path
 systemctl status valheim-bot-request.path        # "active (waiting)"
 ```
 
-The handler runs **as `valheim`** and can only do two things:
+The handler runs **as `valheim`** and can only do these things:
 - **`check`:** run `check_update.sh` now.
 - **`restart`:** `sudo /bin/systemctl restart valheimserver.service`. That is the one
   command valheim's existing sudoers rule allows, so no new permissions are needed.
+- **`set …`:** change a [world setting](#world-settings-from-discord-preset-modifiers-setkeys).
+- **`restore <date and time>`:** [put back a world backup](#restoring-a-world-backup-from-discord)
+  (needs one extra sudoers line).
 
 It logs each request to `update_check.log` (`Update check requested from Discord.`,
 `Restart requested from Discord.`).
@@ -190,3 +193,52 @@ After a change the bot confirms once the file has been written, e.g. "✅ Saved:
 raids → more. It takes effect at the next server restart", and offers a **Restart in 5 min
 (with warning)** button. `update_check.log` records every change
 (`World setting from Discord (…): WORLD_ARGS=…`).
+
+## Restoring a world backup from Discord
+
+`/odin restore` puts the world back to one of **Valheim's own backups** (the
+`<world>_backup_…` folders in `worlds_local`). Admins pick the backup from a list, newest
+first, and confirm with a button that shows how many players would be disconnected.
+
+What the handler does, as `valheim`:
+1. Finds exactly one backup with that date and time. It must belong to the live world;
+   anything else is refused and nothing changes.
+2. Stops the server with `sudo systemctl stop valheimserver.service`, and waits until it
+   has stopped. Valheim saves the world on the way down.
+3. Copies the backup next to the live world. Then it renames the live world to
+   `<world>_backup_prerestore-<date>-<time>` and moves the copy into its place. If the
+   copy fails, the live world is left untouched.
+4. Starts the server again and logs `Restore done: …` in `update_check.log`. The admin
+   channel gets the result, and the public channel is told the world was restored.
+
+The world from before the restore is a backup like any other, so it shows up in
+`/odin restore` too: a restore can be undone the same way. The backup that was restored
+isn't removed.
+
+### One-time setup
+
+1. **Install the updated handler** (from the repo folder, after `git pull`):
+   ```bash
+   sudo install -o valheim -g valheim -m 755 host/valheim-bot-request.sh /home/valheim/valheim-bot-request.sh
+   ```
+2. **Allow `valheim` to stop and start the server.** Restarting was already allowed;
+   restoring needs the server stopped while the files are swapped. Run
+   `sudo visudo -f /etc/sudoers.d/valheim-restore` and add:
+   ```
+   valheim ALL=(root) NOPASSWD: /bin/systemctl stop valheimserver.service, /bin/systemctl start valheimserver.service
+   ```
+   Check it: `sudo -l -U valheim` lists both commands.
+3. **Check the worlds folder.** The handler uses
+   `/home/valheim/valheim_save_data/worlds_local`. If your server saves somewhere else
+   (`-savedir`), change `WORLDS=` near the top of `/home/valheim/valheim-bot-request.sh`.
+
+**Backups on another disk** ([backup copies](../README.md#world-backup-copies)) aren't
+restored from directly. To use one, copy its folder back into `worlds_local` first; it
+then shows up in `/odin restore`.
+
+Test it without Discord (this really restores, so pick a moment nobody's playing):
+```bash
+ls /home/valheim/valheim_save_data/worlds_local                 # e.g. Alheim_backup_auto-20260928-170645
+echo "restore 20260928170645" | sudo -u valheim tee /home/valheim/bot/request
+sleep 30; sudo tail -3 /home/valheim/update_check.log
+```

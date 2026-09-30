@@ -276,6 +276,32 @@ def _tree_size(path: str) -> int:
     return total
 
 
+def list_backups(folder: str) -> list:
+    """[(mtime, size, name)] newest first. name is the folder name, or the file stem
+    for an old .db/.fwl pair."""
+    try:
+        entries = os.listdir(folder)
+    except FileNotFoundError:
+        return []
+    out, pairs = [], {}
+    for n in entries:
+        if n.startswith(".") or not BACKUP_RE.search(n):
+            continue
+        path = os.path.join(folder, n)
+        try:
+            if os.path.isdir(path):
+                out.append((os.stat(path).st_mtime, _tree_size(path), n))
+            elif n.endswith(LEGACY_EXTS):
+                st = os.stat(path)
+                stem = n.rsplit(".", 1)[0]
+                m, size = pairs.get(stem, (0.0, 0))
+                pairs[stem] = (max(m, st.st_mtime), size + st.st_size)
+        except FileNotFoundError:
+            continue
+    out += [(m, size, stem) for stem, (m, size) in pairs.items()]
+    return sorted(out, reverse=True)
+
+
 class BackupCopier:
     """Copies Valheim's own world backups from worlds_local to a second folder, e.g.
     another disk, and keeps the newest `keep` there.
@@ -295,29 +321,7 @@ class BackupCopier:
         self.lock = threading.Lock()
 
     def _backups(self, folder: str) -> list:
-        """[(mtime, size, name)] newest first. name is the folder name, or the file stem
-        for an old .db/.fwl pair."""
-        try:
-            entries = os.listdir(folder)
-        except FileNotFoundError:
-            return []
-        out, pairs = [], {}
-        for n in entries:
-            if n.startswith(".") or not BACKUP_RE.search(n):
-                continue
-            path = os.path.join(folder, n)
-            try:
-                if os.path.isdir(path):
-                    out.append((os.stat(path).st_mtime, _tree_size(path), n))
-                elif n.endswith(LEGACY_EXTS):
-                    st = os.stat(path)
-                    stem = n.rsplit(".", 1)[0]
-                    m, size = pairs.get(stem, (0.0, 0))
-                    pairs[stem] = (max(m, st.st_mtime), size + st.st_size)
-            except FileNotFoundError:
-                continue
-        out += [(m, size, stem) for stem, (m, size) in pairs.items()]
-        return sorted(out, reverse=True)
+        return list_backups(folder)
 
     def _paths(self, folder: str, name: str) -> list:
         path = os.path.join(folder, name)

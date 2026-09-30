@@ -885,6 +885,19 @@ class AdminBot:
     def _online_count(self) -> int:
         return self.live.snapshot()["count"] if self.live else 0
 
+    def restore_points(self, limit: int = 25) -> list:
+        """[(mtime, size, name, id)] of Valheim's own world backups in worlds_local, newest
+        first: the ones the host helper can restore (copies on another disk aren't)."""
+        import extras
+        import updater
+        folder = self.backups.src if self.backups else os.path.join(self.lists.save_dir, "worlds_local")
+        out = []
+        for mtime, size, name in extras.list_backups(folder):
+            bid = updater.backup_id(name)
+            if bid and bid not in {p[3] for p in out}:
+                out.append((mtime, size, name, bid))
+        return out[:limit]
+
     async def _request(self, action: str) -> Optional[str]:
         """Queue a host request, and tell the admins if nothing picks it up."""
         err = self.updater.request(action) if self.updater else "the updater link isn't set up (`updater` in config.json)"
@@ -2693,6 +2706,67 @@ class AdminBot:
                 text = f"Newest backups in `{bot.backups.dest}`:\n" + "\n".join(
                     f"• `{stem}` · {size / 1e6:.0f} MB · <t:{int(mtime)}:R>" for mtime, size, stem in rows)
             await it.response.send_message(text[:2000], ephemeral=True)
+
+        async def restore_choices(it: discord.Interaction, current: str):
+            now = time.time()
+            out = []
+            for mtime, _, name, bid in bot.restore_points():
+                label = f"{name} · {community._dur(now - mtime)} ago"
+                if current.lower() in label.lower():
+                    out.append(app_commands.Choice(name=label[:100], value=bid))
+            return out[:25]
+
+        @odin.command(name="restore", description="Put the world back to one of Valheim's backups (asks first)")
+        @app_commands.describe(backup="Which backup (newest first); the current world is kept as a backup too")
+        async def restore(it: discord.Interaction, backup: str):
+            if not await guard(it):
+                return
+            if bot.updater is None:
+                await it.response.send_message("Restoring needs the host helper (`updater` in config.json, "
+                                                "host/README.md).", ephemeral=True)
+                return
+            point = next((p for p in bot.restore_points(200) if p[3] == backup.strip() or p[2] == backup.strip()),
+                         None)
+            if point is None:
+                await it.response.send_message("No backup by that name. Pick one from the list.", ephemeral=True)
+                return
+            mtime, size, name, bid = point
+            online = bot._online_count()
+            embed = discord.Embed(title="⏪ Restore the world?", color=0xE67E22, description=(
+                f"Back to **`{name}`**, made <t:{int(mtime)}:f> (<t:{int(mtime)}:R>).\n\n"
+                "1. The server stops" + (f": **{online} player{'s' if online != 1 else ''} online will be "
+                                         "disconnected**" if online else "") + ".\n"
+                "2. The current world is kept as a backup (`…_backup_prerestore-…`), so this can be undone "
+                "with `/odin restore`.\n"
+                "3. The backup is copied in and the server starts again.\n\n"
+                "Everything built or found since the backup is lost."))
+            view = discord.ui.View(timeout=300)
+            go = discord.ui.Button(label="Restore", style=discord.ButtonStyle.danger)
+            stop = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+
+            async def on_go(bi: discord.Interaction):
+                if bi.user.id != it.user.id:
+                    await bi.response.send_message("Only the admin who ran it can confirm.", ephemeral=True)
+                    return
+                err = await bot._request(f"restore {bid}")
+                if err:
+                    await bi.response.edit_message(content=f"Couldn't start the restore: {err}", embed=None, view=None)
+                    return
+                log.info("admin_bot: restore of %s requested by %s", name, it.user)
+                await bi.response.edit_message(
+                    content=f"⏪ Restoring `{name}`. The admin channel hears when it's done (a minute or two).",
+                    embed=None, view=None)
+                bot.post_admin(f"⏪ {it.user.display_name} is restoring the world from `{name}`.")
+                await bot._public(f"⏪ **{bot.server_name}** is being restored from a backup of <t:{int(mtime)}:f>. "
+                                  "The server stops now and is back in a few minutes.")
+
+            async def on_stop(bi: discord.Interaction):
+                await bi.response.edit_message(content="Cancelled; nothing changed.", embed=None, view=None)
+            go.callback, stop.callback = on_go, on_stop
+            view.add_item(go)
+            view.add_item(stop)
+            await it.response.send_message(embed=embed, view=view, ephemeral=True)
+        restore.autocomplete("backup")(restore_choices)
 
         @odin.command(name="update-check", description="Ask the server to check for a Valheim update now")
         async def update_check(it: discord.Interaction):

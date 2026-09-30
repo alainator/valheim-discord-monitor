@@ -57,6 +57,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/odin restore`:** put the world back to one of Valheim's backups from Discord. It
+  asks first, keeps the current world as a backup (so it can be undone), and needs a
+  one-time host step ([restore](host/README.md#restoring-a-world-backup-from-discord)).
 - **Join-to-create voice:** join **➕ Raise a longship** and the bot makes you your own
   voice channel ("⛵ Ingrid's longship"), deleted once everyone leaves
   ([join-to-create](#join-to-create-voice-channels)).
@@ -544,7 +547,7 @@ The commands are in four groups, one per place they're used:
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access` | Anywhere: the replies are private |
 | **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
-| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close` | Admins, anywhere: replies are private |
+| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore` | Admins, anywhere: replies are private |
 
 **Admins:** `/odin` only works for the users and roles in `admin_user_ids` /
 `admin_role_ids`. Discord also hides it from anyone without **Manage Server**. If one of
@@ -590,6 +593,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/odin update-check` | Admin | Check for a Valheim update now | [host helper](host/README.md) |
 | `/odin restart [minutes] [reason]` | Admin | Restart (installs any waiting update); warns players at N/5/1 min, early if everyone leaves | [host helper](host/README.md) |
 | `/odin restart-cancel` | Admin | Stop a restart countdown | — |
+| `/odin restore <backup>` | Admin | Put the world back to one of Valheim's backups (newest first), after a confirmation. The current world is kept as a backup | [host helper](host/README.md#restoring-a-world-backup-from-discord) |
 | `/odin bounty <challenge> [reward] [days]` | Admin | Post a [bounty](#bounties) with an **I did it** button; open 7 days by default | Stats database |
 | `/odin bounty-close <bounty>` | Admin | Close an open bounty without a winner | Stats database |
 | `/odin announce <message> [title] [ping]` | Admin | Post an announcement as Huginn in the feed channel; `ping` adds @everyone. `\n` starts a new line | Huginn's webhook |
@@ -1414,6 +1418,10 @@ What happens:
 
 How often Valheim makes backups, and how many it keeps, is set with the server's
 `-backups`, `-backupshort` and `-backuplong` launch options.
+
+**Restoring:** `/odin restore` puts back one of Valheim's own backups in `worlds_local`,
+with the [host helper](host/README.md#restoring-a-world-backup-from-discord). To restore a
+copy from the other disk, copy its folder back into `worlds_local` first.
 
 ### Server health
 
