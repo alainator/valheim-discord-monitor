@@ -45,7 +45,7 @@ from typing import Optional
 # Commands with public replies, and the /odin setup channel they belong in. Others (their
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
-                  "uptime": "bots", "plan": "plans"}
+                  "uptime": "bots", "plan": "plans", "bounties": "plans"}
 WELCOME_DM = ("👋 Welcome to **{guild}**, {member}! We play Valheim on **{server}**.\n"
               "• `/valheim join`: the join code and how to get in\n"
               "• `/valheim request-access`: tell the admins which character you'll play, if the server "
@@ -368,6 +368,27 @@ class AdminBot:
         wdm = cfg.get("welcome_dm")
         self.welcome_dm = (wdm.strip() if isinstance(wdm, str) and wdm.strip()
                            else WELCOME_DM if wdm is True else None)
+        # Join-to-create voice: joining the lobby channel makes you your own voice channel,
+        # deleted once it's empty. true, or {"name", "template", "limit"}.
+        vl = cfg.get("voice_lobby")
+        vl = {} if vl is True else vl if isinstance(vl, dict) and vl.get("enabled", True) else None
+        self.voice_lobby = vl is not None
+        vl = vl or {}
+        self.voice_lobby_name = str(vl.get("name") or "➕ Raise a longship")[:100]
+        self.voice_template = str(vl.get("template") or "⛵ {name}'s longship")
+        self.voice_limit = max(0, min(99, int(vl.get("limit", 0) or 0)))
+        self._voice_lobby_id: Optional[int] = None
+        self._voice_temps: set = set()
+        self._voice_task = None
+        self._voice_lock = None
+        # Bounties: /odin bounty posts a challenge; whoever an admin confirms gets a role.
+        bc = cfg.get("bounties") or {}
+        ch = str(bc.get("channel_id", ""))
+        self.bounty_channel = int(ch) if ch.isdigit() else None
+        role = bc.get("role", "Skadi")
+        self.bounty_role_name = role.strip() if isinstance(role, str) and role.strip() else None
+        self.bounty_role_days = float(bc.get("role_days", 7))
+        self._bounty_claims: dict = {}        # (bounty id, user id) -> when they pressed "I did it"
         cc = cfg.get("command_channels", True)
         self.command_channels_on = cc is not False
         self.command_channel_ids = {k: int(v) for k, v in cc.items() if str(v).isdigit()} \
@@ -473,6 +494,8 @@ class AdminBot:
             self._status_task = asyncio.ensure_future(self._status_loop())
         if self.board_channel and self._board_task is None:
             self._board_task = asyncio.ensure_future(self._board_loop())
+        if self.voice_lobby and self.guild_id and self._voice_task is None:
+            self._voice_task = asyncio.ensure_future(self._voice_setup())
         if not self._attached:
             return                            # the rest need the database from attach()
         if self.db_path and self._plan_task is None:
@@ -1112,7 +1135,7 @@ class AdminBot:
         import community
         while True:
             await asyncio.sleep(30)
-            for job in (self._resolve_polls, self._tidy_notices):
+            for job in (self._resolve_polls, self._tidy_notices, self._bounty_tick):
                 try:
                     await job()
                 except Exception as e:  # noqa: BLE001
@@ -1838,6 +1861,7 @@ class AdminBot:
         intents = discord.Intents.none()
         intents.guilds = True                 # enough for buttons + slash commands; no privileged intents
         intents.members = bool(bot.welcome_dm)  # privileged: only for welcome_dm
+        intents.voice_states = bot.voice_lobby  # join-to-create voice channels (not privileged)
 
         class Tree(app_commands.CommandTree):
             async def interaction_check(self, it: discord.Interaction) -> bool:
@@ -1868,6 +1892,12 @@ class AdminBot:
                 bot.ready.set()
                 bot._start_tasks()
 
+            async def on_voice_state_update(self, member, before, after):
+                try:
+                    await bot._on_voice(member, before, after)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("admin_bot: join-to-create voice failed: %s", e)
+
             async def on_member_join(self, member: discord.Member):
                 if bot.welcome_dm and not member.bot and (not bot.guild_id or member.guild.id == bot.guild_id):
                     await bot._dm(member.id, bot.welcome_text(member.display_name, member.guild.name))
@@ -1884,8 +1914,14 @@ class AdminBot:
         if action == "rsvp":                     # game-night signups: anyone
             await self._on_rsvp(it, pid)
             return
+        if action == "bclaim":                   # "I did it" on a bounty: anyone
+            await self._on_bounty_claim(it, pid)
+            return
         if not self._is_admin(it.user):
             await it.response.send_message("Only the server admins can do that.", ephemeral=True)
+            return
+        if action in ("bconfirm", "breject"):
+            await self._on_bounty_decision(it, action == "bconfirm", pid)
             return
         if action == "restart":                  # the button on a world-settings confirmation
             minutes = int(pid) if pid.isdigit() else 5
@@ -1911,6 +1947,260 @@ class AdminBot:
         await it.response.edit_message(embed=embed, view=self._buttons(pid, disabled=True))
         if self.tidy_hours > 0 and it.message:
             self._queue_tidy(it.message.channel.id, it.message.id)
+
+    # -- join-to-create voice ----------------------------------------------------
+    def _voice_save(self) -> None:
+        self._meta("voice:lobby", self._voice_lobby_id or "")
+        self._meta("voice:temp", json.dumps(sorted(self._voice_temps)))
+
+    async def _voice_setup(self) -> None:
+        """Find or create the lobby channel (in the Longhouses category from /odin setup, if
+        there is one), and delete temporary channels left empty while the bot was away."""
+        import discord
+        import server_layout
+        await asyncio.sleep(5)
+        try:
+            guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+            try:
+                self._voice_temps |= {int(x) for x in json.loads(self._meta("voice:temp") or "[]")}
+            except (ValueError, TypeError):
+                pass
+            rid = self._meta("voice:lobby")
+            lobby = guild.get_channel(int(rid)) if rid and str(rid).isdigit() else None
+            if lobby is None:
+                want = server_layout.norm(self.voice_lobby_name)
+                lobby = next((c for c in guild.voice_channels if server_layout.norm(c.name) == want), None)
+            if lobby is None:
+                cat_id = self._meta("layout:cat:longhouses")
+                category = guild.get_channel(int(cat_id)) if cat_id and str(cat_id).isdigit() else None
+                lobby = await guild.create_voice_channel(self.voice_lobby_name, category=category,
+                                                         reason="Join-to-create voice lobby")
+                log.info("admin_bot: created the %s voice channel", self.voice_lobby_name)
+            self._voice_lobby_id = lobby.id
+            for cid in list(self._voice_temps):
+                ch = guild.get_channel(cid)
+                if ch is None:
+                    self._voice_temps.discard(cid)
+                elif not ch.members:
+                    await self._voice_delete(ch)
+            self._voice_save()
+        except discord.Forbidden:
+            log.warning("admin_bot: voice_lobby needs Manage Channels and Move Members; it's off")
+            self.voice_lobby = False
+        except Exception as e:  # noqa: BLE001
+            log.warning("admin_bot: voice lobby set-up failed: %s", e)
+
+    def voice_name(self, member_name: str) -> str:
+        return self.voice_template.replace("{name}", member_name)[:100] or member_name[:100]
+
+    async def _on_voice(self, member, before, after) -> None:
+        if not (self.voice_lobby and self._voice_lobby_id) or getattr(member, "bot", False):
+            return
+        if self.guild_id and member.guild.id != self.guild_id:
+            return
+        if self._voice_lock is None:
+            self._voice_lock = asyncio.Lock()
+        async with self._voice_lock:
+            if after.channel is not None and after.channel.id == self._voice_lobby_id:
+                await self._voice_create(member, after.channel)
+            left = before.channel
+            if left is not None and left != after.channel and left.id in self._voice_temps and not left.members:
+                await self._voice_delete(left)
+
+    async def _voice_create(self, member, lobby) -> None:
+        import discord
+        kw = dict(category=lobby.category, user_limit=self.voice_limit or None,
+                  reason=f"Join-to-create: {member.display_name}")
+        # Its maker can rename it, set a limit and move people; if the bot can't hand that
+        # out (it needs Manage Roles for channel permissions), the channel is made without.
+        own = {member: discord.PermissionOverwrite(manage_channels=True, move_members=True, connect=True)}
+        try:
+            ch = await member.guild.create_voice_channel(self.voice_name(member.display_name), overwrites=own, **kw)
+        except discord.Forbidden:
+            ch = await member.guild.create_voice_channel(self.voice_name(member.display_name), **kw)
+        self._voice_temps.add(ch.id)
+        self._voice_save()
+        try:
+            await member.move_to(ch, reason="Join-to-create")
+        except discord.HTTPException as e:       # left already, or no Move Members
+            log.info("admin_bot: couldn't move %s into their channel: %s", member, e)
+            await self._voice_delete(ch)
+
+    async def _voice_delete(self, ch) -> None:
+        import discord
+        try:
+            await ch.delete(reason="Join-to-create channel is empty")
+        except discord.NotFound:
+            pass
+        except discord.HTTPException as e:
+            log.info("admin_bot: couldn't delete the empty voice channel %s: %s", ch.name, e)
+            return
+        self._voice_temps.discard(ch.id)
+        self._voice_save()
+
+    # -- bounties ----------------------------------------------------------------
+    def _bounty_view(self, bounty_id: int, disabled: bool = False):
+        import discord
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(label="🎯 I did it", style=discord.ButtonStyle.success, disabled=disabled,
+                                        custom_id=f"{BTN_PREFIX}:bclaim:{bounty_id}"))
+        return view
+
+    def _bounty_admin_view(self, bounty_id: int, uid, disabled: bool = False):
+        import discord
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(label="Confirm", style=discord.ButtonStyle.success, disabled=disabled,
+                                        custom_id=f"{BTN_PREFIX}:bconfirm:{bounty_id}-{uid}"))
+        view.add_item(discord.ui.Button(label="Reject", style=discord.ButtonStyle.secondary, disabled=disabled,
+                                        custom_id=f"{BTN_PREFIX}:breject:{bounty_id}-{uid}"))
+        return view
+
+    async def _bounty_target(self, fallback=None):
+        """Where bounties go: bounties.channel_id, else #war-council from /odin setup, else
+        the channel the command was run in."""
+        cid = self.bounty_channel or self._meta("layout:ch:plans")
+        if cid and str(cid).isdigit():
+            try:
+                return self.client.get_channel(int(cid)) or await self.client.fetch_channel(int(cid))
+            except Exception:  # noqa: BLE001  (deleted, or no access)
+                pass
+        return fallback
+
+    async def _post_bounty(self, channel, title: str, reward: str, days: float, creator_id):
+        import discord
+        import community
+        bid = community.create_bounty(self.db, title, reward, days, creator_id)
+        msg = await channel.send(embed=discord.Embed.from_dict(community.render_bounty(community.get_bounty(self.db, bid))),
+                                 view=self._bounty_view(bid), allowed_mentions=discord.AllowedMentions.none())
+        community.set_bounty_message(self.db, bid, channel.id, msg.id)
+        return msg
+
+    async def _refresh_bounty_post(self, b: dict) -> None:
+        import discord
+        import community
+        if not (b.get("channel_id") and b.get("message_id")):
+            return
+        try:
+            await self.client.get_partial_messageable(int(b["channel_id"])).get_partial_message(
+                int(b["message_id"])).edit(embed=discord.Embed.from_dict(community.render_bounty(b)),
+                                           view=self._bounty_view(b["id"], disabled=b["status"] != "open"))
+        except discord.HTTPException as e:
+            log.info("admin_bot: couldn't update bounty #%s's post: %s", b["id"], e)
+
+    async def _on_bounty_claim(self, it, arg: str) -> None:
+        import discord
+        import community
+        b = community.get_bounty(self.db, int(arg)) if self.db_path and arg.isdigit() else None
+        if not b or b["status"] != "open":
+            await it.response.send_message("That bounty is closed.", ephemeral=True)
+            return
+        key = (b["id"], it.user.id)
+        if time.time() - self._bounty_claims.get(key, 0) < 3600:
+            await it.response.send_message("You've already told the admins; they'll confirm soon.", ephemeral=True)
+            return
+        channel = self.client.get_channel(self.channel_id) or await self.client.fetch_channel(self.channel_id)
+        embed = discord.Embed(title=f"🎯 Bounty claim: {b['title']}"[:256], color=0xC27C0E,
+                              description=f"{it.user.mention} says they did it. Confirm to give them the bounty"
+                                          + (f" and the **{self.bounty_role_name}** role." if self.bounty_role_name
+                                             else "."))
+        embed.set_footer(text=f"Bounty #{b['id']}")
+        await channel.send(embed=embed, view=self._bounty_admin_view(b["id"], it.user.id),
+                           allowed_mentions=discord.AllowedMentions.none())
+        self._bounty_claims[key] = time.time()
+        await it.response.send_message("🎯 Sent to the admins. You'll hear back when they've checked.", ephemeral=True)
+
+    async def _on_bounty_decision(self, it, confirm: bool, arg: str) -> None:
+        import discord
+        import community
+        bid, _, uid = arg.partition("-")
+        b = community.get_bounty(self.db, int(bid)) if self.db_path and bid.isdigit() and uid.isdigit() else None
+        if not b:
+            await it.response.send_message("That bounty is gone.", ephemeral=True)
+            return
+        if confirm:
+            if not community.finish_bounty(self.db, b["id"], "done", uid):
+                await it.response.send_message("That bounty was already closed.", ephemeral=True)
+                return
+            outcome = f"✅ Confirmed by {it.user.mention}"
+        else:
+            outcome = f"❌ Rejected by {it.user.mention}"
+        embed = it.message.embeds[0] if it.message and it.message.embeds else None
+        if embed is not None:
+            embed.add_field(name="Result", value=outcome, inline=False)
+        await it.response.edit_message(embed=embed, view=self._bounty_admin_view(b["id"], uid, disabled=True))
+        if self.tidy_hours > 0 and it.message:
+            self._queue_tidy(it.message.channel.id, it.message.id)
+        if not confirm:
+            self._bounty_claims.pop((b["id"], int(uid)), None)
+            await self._dm(uid, f"The admins couldn't confirm your claim for the bounty **{b['title']}**. "
+                                "Ask them in the server if you think that's a mistake.")
+            return
+        b = community.get_bounty(self.db, b["id"])
+        await self._refresh_bounty_post(b)
+        role_note = await self._give_bounty_role(uid)
+        target = await self._bounty_target()
+        if target is None and b.get("channel_id"):
+            target = self.client.get_partial_messageable(int(b["channel_id"]))
+        if target is not None:
+            text = (f"🏆 <@{uid}> claimed the bounty **{b['title']}**!"
+                    + (f" Reward: {b['reward']}." if b.get("reward") else "") + role_note)
+            try:
+                await target.send(text, allowed_mentions=discord.AllowedMentions(
+                    users=[discord.Object(id=int(uid))], everyone=False, roles=False))
+            except discord.HTTPException as e:
+                log.info("admin_bot: couldn't announce bounty #%s: %s", b["id"], e)
+        log.info("admin_bot: bounty #%s confirmed for %s by %s", b["id"], uid, it.user)
+
+    def _bounty_holders(self) -> dict:
+        try:
+            return {str(k): float(v) for k, v in json.loads(self._meta("bounty:holders") or "{}").items()}
+        except (ValueError, TypeError, AttributeError):
+            return {}
+
+    async def _give_bounty_role(self, uid) -> str:
+        """The bounty role for role_days (a second bounty extends it). Returns a note for
+        the announcement."""
+        import discord
+        if not (self.bounty_role_name and self.guild_id and self.bounty_role_days > 0):
+            return ""
+        try:
+            guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+            role = await self._ensure_role(guild, "bounty", None, self.bounty_role_name, 0x1ABC9C, hoist=True,
+                                           reason="Bounty hunter (/odin bounty)")
+            member = await guild.fetch_member(int(uid))
+            await member.add_roles(role, reason="Claimed a bounty")
+        except discord.HTTPException as e:
+            log.warning("admin_bot: couldn't give the %s role (needs Manage Roles): %s", self.bounty_role_name, e)
+            return ""
+        holders = self._bounty_holders()
+        holders[str(uid)] = max(holders.get(str(uid), 0), time.time()) + self.bounty_role_days * 86400
+        self._meta("bounty:holders", json.dumps(holders))
+        days = f"{self.bounty_role_days:g}"
+        return f" They're **{role.name}** for {days} day{'s' if days != '1' else ''}."
+
+    async def _bounty_tick(self) -> None:
+        """Close bounties past their deadline, and take the bounty role back when it runs out."""
+        import discord
+        import community
+        for b in community.expired_bounties(self.db):
+            if community.finish_bounty(self.db, b["id"], "expired"):
+                await self._refresh_bounty_post(community.get_bounty(self.db, b["id"]))
+        holders = self._bounty_holders()
+        due = [uid for uid, until in holders.items() if until <= time.time()]
+        if not due or not self.guild_id:
+            return
+        guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+        rid = self._meta("role:bounty")
+        role = guild.get_role(int(rid)) if rid and str(rid).isdigit() else None
+        for uid in due:
+            if role is not None:
+                try:
+                    member = await guild.fetch_member(int(uid))
+                    await member.remove_roles(role, reason="Bounty role ran out")
+                except discord.NotFound:
+                    pass
+            holders.pop(uid, None)
+        self._meta("bounty:holders", json.dumps(holders))
 
     def _queue_tidy(self, channel_id, message_id) -> None:
         try:
@@ -2318,6 +2608,26 @@ class AdminBot:
                 "(`/valheim join` has the code). If you're turned away, the admins see it's you and "
                 "can let you in with one click, and you'll get a DM.", ephemeral=True)
 
+        @warcouncil.command(name="bounties", description="Open bounties, and the best bounty hunters")
+        async def bounties(it: discord.Interaction):
+            if not await need_db(it):
+                return
+            lines = []
+            for b in community.open_bounties(bot.db)[:15]:
+                link = (f"https://discord.com/channels/{it.guild_id or '@me'}/{b['channel_id']}/{b['message_id']}"
+                        if b.get("message_id") else "")
+                title = f"[{b['title']}]({link})" if link else f"**{b['title']}**"
+                lines.append(f"🎯 {title}" + (f" · {b['reward']}" if b.get("reward") else "")
+                             + f" · ends <t:{b['expires_at']}:R>")
+            embed = discord.Embed(title="🎯 Bounties", color=0xC27C0E,
+                                  description="\n".join(lines) or "No open bounties. Admins post them with "
+                                                                  "`/odin bounty`.")
+            hunters = community.bounty_hunters(bot.db)[:5]
+            if hunters:
+                embed.add_field(name="Bounty hunters", value="\n".join(
+                    f"<@{h['user_id']}>: {h['n']}" for h in hunters), inline=False)
+            await it.response.send_message(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
         @warcouncil.command(name="plan", description="Plan a game night: a signup with a reminder, or a poll for the time")
         @app_commands.describe(title="What's happening, e.g. 'Bonemass run'",
                                when="e.g. 20:00, 8pm, sat 20:00, in 2h. Several ('sat 20:00, sun 18:00') "
@@ -2428,6 +2738,46 @@ class AdminBot:
             except OSError as e:
                 text = f"Couldn't read the list files: {e}"
             await it.response.send_message(text[:1990], ephemeral=True)
+
+        @odin.command(name="bounty", description="Post a bounty: a challenge members claim for a role and glory")
+        @app_commands.describe(challenge="What to do, e.g. 'Kill Moder without dying'",
+                               reward="What they get, e.g. '10 black metal' (optional)",
+                               days="How long it's open (default 7)")
+        async def bounty(it: discord.Interaction, challenge: str, reward: str = "", days: int = 7):
+            if not await guard(it) or not await need_db(it):
+                return
+            channel = await bot._bounty_target(it.channel)
+            if channel is None:
+                await it.response.send_message("Run this in the channel the bounty should go to.", ephemeral=True)
+                return
+            await it.response.defer(ephemeral=True)
+            try:
+                msg = await bot._post_bounty(channel, challenge.strip()[:200], reward.strip()[:200],
+                                             max(1, min(days, 90)), it.user.id)
+            except discord.HTTPException as e:
+                await it.followup.send(f"Couldn't post it: {e}", ephemeral=True)
+                return
+            await it.followup.send(f"🎯 Bounty posted: {msg.jump_url}", ephemeral=True)
+
+        async def bounty_choices(it: discord.Interaction, current: str):
+            if not bot.db_path:
+                return []
+            return [app_commands.Choice(name=f"#{b['id']} {b['title']}"[:100], value=str(b["id"]))
+                    for b in community.open_bounties(bot.db, current)[:25]]
+
+        @odin.command(name="bounty-close", description="Close an open bounty without a winner")
+        @app_commands.describe(bounty="Which bounty")
+        async def bounty_close(it: discord.Interaction, bounty: str):
+            if not await guard(it) or not await need_db(it):
+                return
+            m = re.search(r"\d+", bounty)
+            bid = int(m.group()) if m else 0
+            if not community.finish_bounty(bot.db, bid, "closed"):
+                await it.response.send_message("No open bounty with that number.", ephemeral=True)
+                return
+            await bot._refresh_bounty_post(community.get_bounty(bot.db, bid))
+            await it.response.send_message(f"Closed bounty #{bid}.", ephemeral=True)
+        bounty_close.autocomplete("bounty")(bounty_choices)
 
         @odin.command(name="announce", description="Post an announcement as Huginn in the feed channel")
         @app_commands.describe(message="What to announce (use \\n for a new line)", title="An optional headline",

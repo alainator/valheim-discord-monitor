@@ -130,6 +130,21 @@ def init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (plan_id, user_id)
         );
 
+        -- /odin bounty: challenges members claim, confirmed by an admin
+        CREATE TABLE IF NOT EXISTS bounties (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            title      TEXT NOT NULL,
+            reward     TEXT,
+            created_at INTEGER NOT NULL,             -- real epoch
+            expires_at INTEGER NOT NULL,
+            channel_id TEXT,
+            message_id TEXT,
+            creator_id TEXT,
+            status     TEXT NOT NULL DEFAULT 'open', -- open | done | expired | closed
+            winner_id  TEXT,
+            done_at    INTEGER
+        );
+
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT

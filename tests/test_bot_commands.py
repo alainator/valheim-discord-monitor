@@ -37,10 +37,10 @@ class BotCommandsTest(unittest.TestCase):
         self.assertEqual({k: v[0] for k, v in groups.items()}, {
             "valheim": sorted(["join", "map", "link", "unlink", "notify", "request-access"]),
             "muninn": sorted(["stats", "top", "titles", "online", "compare", "uptime"]),
-            "warcouncil": ["plan"],
+            "warcouncil": ["bounties", "plan"],
             "odin": sorted(["permit", "ban", "unban", "unpermit", "lists", "settings", "modifier", "preset",
                             "setkey", "backups", "update-check", "restart", "restart-cancel", "setup",
-                            "announce"]),
+                            "announce", "bounty", "bounty-close"]),
         })
         # /odin is hidden from members without Manage Server; the others are for everyone.
         self.assertEqual(int(groups["odin"][1]), 1 << 5)
