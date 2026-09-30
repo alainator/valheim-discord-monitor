@@ -31,7 +31,7 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   server before anything is written ([world settings](#auto-updates-and-restarts-from-discord)).
 - **Community:** `/valheim stats` and `/valheim top`, DMs when friends come online, an
   "In Valheim" role, weekly **title roles** for the leaderboard leaders (Heimdall, Hel,
-  Huginn, Thor), game-night signups with reminders, a world map link, and a smoother
+  Sleipnir, Thor), game-night signups with reminders, a world map link, and a smoother
   first join ([players & community](#players--community)).
 - **Server health:** warnings before the save disk fills up or saves get slow, and an
   optional daily restart while nobody's on ([server health](#server-health)).
@@ -48,12 +48,14 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Sleipnir replaces Huginn** as the "most visits" title. The bot renames the existing
+  role, so nothing to do ([title roles](#title-roles)).
 - **The bot creates the "In Valheim" role** with `"online_role": true`, instead of you
   making it and copying its ID ([players & community](#players--community)).
 - **Odin, the server owner's role:** `"owner_role": true` gives the Discord server's owner
   an "Odin" role near the top of the member list ([players & community](#players--community)).
 - **Title roles:** the leader of each `/valheim top` board gets a Norse role (Heimdall,
-  Hel, Huginn, Thor), reassigned weekly. Turn on with `"titles": {"enabled": true}`
+  Hel, Sleipnir, Thor), reassigned weekly. Turn on with `"titles": {"enabled": true}`
   ([title roles](#title-roles)).
 - **`/valheim map` works with Valheim 1.0 worlds.** It reads the seed from the world
   folder (`worlds_local/<world>/_main.<N>.fwl2`); set `admin_bot.map.seed` if it can't
@@ -662,8 +664,13 @@ mythology:
 |---|---|---|
 | **Heimdall** | Most time played | The watchman of Bifröst never sleeps and never leaves his post |
 | **Hel** | Most deaths | Ruler of the realm of the dead: everyone who dies ends up with her |
-| **Huginn** | Most visits | Odin's raven flies out over the world every day and always comes back |
+| **Sleipnir** | Most visits | Odin's eight-legged horse carries riders between the worlds, and always comes back |
 | **Thor** | Longest single session | Drank from a horn linked to the sea and lowered the ocean |
+
+**Naming tip:** to keep the theme, call the announcement webhook **Huginn** (`"discord":
+{"username": "Huginn"}`) and the bot **Muninn** (developer portal → Bot → Username). They're
+Odin's two ravens, Thought and Memory, who fly over the world and report back to him, and
+the Odin role goes to the server owner (below).
 
 **How it works:**
 - **Weekly.** Every week (default Sunday 18:00, container time zone) the bot looks at the

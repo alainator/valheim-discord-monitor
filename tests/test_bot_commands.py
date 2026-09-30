@@ -86,8 +86,9 @@ class BotCommandsTest(unittest.TestCase):
             def __init__(self, rid, name):
                 self.id, self.name, self.position = rid, name, 1
 
-            async def edit(self, position=None):
-                self.position = position
+            async def edit(self, position=None, name=None, colour=None, reason=None):
+                self.position = position if position is not None else self.position
+                self.name = name or self.name
 
         class Guild:
             def __init__(self):
@@ -136,10 +137,10 @@ class BotCommandsTest(unittest.TestCase):
         self.assertEqual(changed, {"time", "deaths", "sessions", "longest"})
         self.assertEqual(holders["time"], {"player": "Ingrid", "user_id": "42", "v": 7200})
         self.assertEqual(holders["deaths"]["user_id"], None)                 # not linked yet
-        self.assertEqual(sorted(r.name for r in guild.roles), ["Heimdall", "Hel", "Huginn", "Odin", "Thor"])
+        self.assertEqual(sorted(r.name for r in guild.roles), ["Heimdall", "Hel", "Odin", "Sleipnir", "Thor"])
         self.assertIn(("add", 42, "Heimdall"), guild.log)
         self.assertIn(("add", 77, "Hel"), guild.log)                          # given after linking
-        self.assertIn(("add", 77, "Huginn"), guild.log)                       # tied on visits: first by name
+        self.assertIn(("add", 77, "Sleipnir"), guild.log)                       # tied on visits: first by name
         # The "In Valheim" role with "online_role": true: created once (shown separately), then reused.
         bot.online_role_name = "In Valheim"
         asyncio.run(bot._set_role("Ingrid", True))
@@ -149,6 +150,12 @@ class BotCommandsTest(unittest.TestCase):
         self.assertTrue(online[0].hoist)
         self.assertIn(("add", 42, "In Valheim"), guild.log)
         self.assertIn(("remove", 42, "In Valheim"), guild.log)
+        # A title role made under its old name (Huginn) is renamed, not duplicated.
+        sleipnir = next(r for r in guild.roles if r.name == "Sleipnir")
+        sleipnir.name = "Huginn"
+        asyncio.run(bot._rename_old_titles())
+        self.assertEqual(sleipnir.name, "Sleipnir")
+        self.assertEqual(sum(r.name == "Sleipnir" for r in guild.roles), 1)
         # Owner role: created once, moved up under the bot's role, and follows a change of owner.
         bot.owner_role_name = "Odin"
         asyncio.run(bot._sync_owner_role())

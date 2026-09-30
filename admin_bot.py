@@ -913,14 +913,21 @@ class AdminBot:
             await asyncio.sleep(6 * 3600)
 
     async def _title_role(self, guild, category: str):
-        """The Discord role for a title: configured, remembered, found by name, or created."""
+        """The Discord role for a title: configured, remembered, found by name, or created.
+        A role still carrying an earlier name (community.TITLE_OLD_NAMES) is renamed."""
+        import discord
         import community
         name, why, colour = community.TITLES[category]
         configured = (self.title_role_ids.get(category)
                       or community.get_meta(self.db, f"role:title:{category}")
                       or community.get_meta(self.db, f"title_role:{category}"))     # before 2026-10
-        return await self._ensure_role(guild, f"title:{category}", configured, name, colour,
+        role = await self._ensure_role(guild, f"title:{category}", configured, name, colour,
                                        reason=f"Valheim title: {why}")
+        if role.name in community.TITLE_OLD_NAMES.get(category, ()):
+            old = role.name
+            await role.edit(name=name, colour=discord.Colour(colour), reason="Valheim title renamed")
+            log.info("admin_bot: renamed the title role %s to %s", old, name)
+        return role
 
     async def _move_role(self, guild, role, old_uid, new_uid, reason: str) -> None:
         import discord
@@ -969,11 +976,25 @@ class AdminBot:
                                 "v": community.title_value(self.db, cat, player, since)} if player else None
             return holders, changed
 
+    async def _rename_old_titles(self) -> None:
+        """Rename title roles made under an earlier name (Huginn -> Sleipnir) at start-up,
+        instead of waiting until that title next changes hands."""
+        import community
+        guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+        for cat in community.TITLE_OLD_NAMES:
+            if (self.title_role_ids.get(cat) or community.get_meta(self.db, f"role:title:{cat}")
+                    or community.get_meta(self.db, f"title_role:{cat}")):
+                await self._title_role(guild, cat)
+
     async def _titles_loop(self) -> None:
         """Once a week (and right away the first time), hand the titles to the leaders."""
         import discord
         import community
         await asyncio.sleep(15)
+        try:
+            await self._rename_old_titles()
+        except Exception as e:  # noqa: BLE001
+            log.warning("admin_bot: couldn't rename an old title role: %s", e)
         while True:
             try:
                 week = self._titles_due()
@@ -1226,7 +1247,7 @@ class AdminBot:
             embed = community.render_top(category, community.top(bot.db, category, 10))
             await it.response.send_message(embed=discord.Embed.from_dict(embed))
 
-        @group.command(name="titles", description="Who holds Heimdall, Hel, Huginn and Thor (the top of each board)")
+        @group.command(name="titles", description="Who holds Heimdall, Hel, Sleipnir and Thor (the top of each board)")
         @app_commands.describe(refresh="Admins: reassign the titles now instead of waiting for the weekly run")
         async def titles(it: discord.Interaction, refresh: bool = False):
             if not await need_db(it):
