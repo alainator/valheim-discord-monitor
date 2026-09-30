@@ -31,6 +31,14 @@ from typing import Optional
 SCHEMA_VERSION = 1
 
 
+def platform_key(platform_id: str) -> str:
+    """The id without its platform prefix, so the log's "Steam_7656…" and the lists'
+    "V_7656…" (or "Nintendo_…" and "N_…") compare equal."""
+    pid = (platform_id or "").strip()
+    head, sep, body = pid.partition("_")
+    return body if sep and head.isalpha() and body else pid
+
+
 def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row
@@ -135,6 +143,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
             updated_at INTEGER
         );
         CREATE INDEX IF NOT EXISTS ix_player_steam_id ON player_steam(steam_id);
+        -- every platform id (Steam, Xbox, PlayStation, Nintendo) a character has joined with,
+        -- so a refused join or a version mismatch can be traced to a known player
+        CREATE TABLE IF NOT EXISTS player_platform (
+            platform_key TEXT NOT NULL,       -- the id without its prefix (V_/Steam_/Nintendo_/N_…)
+            platform_id  TEXT NOT NULL,       -- as last seen, e.g. "Nintendo_1421…"
+            player       TEXT NOT NULL,
+            updated_at   INTEGER,
+            PRIMARY KEY (platform_key, player)
+        );
 
         -- per-SteamID profile + achievement summary (filled by the Steam Web API)
         CREATE TABLE IF NOT EXISTS steam_profile (
@@ -297,6 +314,14 @@ class Store:
             "INSERT INTO player_steam(player, steam_id, updated_at) VALUES (?,?,?) "
             "ON CONFLICT(player) DO UPDATE SET steam_id=excluded.steam_id, updated_at=excluded.updated_at",
             (player, steam_id, ts))
+        self.conn.commit()
+
+    def link_platform(self, player: str, platform_id: str, ts: int) -> None:
+        """Record that this character joined with this platform id (any platform)."""
+        self.conn.execute(
+            "INSERT INTO player_platform(platform_key, platform_id, player, updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(platform_key, player) DO UPDATE SET platform_id=excluded.platform_id, "
+            "updated_at=excluded.updated_at", (platform_key(platform_id), platform_id, player, ts))
         self.conn.commit()
 
     # -- Steam Web API writers (called by steam.py) ------------------------
