@@ -35,7 +35,7 @@ class BotCommandsTest(unittest.TestCase):
                                            "update-check", "restart", "restart-cancel", "lists", "join",
                                            "settings", "modifier", "preset", "setkey",
                                            "stats", "top", "notify", "link", "unlink", "request-access",
-                                           "plan", "map", "titles"]))
+                                           "plan", "map", "titles", "setup"]))
 
     def test_database_tasks_start_after_attach(self):
         """start() waits for on_ready, and attach() hands over the database only after that,

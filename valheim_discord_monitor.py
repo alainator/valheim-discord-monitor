@@ -1371,7 +1371,7 @@ def main():
     if admin:
         admin.attach(live=live, backups=backups, updater=upd, announce=post_update,
                      post_embed=lambda embed: discord.post_embed("titles", embed, {"titles"}),
-                     db_path=db_cfg["path"] if db_enabled else None)
+                     db_path=db_cfg["path"] if db_enabled else None, webhook_url=discord.url)
 
     health = extras.HealthWatch(cfg.get("health") or {})
     daily = extras.DailyRestart(cfg["daily_restart"]) if (cfg.get("daily_restart") or {}).get("time") else None

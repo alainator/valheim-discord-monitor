@@ -20,10 +20,12 @@ Python 3.9+, no third-party packages for the core monitor. Optional extras: SFTP
 On top of the Discord posts it can also, with the optional **admin bot**:
 - **Alert you when someone is refused** by your ban or permitted list, with **Permit** /
   **Ban** buttons ([join-attempt alerts](#join-attempt-alerts--discord-admin-bot)).
-- Show **who's online**: in a voice channel's name ([status
-  channel](#status-voice-channel)), in a column of [stat channels](#stat-channels) (join code,
-  uptime, deaths this week, next game night…), and in a live message with the join code, uptime,
-  version, last save, backup and raid ([status board](#status-board)).
+- **Organise your Discord** into Valheim-themed channels with one command, previewed first
+  and undoable ([server setup](#server-setup-valheim-setup)).
+- Show **who's online** and the server's numbers in locked voice channels at the top of
+  the channel list: names online, join code, uptime, this week's stats and every title
+  holder ([stat channels](#stat-channels)). A single [status channel](#status-voice-channel)
+  or a live [status board](#status-board) message also work.
 - Answer **`/valheim join`** for anyone: the current join code, the address and how to
   connect ([commands](#discord-commands)).
 - **Restart and update the server** from Discord with a countdown warning, and post when a
@@ -53,6 +55,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/valheim setup`:** organises your whole Discord into Valheim-themed categories and
+  channels (The Gates, The Mead Hall, The Wilds, The Longhouses, Odin's Seat). It previews
+  first, never deletes anything, and can be undone ([server setup](#server-setup-valheim-setup)).
 - **Stat channels:** three bot-made categories of locked voice channels: Heimdall's Watch
   (who's online by name, join code, uptime, saves, backups, disk), The Saga (this week's
   numbers, next game night) and the Hall of Champions (Odin and every title holder). Your
@@ -93,7 +98,7 @@ And without the bot:
   [Count mode](#count-mode-quick-start) · [Log mode](#log-mode)
 - **Admin bot:** [Join alerts & setup](#join-attempt-alerts--discord-admin-bot) ·
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
-  [Stat channels](#stat-channels) ·
+  [Stat channels](#stat-channels) · [Server setup](#server-setup-valheim-setup) ·
   [Players & community](#players--community) · [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
@@ -478,6 +483,7 @@ in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visib
 | `/valheim update-check` | Admin | Check for a Valheim update now | [host helper](host/README.md) |
 | `/valheim restart [minutes] [reason]` | Admin | Restart (installs any waiting update); warns players at N/5/1 min, early if everyone leaves | [host helper](host/README.md) |
 | `/valheim restart-cancel` | Admin | Stop a restart countdown | — |
+| `/valheim setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-valheim-setup)) | Manage Channels, Manage Roles |
 | `/valheim settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
 | `/valheim modifier <name> <value>` | Admin | Change a modifier, e.g. `raids more`; `normal` resets it | world settings |
 | `/valheim preset <name>` | Admin | Change the preset; `default` removes it | world settings |
@@ -691,6 +697,64 @@ within a minute.
   limit.
 - The live channels (`players`, `server`, `join_code`, `uptime`, `saved`, `backup`, `disk`,
   `last_raid`) and Odin don't need the stats database; the rest do.
+
+### Server setup: `/valheim setup`
+
+Organises your Discord server (new or existing) into Valheim- and Norse-themed categories
+and channels, in one command. Admins only.
+
+```
+🚪 THE GATES
+  # 📜┃runestone        rules & announcements (only admins post)
+  # 🚪┃the-gates        welcome, how to join, and a guide to every channel
+🍺 THE MEAD HALL
+  # 🍺┃mead-hall        general chat                          ← your "general"
+  # 🎨┃skalds-corner    screenshots, clips, memes
+  # 🔨┃the-forge        builds & base tours
+  # 🪶┃muninns-roost    bot commands (talk to Muninn)
+⚔️ THE WILDS
+  # 🐦┃huginns-watch    Huginn's feed: logins, deaths, raids  ← your webhook's channel
+  # 🗺️┃war-council      raids & game nights (/valheim plan)
+  # 🔮┃seers-stone      seeds, maps, tips
+🔊 THE LONGHOUSES
+  🔊 🍺 The Longhouse                                        ← your "General" voice
+  🔊 ⚔️ Raiding Party                                        ← your "Gaming" voice
+  🔊 🎣 Fishing Hut (AFK)
+🔒 ODIN'S SEAT (admins only)
+  # 👁️┃odins-seat       refused joins, Permit/Ban            ← your admin channel
+```
+The [stat channels](#stat-channels) stay on top.
+
+**How it works:**
+1. **`/valheim setup preview`** lists every category and channel and what would happen to
+   it: ✨ new, ← renamed from, or ✓ already right. Nothing changes yet.
+2. **`/valheim setup apply`** shows the same list with **Apply** and **Cancel** buttons.
+   Only the admin who ran it can confirm.
+3. **`/valheim setup undo`** puts every renamed or moved channel back: names, categories,
+   topics, permissions and order. Channels the setup created are listed rather than
+   deleted, since they may have messages by then; delete the ones you don't want.
+
+**What it touches and what it doesn't:**
+- **Nothing is ever deleted.** Channels it doesn't recognise stay exactly where they are.
+- **It recognises Discord's defaults** (`general`, the "General" voice channel, "Text
+  Channels", "Voice Channels") and common names (`rules`, `memes`, `bot-commands`, `lfg`,
+  `afk`…).
+- **It knows the bot's own channels:** the admin channel (`channel_id`), and the channel
+  Huginn's webhook posts to (looked up from the webhook). If the webhook posts into your
+  general chat, that stays your chat; a new #huginns-watch is created, and the preview
+  tells you how to move the webhook there.
+- **It sets topics** on text channels that don't have one, and keeps topics you wrote.
+- **Permissions:** Odin's Seat is made private (only admins and the bot can see it), and
+  #runestone is read-only for members. Other channels keep their permissions.
+- **It posts a "📖 A guide to the realm" message** in #the-gates listing every channel and
+  what it's for. Running setup again updates that message instead of posting a new one.
+- **Run it again any time,** for example after a bot update adds channels. It remembers
+  its channels by ID, so channels you renamed afterwards keep their place and aren't
+  renamed back. A second run on an organised server changes nothing.
+
+**Needs:** Manage Channels and Manage Roles (Discord needs Manage Roles to change channel
+permissions). To make the Fishing Hut the server's AFK channel, set it yourself in Server
+Settings → Overview → Inactive Channel.
 
 ### Players & community
 
@@ -1464,6 +1528,8 @@ Added here:
   commands, and support for Valheim 1.0's `V_…` player IDs.
 - **Status voice channel**, bot-created **stat channels**, and a live **status board**,
   filled in from the existing log at start-up.
+- **`/valheim setup`:** organises a Discord server into themed channels, with preview and
+  undo.
 - **`/valheim join`:** the current join code (tracked across restarts), address and how
   to connect.
 - **Extras:** raid alerts, version-mismatch alerts, session summaries, first-visit

@@ -251,6 +251,11 @@ class StatusChannel:
 # ---------------------------------------------------------------------------
 # The bot
 # ---------------------------------------------------------------------------
+def norm_name(name: str) -> str:
+    """Channel names compared the way Discord stores text channels (case, spaces)."""
+    return (name or "").lower().replace(" ", "-")
+
+
 def _assignable_role(guild, name: str):
     """A role with this name that can be handed out. Skips roles Discord manages itself,
     like the role a bot gets when it joins, which is named after the bot (a bot called
@@ -330,6 +335,7 @@ class AdminBot:
         self._owner_name: Optional[str] = None
         self._stats_task = None
         self._stat_ids: dict = {}            # channel IDs when there's no database to keep them in
+        self.webhook_url = ""                # from attach(): /valheim setup finds Huginn's channel with it
         lfg = cfg.get("lfg") or {}
         self.remind_minutes = int(lfg.get("reminder_minutes", 15))
         self.discord_events = bool(lfg.get("discord_event", False))
@@ -402,12 +408,13 @@ class AdminBot:
         fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
 
     def attach(self, live=None, backups=None, updater=None, announce=None, db_path=None,
-               post_embed=None) -> None:
+               post_embed=None, webhook_url: str = "") -> None:
         """Hand the bot the monitor's live state, backup copier, updater link, ways to post
         to the public channel, and the stats database (community features)."""
         self.live, self.backups, self.updater, self.announce = live, backups, updater, announce
         self.db_path = db_path
         self.post_embed = post_embed
+        self.webhook_url = webhook_url or ""
         self._attached = True
         # start() waits for the connection, so on_ready usually ran before this: start the
         # tasks that need the database now.
@@ -947,6 +954,262 @@ class AdminBot:
             except Exception as e:  # noqa: BLE001
                 log.warning("admin_bot: owner role failed: %s", e)
             await asyncio.sleep(6 * 3600)
+
+    # -- /valheim setup (server_layout.py) ------------------------------------------
+    def _feed_channel_id(self) -> Optional[int]:
+        """The channel Huginn's webhook posts to: a webhook URL answers GET with its channel."""
+        if not self.webhook_url.startswith("https://"):
+            return None
+        try:
+            import urllib.request
+            req = urllib.request.Request(self.webhook_url, headers={"User-Agent": "valheim-discord-monitor"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return int(json.loads(r.read().decode())["channel_id"])
+        except Exception as e:  # noqa: BLE001
+            log.info("admin_bot: couldn't look up the webhook's channel: %s", e)
+            return None
+
+    def _layout_remembered(self) -> dict:
+        import server_layout
+        out = {}
+        for cat in server_layout.TEMPLATE:
+            for key in [f"cat:{cat['key']}"] + [f"ch:{c[0]}" for c in cat["channels"]]:
+                v = self._meta(f"layout:{key}")
+                if v:
+                    out[key] = int(v)
+        return out
+
+    def _stat_ids_in_use(self) -> set:
+        if self.db_path:
+            rows = self.db.execute("SELECT value FROM meta WHERE key LIKE 'statchan:%'").fetchall()
+            vals = [r[0] for r in rows]
+        else:
+            vals = list(self._stat_ids.values())
+        return {int(v) for v in vals if str(v).isdigit()}
+
+    async def _layout_plan(self, guild) -> dict:
+        import discord
+        import server_layout
+        snap = {"categories": [{"id": c.id, "name": c.name, "position": c.position} for c in guild.categories],
+                "channels": []}
+        for ch in guild.channels:
+            kind = {discord.ChannelType.text: "text", discord.ChannelType.voice: "voice"}.get(ch.type)
+            if kind:
+                snap["channels"].append({"id": ch.id, "name": ch.name, "kind": kind, "position": ch.position,
+                                         "category_id": ch.category_id, "topic": getattr(ch, "topic", None)})
+        feed = await asyncio.get_running_loop().run_in_executor(None, self._feed_channel_id)
+        return server_layout.plan(snap, known={"admin": self.channel_id, "feed": feed},
+                                  remembered=self._layout_remembered(), exclude=self._stat_ids_in_use())
+
+    async def _layout_overwrites(self, guild, flags: set, current: Optional[dict] = None) -> Optional[dict]:
+        """Permission overwrites for a private (admins only) or read-only channel, added to
+        whatever the channel already has. None when nothing needs to change."""
+        import discord
+        if not ({"private", "readonly"} & flags):
+            return None
+        ow = dict(current or {})
+        admins = [r for r in (guild.get_role(rid) for rid in self.admin_roles) if r]
+        for uid in self.admin_users:
+            try:
+                admins.append(await guild.fetch_member(uid))
+            except discord.HTTPException:
+                pass
+        me = getattr(guild, "me", None)
+        if "private" in flags:
+            ow[guild.default_role] = discord.PermissionOverwrite(view_channel=False)
+            for who in admins + ([me] if me else []):
+                ow[who] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        if "readonly" in flags:
+            base = ow.get(guild.default_role) or discord.PermissionOverwrite()
+            base.send_messages = False
+            ow[guild.default_role] = base
+            for who in admins + ([me] if me else []):
+                ow[who] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        return ow
+
+    @staticmethod
+    def _dump_overwrites(ow: dict) -> list:
+        import discord
+        def kind(t):
+            return "role" if isinstance(t, discord.Role) or getattr(t, "type", None) is discord.Role else "member"
+        return [[t.id, kind(t), *(p.value for p in o.pair())] for t, o in ow.items()]
+
+    @staticmethod
+    def _load_overwrites(rows: list) -> dict:
+        import discord
+        return {discord.Object(tid, type=discord.Role if kind == "role" else discord.Member):
+                discord.PermissionOverwrite.from_pair(discord.Permissions(a), discord.Permissions(d))
+                for tid, kind, a, d in rows}
+
+    def _layout_undo_state(self) -> dict:
+        try:
+            return json.loads(self._meta("layout:undo") or "{}")
+        except ValueError:
+            return {}
+
+    async def _layout_apply(self, guild, p: dict) -> list:
+        """Create, rename and move to match the plan. Remembers each object's original
+        state (the first time it's touched) for /valheim setup undo. Returns problems."""
+        import discord
+        undo = self._layout_undo_state()
+        undo.setdefault("before", {})
+        undo.setdefault("created", [])
+        problems = []
+
+        def remember(obj):
+            key = str(obj.id)
+            if key not in undo["before"]:
+                undo["before"][key] = {"name": obj.name, "category_id": getattr(obj, "category_id", None),
+                                       "position": obj.position, "topic": getattr(obj, "topic", None),
+                                       "overwrites": self._dump_overwrites(obj.overwrites)}
+
+        cats = {}
+        for c in p["categories"]:
+            try:
+                if c["id"] is None:
+                    ow = await self._layout_overwrites(guild, {"private"}) if c["private"] else {}
+                    cat = await guild.create_category(c["name"], overwrites=ow or {}, reason="/valheim setup")
+                    undo["created"].append(cat.id)
+                else:
+                    cat = guild.get_channel(c["id"])
+                    changes = {}
+                    if cat.name != c["name"]:
+                        changes["name"] = c["name"]
+                    if c["private"]:
+                        changes["overwrites"] = await self._layout_overwrites(guild, {"private"}, cat.overwrites)
+                    if changes:
+                        remember(cat)
+                        await cat.edit(**changes, reason="/valheim setup")
+                cats[c["key"]] = cat
+                self._meta(f"layout:cat:{c['key']}", cat.id)
+            except discord.HTTPException as e:
+                problems.append(f"{c['name']}: {e}")
+
+        for ch in p["channels"]:
+            cat = cats.get(ch["category"])
+            if cat is None:
+                continue
+            try:
+                if ch["id"] is None:
+                    ow = await self._layout_overwrites(guild, ch["flags"], cat.overwrites) or cat.overwrites
+                    make = guild.create_text_channel if ch["kind"] == "text" else guild.create_voice_channel
+                    extra = {"topic": ch["topic"]} if ch["kind"] == "text" and ch["topic"] else {}
+                    obj = await make(ch["name"], category=cat, overwrites=ow, reason="/valheim setup", **extra)
+                    undo["created"].append(obj.id)
+                else:
+                    obj = guild.get_channel(ch["id"])
+                    changes = {}
+                    target = ch["name"] if ch["kind"] == "voice" else norm_name(ch["name"])
+                    if obj.name != target:
+                        changes["name"] = ch["name"]
+                    if obj.category_id != cat.id:
+                        changes["category"] = cat
+                    if ch["kind"] == "text" and ch["topic"] and not getattr(obj, "topic", None):
+                        changes["topic"] = ch["topic"]
+                    ow = await self._layout_overwrites(guild, ch["flags"], obj.overwrites)
+                    if ow is not None:
+                        changes["overwrites"] = ow
+                    if changes:
+                        remember(obj)
+                        await obj.edit(**changes, reason="/valheim setup")
+                self._meta(f"layout:ch:{ch['key']}", obj.id)
+            except discord.HTTPException as e:
+                problems.append(f"{ch['name']}: {e}")
+
+        # Order: the stat categories first (at a glance), then the template, then the rest.
+        try:
+            stat_ids = self._stat_ids_in_use()
+            order = [c for c in sorted(guild.categories, key=lambda c: c.position) if c.id in stat_ids]
+            order += [cats[c["key"]] for c in p["categories"] if c["key"] in cats]
+            order += [c for c in sorted(guild.categories, key=lambda c: c.position) if c not in order]
+            payload = [{"id": c.id, "position": i} for i, c in enumerate(order)]
+            for key, cat in cats.items():
+                slots = [c for c in p["channels"] if c["category"] == key]
+                for i, slot in enumerate(slots):
+                    cid = self._meta(f"layout:ch:{slot['key']}")
+                    if cid:
+                        payload.append({"id": int(cid), "position": i})
+            await guild._state.http.bulk_channel_update(guild.id, payload, reason="/valheim setup")
+        except Exception as e:  # noqa: BLE001
+            problems.append(f"ordering the categories: {e}")
+        self._meta("layout:undo", json.dumps(undo))
+        return problems
+
+    async def _layout_guide(self, guild, p: dict) -> None:
+        """Post (or update) a guide to every channel in the welcome channel."""
+        import discord
+        import stat_channels
+        cid = self._meta("layout:ch:welcome")
+        channel = guild.get_channel(int(cid)) if cid else None
+        if channel is None:
+            return
+        lines = []
+        for cat in p["categories"]:
+            if cat["private"]:
+                continue
+            lines.append(f"**{cat['name']}**")
+            for ch in (c for c in p["channels"] if c["category"] == cat["key"]):
+                what = ch["topic"] or {"vc_main": "Voice chat: hang out while you play.",
+                                       "vc_raid": "Voice chat for raids, boss fights and game nights.",
+                                       "vc_afk": "Away from keyboard."}.get(ch["key"], "")
+                mention = f"<#{self._meta('layout:ch:' + ch['key'])}>" if self._meta("layout:ch:" + ch["key"]) \
+                    else ch["name"]
+                lines.append(f"{mention}: {what}")
+            lines.append("")
+        if self._stat_ids_in_use():
+            lines.append("**" + " / ".join(title for _, title, _ in stat_channels.GROUPS) + "**")
+            lines.append("Locked voice channels that show the server live, this week's numbers and the "
+                         "title holders. Read the names; you can't join them.")
+        embed = discord.Embed(title="📖 A guide to the realm", description="\n".join(lines)[:4000],
+                              color=0xC27C0E)
+        try:
+            mid = self._meta("layout:guide")
+            if mid:
+                try:
+                    msg = await channel.fetch_message(int(mid))
+                    await msg.edit(embed=embed)
+                    return
+                except discord.NotFound:
+                    pass
+            msg = await channel.send(embed=embed)
+            self._meta("layout:guide", msg.id)
+        except discord.HTTPException as e:
+            log.info("admin_bot: couldn't post the channel guide: %s", e)
+
+    async def _layout_undo(self, guild) -> tuple:
+        """Put every renamed/moved channel back. Channels the setup created are left (and
+        listed), because deleting could lose messages."""
+        import discord
+        undo = self._layout_undo_state()
+        restored, problems = 0, []
+        positions = []
+        for key, old in (undo.get("before") or {}).items():
+            obj = guild.get_channel(int(key))
+            if obj is None:
+                continue
+            try:
+                changes = {"name": old["name"], "overwrites": self._load_overwrites(old["overwrites"])}
+                if obj.type != discord.ChannelType.category:
+                    cat = guild.get_channel(old["category_id"]) if old.get("category_id") else None
+                    changes["category"] = cat
+                if obj.type == discord.ChannelType.text:
+                    changes["topic"] = old.get("topic")
+                await obj.edit(**changes, reason="/valheim setup undo")
+                positions.append({"id": obj.id, "position": old["position"]})
+                restored += 1
+            except discord.HTTPException as e:
+                problems.append(f"{obj.name}: {e}")
+        if positions:
+            try:
+                await guild._state.http.bulk_channel_update(guild.id, positions, reason="/valheim setup undo")
+            except Exception as e:  # noqa: BLE001
+                problems.append(f"positions: {e}")
+        created = [guild.get_channel(i) for i in undo.get("created", [])]
+        created = [c for c in created if c is not None]
+        self._meta("layout:undo", "")
+        for key in list(self._layout_remembered()):
+            self._meta(f"layout:{key}", "")
+        return restored, created, problems
 
     # -- stat channels -----------------------------------------------------------
     def _stat_name(self, key: str) -> Optional[str]:
@@ -1653,6 +1916,67 @@ class AdminBot:
             except OSError as e:
                 text = f"Couldn't read the list files: {e}"
             await it.response.send_message(text[:1990], ephemeral=True)
+
+        @group.command(name="setup", description="Admins: organise this Discord into Valheim-themed channels")
+        @app_commands.describe(action="preview: show what would change · apply: do it (asks first) · "
+                                      "undo: put renamed channels back")
+        @app_commands.choices(action=[app_commands.Choice(name="preview", value="preview"),
+                                      app_commands.Choice(name="apply", value="apply"),
+                                      app_commands.Choice(name="undo", value="undo")])
+        async def setup(it: discord.Interaction, action: str = "preview"):
+            import server_layout
+            if not await guard(it):
+                return
+            if not it.guild:
+                await it.response.send_message("Run this in your Discord server.", ephemeral=True)
+                return
+            await it.response.defer(ephemeral=True, thinking=True)
+            guild = it.guild
+            if action == "undo":
+                restored, created, problems = await bot._layout_undo(guild)
+                text = f"↩️ Put {restored} channel(s) and categories back as they were."
+                if created:
+                    text += ("\nThe setup also created these; delete any you don't want (they may have "
+                             "messages): " + ", ".join(c.mention if hasattr(c, "mention") else c.name
+                                                       for c in created))
+                if problems:
+                    text += "\n⚠️ " + "\n⚠️ ".join(problems[:10])
+                await it.followup.send(text[:1990], ephemeral=True)
+                return
+            p = await bot._layout_plan(guild)
+            embed = discord.Embed(title="🛠️ Server layout: preview" if action == "preview"
+                                  else "🛠️ Server layout: apply this?",
+                                  description=server_layout.render(p), color=0xC27C0E)
+            if action == "preview":
+                embed.set_footer(text="Run /valheim setup apply to do it. Undo with /valheim setup undo.")
+                await it.followup.send(embed=embed, ephemeral=True)
+                return
+            view = discord.ui.View(timeout=600)
+            go = discord.ui.Button(label="Apply", style=discord.ButtonStyle.danger)
+            stop = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+
+            async def on_go(bi: discord.Interaction):
+                if bi.user.id != it.user.id:
+                    await bi.response.send_message("Only the admin who ran it can confirm.", ephemeral=True)
+                    return
+                await bi.response.edit_message(content="Working… (this takes a minute on a big server)",
+                                               embed=None, view=None)
+                problems = await bot._layout_apply(guild, p)
+                await bot._layout_guide(guild, p)
+                log.info("admin_bot: /valheim setup applied by %s (%d problem(s))", it.user, len(problems))
+                text = ("✅ Done. A guide to every channel is posted in the welcome channel. "
+                        "Undo with `/valheim setup undo`.")
+                if problems:
+                    text += "\n⚠️ Some changes failed (the bot needs Manage Channels and Manage Roles):\n" + \
+                        "\n".join(problems[:10])
+                await bi.edit_original_response(content=text[:1990])
+
+            async def on_stop(bi: discord.Interaction):
+                await bi.response.edit_message(content="Cancelled; nothing changed.", embed=None, view=None)
+            go.callback, stop.callback = on_go, on_stop
+            view.add_item(go)
+            view.add_item(stop)
+            await it.followup.send(embed=embed, view=view, ephemeral=True)
 
         tree.add_command(group)
 
