@@ -337,6 +337,8 @@ class AdminBot:
         self._stats_task = None
         self._stat_ids: dict = {}            # channel IDs when there's no database to keep them in
         self.webhook_url = ""                # from attach(): /valheim setup finds Huginn's channel with it
+        self.set_webhook = None
+        self._webhook_checked = False
         lfg = cfg.get("lfg") or {}
         self.remind_minutes = int(lfg.get("reminder_minutes", 15))
         self.discord_events = bool(lfg.get("discord_event", False))
@@ -409,13 +411,14 @@ class AdminBot:
         fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
 
     def attach(self, live=None, backups=None, updater=None, announce=None, db_path=None,
-               post_embed=None, webhook_url: str = "") -> None:
+               post_embed=None, webhook_url: str = "", set_webhook=None) -> None:
         """Hand the bot the monitor's live state, backup copier, updater link, ways to post
         to the public channel, and the stats database (community features)."""
         self.live, self.backups, self.updater, self.announce = live, backups, updater, announce
         self.db_path = db_path
         self.post_embed = post_embed
         self.webhook_url = webhook_url or ""
+        self.set_webhook = set_webhook       # hands the monitor a webhook the bot created
         self._attached = True
         # start() waits for the connection, so on_ready usually ran before this: start the
         # tasks that need the database now.
@@ -443,6 +446,9 @@ class AdminBot:
                                              if not ok))
             else:
                 self._titles_task = asyncio.ensure_future(self._titles_loop())
+        if not self._webhook_checked:
+            self._webhook_checked = True
+            asyncio.ensure_future(self._check_webhook())
         if (self.online_role or self.online_role_name) and self.db_path and self.guild_id \
                 and self._role_task is None:
             self._role_task = asyncio.ensure_future(self._online_role_loop())
@@ -1103,8 +1109,59 @@ class AdminBot:
                                          "category_id": ch.category_id, "topic": getattr(ch, "topic", None)})
         snap["system_channel_id"] = getattr(guild, "system_channel_id", None)
         feed = await asyncio.get_running_loop().run_in_executor(None, self._feed_channel_id)
-        return server_layout.plan(snap, known={"admin": self.channel_id, "feed": feed},
-                                  remembered=self._layout_remembered(), exclude=self._stat_ids_in_use())
+        p = server_layout.plan(snap, known={"admin": self.channel_id, "feed": feed},
+                               remembered=self._layout_remembered(), exclude=self._stat_ids_in_use())
+        # Huginn's webhook: create it if there's none, move it if it posts somewhere else.
+        slot = next(c for c in p["channels"] if c["key"] == "feed")
+        if not self.webhook_url:
+            p["webhook"] = {"action": "create"}
+        elif feed and feed != slot["id"]:
+            where = next((c["name"] for c in snap["channels"] if c["id"] == feed), None)
+            p["webhook"] = {"action": "move", "from": where}
+        return p
+
+    def _webhook_id(self) -> Optional[int]:
+        m = re.search(r"/webhooks/(\d+)/", self.webhook_url or "")
+        return int(m.group(1)) if m else None
+
+    async def _layout_webhook(self, guild, p: dict, undo: dict, problems: list) -> None:
+        """Create Huginn's webhook in the feed channel, or move the existing one there."""
+        import discord
+        action = (p.get("webhook") or {}).get("action")
+        cid = self._meta("layout:ch:feed")
+        feed = guild.get_channel(int(cid)) if cid else None
+        if not action or feed is None:
+            return
+        try:
+            if action == "create":
+                hook = await feed.create_webhook(name="Huginn", reason="/valheim setup")
+                self.webhook_url = hook.url
+                if self.set_webhook:
+                    self.set_webhook(hook.url)
+                log.info("admin_bot: created Huginn's webhook in #%s", feed.name)
+            else:
+                hook = await self.client.fetch_webhook(self._webhook_id())
+                undo.setdefault("webhook_channel", hook.channel_id)
+                await hook.edit(channel=feed, reason="/valheim setup")
+                log.info("admin_bot: moved Huginn's webhook to #%s", feed.name)
+        except discord.Forbidden:
+            problems.append("Huginn's webhook: the bot needs Manage Webhooks to "
+                            + ("create it" if action == "create" else "move it") +
+                            ". Or do it yourself: channel settings → Integrations → Webhooks.")
+        except discord.HTTPException as e:
+            problems.append(f"Huginn's webhook: {e}")
+
+    async def _check_webhook(self) -> None:
+        """At start-up: warn if Huginn's webhook posts into the private admin channel,
+        where nobody else sees the posts."""
+        feed = await asyncio.get_running_loop().run_in_executor(None, self._feed_channel_id)
+        if feed and feed == self.channel_id:
+            text = ("⚠️ Huginn's webhook posts into this admin channel, so logins, deaths and the other "
+                    "public posts only show up here. Run `/valheim setup apply` to move it to "
+                    "#huginns-watch (the bot needs Manage Webhooks), or move it yourself: this channel's "
+                    "settings → Integrations → Webhooks → Channel.")
+            log.warning("admin_bot: Huginn's webhook posts into the admin channel; public posts are hidden")
+            self.post_admin(text)
 
     async def _layout_overwrites(self, guild, flags: set, current: Optional[dict] = None) -> Optional[dict]:
         """Permission overwrites for a private (admins only) or read-only channel, added to
@@ -1237,6 +1294,7 @@ class AdminBot:
             await guild._state.http.bulk_channel_update(guild.id, payload, reason="/valheim setup")
         except Exception as e:  # noqa: BLE001
             problems.append(f"ordering the categories: {e}")
+        await self._layout_webhook(guild, p, undo, problems)
         # Discord's join greetings: into the welcome channel if they'd be hidden or go nowhere.
         welcome = self._meta("layout:ch:welcome")
         if (p.get("system") or {}).get("move") and welcome:
@@ -1321,6 +1379,13 @@ class AdminBot:
                 await guild._state.http.bulk_channel_update(guild.id, positions, reason="/valheim setup undo")
             except Exception as e:  # noqa: BLE001
                 problems.append(f"positions: {e}")
+        if undo.get("webhook_channel") and self._webhook_id():
+            try:
+                hook = await self.client.fetch_webhook(self._webhook_id())
+                await hook.edit(channel=guild.get_channel(int(undo["webhook_channel"])),
+                                reason="/valheim setup undo")
+            except (discord.HTTPException, AttributeError, TypeError) as e:
+                problems.append(f"Huginn's webhook: {e}")
         if "system_channel" in undo:
             try:
                 old = undo["system_channel"]

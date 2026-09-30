@@ -2,6 +2,7 @@
 config.json
 monitor_state.json
 parser_state.json
+webhook.json
 .env
 
 # Python

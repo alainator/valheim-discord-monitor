@@ -552,6 +552,8 @@ class Discord:
         self.send({"username": self.username, "embeds": [embed]})
 
     def send(self, payload: dict) -> None:
+        if not self.url:
+            return                                   # no webhook yet (the admin bot can create one)
         # Character names are chosen by players: never let one ping @everyone, a role or a user.
         payload.setdefault("allowed_mentions", {"parse": []})
         body = json.dumps(payload).encode()
@@ -1248,9 +1250,32 @@ def main():
     server_name = cfg.get("server_name", "the server")
     events = set(cfg.get("events", ["login", "logout", "death"]))
     d = cfg["discord"]
-    discord = Discord(d.get("webhook_url", ""), d.get("username", "Valheim"),
+    # A webhook the admin bot created (/valheim setup) is kept in webhook.json, used when
+    # neither DISCORD_WEBHOOK_URL nor discord.webhook_url is set.
+    webhook_file = cfg.get("webhook_file") or os.path.join(
+        os.path.dirname(cfg.get("state_file", "monitor_state.json")) or ".", "webhook.json")
+    webhook_url = d.get("webhook_url", "")
+    if not webhook_url or "XXXX" in webhook_url:
+        try:
+            with open(webhook_file) as f:
+                webhook_url = json.load(f).get("url", "") or webhook_url
+        except (OSError, ValueError):
+            pass
+    if "XXXX" in webhook_url:                    # the example config's placeholder
+        webhook_url = ""
+    discord = Discord(webhook_url, d.get("username", "Valheim"),
                       show_count=d.get("show_player_count", True), use_embeds=d.get("embeds", True),
                       messages=d.get("messages"))
+
+    def set_webhook(url: str) -> None:
+        """Called by the admin bot after it created Huginn's webhook: use it and keep it."""
+        discord.url = url
+        try:
+            with open(webhook_file, "w") as f:
+                json.dump({"url": url}, f)
+            os.chmod(webhook_file, 0o600)
+        except OSError as e:
+            log.warning("Couldn't save %s: %s", webhook_file, e)
 
     db_cfg = cfg.get("database") or {}
     db_enabled = bool(db_cfg.get("path")) and db_cfg.get("enabled", True)
@@ -1340,7 +1365,10 @@ def main():
         return
 
     if not discord.url:
-        sys.exit("No Discord webhook URL configured (config discord.webhook_url or DISCORD_WEBHOOK_URL)")
+        if not (cfg.get("admin_bot") or {}).get("enabled"):
+            sys.exit("No Discord webhook URL configured (config discord.webhook_url or DISCORD_WEBHOOK_URL)")
+        log.warning("No Discord webhook URL yet: public posts are skipped until you set DISCORD_WEBHOOK_URL, "
+                    "or run /valheim setup apply and the bot creates Huginn's webhook")
 
     interval = float(cfg.get("poll_interval_seconds", 10))
 
@@ -1493,7 +1521,8 @@ def main():
     if admin:
         admin.attach(live=live, backups=backups, updater=upd, announce=post_update,
                      post_embed=lambda embed: discord.post_embed("titles", embed, {"titles"}),
-                     db_path=db_cfg["path"] if db_enabled else None, webhook_url=discord.url)
+                     db_path=db_cfg["path"] if db_enabled else None, webhook_url=discord.url,
+                     set_webhook=set_webhook)
 
     health = extras.HealthWatch(cfg.get("health") or {})
     daily = extras.DailyRestart(cfg["daily_restart"]) if (cfg.get("daily_restart") or {}).get("time") else None

@@ -120,15 +120,16 @@ def plan(snapshot: dict, known: Optional[dict] = None, remembered: Optional[dict
     # name would also fit another one.
     slots = [(cat, ch) for cat in TEMPLATE for ch in cat["channels"]]
     found, notes = {}, []
-    # Huginn's webhook posting into the general chat: keep that as the chat, give the feed
-    # a channel of its own, and say how to move the webhook.
+    # Huginn's webhook posting into the general chat or the admin channel: that channel keeps
+    # its job, the feed gets a channel of its own, and the webhook is moved there on apply.
     general = next(ch for cat in TEMPLATE for ch in cat["channels"] if ch[0] == "general")
     feed_ch = next((c for c in chans if known.get("feed") and str(c["id"]) == str(known["feed"])), None)
-    if feed_ch and not remembered.get("ch:feed") and \
-            norm(feed_ch["name"]) in {norm(n) for n in [general[2]] + general[4]}:
+    if feed_ch and not remembered.get("ch:feed") and (
+            str(feed_ch["id"]) == str(known.get("admin"))
+            or norm(feed_ch["name"]) in {norm(n) for n in [general[2]] + general[4]}):
         known = {**known, "feed": None}
-        notes.append(f"Huginn's webhook posts in #{feed_ch['name']}, which stays your chat. To move the feed "
-                     f"to the new #huginns-watch: Edit Channel → Integrations → Webhooks → Huginn → Channel.")
+        notes.append(f"Huginn's webhook posts in #{feed_ch['name']}, which keeps its job; the feed gets its "
+                     f"own #huginns-watch.")
     for pass_ in ("id", "name"):
         for cat, (key, kind, name, topic, aliases, flags) in slots:
             if key in found:
@@ -222,6 +223,13 @@ def render(p: dict, limit: int = 3900) -> str:
             else "no channel"
         lines.append(f"📣 Discord's join messages (\"Yay you made it…\") go to {where}; they'll go to "
                      f"#{_discord_name(next(c for c in p['channels'] if c['key'] == 'welcome'))}.")
+    hook = p.get("webhook") or {}
+    feed_name = _discord_name(next(c for c in p["channels"] if c["key"] == "feed"))
+    if hook.get("action") == "create":
+        lines.append(f"🐦 No webhook is set up yet: Huginn's webhook will be created in #{feed_name}.")
+    elif hook.get("action") == "move":
+        lines.append(f"🐦 Huginn's webhook posts in #{hook.get('from') or '?'}; it'll be moved to #{feed_name} "
+                     "(same URL, nothing to change in your config).")
     for note in p.get("notes", []):
         lines.append(f"⚠️ {note}")
     lines.append(f"{n['create']} new · {n['rename']} renamed · {n['move']} moved · {n['same']} already right. "
