@@ -66,24 +66,28 @@ class BotCommandsTest(unittest.TestCase):
         self.assertEqual(before, (None, None))
         self.assertTrue(all(after))
 
-    def test_stat_channels_are_created_once_and_locked(self):
-        import admin_bot
-        import extras
-
+    def stat_guild(self):
         class Channel:
             def __init__(self, cid, name, overwrites, category=None):
                 self.id, self.name, self.overwrites, self.category = cid, name, overwrites, category
 
-            async def edit(self, name=None, reason=None):
-                self.name = name
+            async def edit(self, name=None, category=None, overwrites=None, position=None, reason=None):
+                self.name = name or self.name
+                self.category = category or self.category
+                self.overwrites = overwrites or self.overwrites
 
         class Guild:
+            owner_id = 7
+
             def __init__(self):
                 self.default_role, self.me = "everyone", "bot"
                 self.categories, self.voice = [], []
 
             def get_channel(self, cid):
                 return next((c for c in self.categories + self.voice if c.id == cid), None)
+
+            async def fetch_member(self, uid):
+                return type("M", (), {"display_name": "Alain"})()
 
             async def create_category(self, name, overwrites=None, position=None, reason=None):
                 self.categories.append(Channel(500 + len(self.categories), name, overwrites))
@@ -92,27 +96,76 @@ class BotCommandsTest(unittest.TestCase):
             async def create_voice_channel(self, name, category=None, overwrites=None, position=None, reason=None):
                 self.voice.append(Channel(600 + len(self.voice), name, overwrites, category))
                 return self.voice[-1]
+        return Guild, Channel
 
+    def stat_bot(self, d, guild, **stat_cfg):
+        import admin_bot
+        import extras
+        cfg = {"token": "x", "channel_id": "1", "guild_id": "9", "admin_user_ids": [5], "save_dir": d,
+               "stat_channels": {"enabled": True, **stat_cfg}, "owner_role": True}
+        bot = admin_bot.AdminBot(cfg, "S")
+        bot.attach(db_path=os.path.join(d, "s.db"))
+        live = extras.LiveState()
+        live.join_code, live.count, live.online = "482913", 1, {"Ingrid": 1.0}
+        bot.live = live
+        bot.client = type("C", (), {"get_guild": lambda self, gid: guild})()
+        return bot
+
+    def test_stat_channels_are_grouped_created_once_and_locked(self):
+        Guild, _ = self.stat_guild()
+        guild = Guild()
         with tempfile.TemporaryDirectory() as d:
-            bot = admin_bot.AdminBot({"token": "x", "channel_id": "1", "guild_id": "9", "admin_user_ids": [5],
-                                      "save_dir": d, "stat_channels": {"enabled": True,
-                                                                        "show": ["join_code", "deaths_week"]}}, "S")
-            bot.attach(db_path=os.path.join(d, "s.db"))
-            live = extras.LiveState()
-            live.join_code, live.count = "482913", 1
-            bot.live = live
-            guild = Guild()
-            bot.client = type("C", (), {"get_guild": lambda self, gid: guild})()
-            bot.stats_show = ["join_code", "deaths_week"]
+            bot = self.stat_bot(d, guild, show=["join_code", "deaths_week", "title_owner"])
+            bot.stats_show = ["join_code", "deaths_week", "title_owner"]
             first = asyncio.run(bot._ensure_stat_channels())
             again = asyncio.run(bot._ensure_stat_channels())
-        self.assertEqual([c.name for c in guild.categories], ["📊 Valheim"])
-        self.assertEqual([c.name for c in guild.voice], ["🔑 Join code: 482913", "💀 Deaths this week: 0"])
+        self.assertEqual([c.name for c in guild.categories],
+                         ["🛡️ Heimdall's Watch · live", "📜 The Saga · this week", "👑 Hall of Champions · titles"])
+        watch, saga, hall = guild.categories
+        self.assertEqual([(c.name, c.category) for c in guild.voice],
+                         [("🔑 Join code: 482913", watch), ("💀 Deaths this week: 0", saga),
+                          ("👁️ Odin (server owner): Alain", hall)])
         self.assertEqual({k: c.id for k, c in first.items()}, {k: c.id for k, c in again.items()})
         locked = guild.voice[0].overwrites["everyone"]
         self.assertFalse(locked.connect)
         self.assertTrue(locked.view_channel)
         self.assertTrue(guild.voice[0].overwrites["bot"].manage_channels)
+
+    def test_single_layout(self):
+        Guild, _ = self.stat_guild()
+        guild = Guild()
+        with tempfile.TemporaryDirectory() as d:
+            bot = self.stat_bot(d, guild, layout="single", category="Valheim stats")
+            bot.stats_show = ["join_code", "deaths_week", "title_owner"]
+            asyncio.run(bot._ensure_stat_channels())
+        self.assertEqual([c.name for c in guild.categories], ["Valheim stats"])
+        self.assertEqual({c.category.name for c in guild.voice}, {"Valheim stats"})
+
+    def test_taking_over_the_status_channel_and_old_category(self):
+        Guild, Channel = self.stat_guild()
+        guild = Guild()
+        mine = Channel(42, "🟢 Valheim: 2 online", {"everyone": "open"})     # a status_channel made by hand
+        old_cat = Channel(41, "📊 Valheim", {})                              # the category from before
+        guild.voice.append(mine)
+        guild.categories.append(old_cat)
+        with tempfile.TemporaryDirectory() as d:
+            import admin_bot
+            cfg = {"token": "x", "channel_id": "1", "guild_id": "9", "admin_user_ids": [5], "save_dir": d,
+                   "status_channel": {"channel_id": "42"},
+                   "stat_channels": {"enabled": True, "show": ["players", "server"]}}
+            bot = admin_bot.AdminBot(cfg, "S")
+            self.assertTrue(bot.stats_take_status)             # so the old status loop doesn't start
+            bot.attach(db_path=os.path.join(d, "s.db"))
+            bot.live = __import__("extras").LiveState()
+            bot.client = type("C", (), {"get_guild": lambda self, gid: guild})()
+            bot.stats_show = ["players", "server"]
+            bot._meta("statchan:category", 41)
+            chans = asyncio.run(bot._ensure_stat_channels())
+        self.assertIs(chans["players"], mine)                  # reused, not duplicated
+        self.assertIs(mine.category, old_cat)                  # moved into the category
+        self.assertFalse(mine.overwrites["everyone"].connect)  # and locked
+        self.assertEqual(old_cat.name, "🛡️ Heimdall's Watch · live")
+        self.assertEqual(len(guild.categories), 1)             # "server" is in the same group
 
     def test_title_roles_move_with_the_leaders(self):
         import datetime as dt

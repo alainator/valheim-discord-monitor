@@ -53,10 +53,11 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
-- **Stat channels:** locked voice channels showing the join code, uptime, last backup,
-  peak today, hours and deaths this week, the last raid, the next game night, title holders
-  and more. The bot creates them itself: `"stat_channels": {"enabled": true}`
-  ([stat channels](#stat-channels)).
+- **Stat channels:** three bot-made categories of locked voice channels: Heimdall's Watch
+  (who's online by name, join code, uptime, saves, backups, disk), The Saga (this week's
+  numbers, next game night) and the Hall of Champions (Odin and every title holder). Your
+  status channel moves in, and the status board isn't needed any more:
+  `"stat_channels": {"enabled": true}` ([stat channels](#stat-channels)).
 - **Steam achievements in Discord:** unlock posts from Huginn, achievements in
   `/valheim stats`, a "Most achievements" board in `/valheim top`, and a fifth title role,
   **Bragi**. No web page needed ([details](#steam-achievements-in-discord)).
@@ -556,13 +557,13 @@ in the channel list without opening anything.
 | Setting | Channel type | What you get |
 |---|---|---|
 | `status_channel` (this section) | **Voice** channel you make | The channel's *name* changes: `🟢 Valheim: 3 online` |
-| [`stat_channels`](#stat-channels) | **Voice** channels the bot makes | A category of locked channels, each named after one number: join code, uptime, deaths this week… |
+| [`stat_channels`](#stat-channels) | **Voice** channels the bot makes | Three categories of locked channels: who's online by name, join code, uptime, this week's numbers, title holders… |
 | [`status_board`](#status-board) | **Text** channel | One *message* the bot keeps editing, with who's on, version, uptime, last save, backup and raid |
 
 You can use any or all of them. `status_channel` and `status_board` each need their own
 channel of the right type; the bot won't rename a text channel (it logs a warning and skips
-it). The stat channels need no setup in Discord, and they leave out the player count when
-you already have a `status_channel`.
+it). The stat channels need no setup in Discord, and they take over your `status_channel`
+(moved into their category, with names), so with them on you need neither of the other two.
 
 **The channel shows one of three names at a time**, whichever matches the server right now:
 
@@ -613,59 +614,83 @@ you already have a `status_channel`.
 
 ### Stat channels
 
-A column of locked voice channels at the top of your channel list whose names show the
-server's numbers. The bot creates and updates them; members can see them but not join.
+Locked voice channels at the top of your channel list whose names show the server's
+numbers and title holders. The bot creates, fills and updates them; members can see them
+but not join. Each name says what it is, because Discord doesn't allow descriptions on
+voice channels or categories.
 
 ```
-📊 VALHEIM
+🛡️ HEIMDALL'S WATCH · LIVE
+  🟢 3 online: Ingrid, Bjorn, Sigrid
   🟢 Server online · l-1.0.16
   🔑 Join code: 482913
   ⏱ Up 3 d
-  💾 Backup: today 04:10
+  💾 World saved today 12:04 (1.2 s)
+  🗄 Backup: today 04:10
+  💽 Disk free: 412 GB
+📜 THE SAGA · THIS WEEK
   📈 Peak today: 4
   ⏳ This week: 38 h played
   💀 Deaths this week: 14
   ⚔️ Last raid: The Elder's army (Tue)
-  🧭 23 Vikings have visited
   📅 Bonemass run · Sat 20:00
-  👑 Heimdall: Ingrid
+  🧭 23 Vikings have visited
   🏅 312 achievements unlocked
+👑 HALL OF CHAMPIONS · TITLES
+  👁️ Odin (server owner): Alain
+  🛡️ Heimdall (most hours): Ingrid
+  💀 Hel (most deaths): Bjorn
+  🐎 Sleipnir (most visits): Sigrid
+  ⚡ Thor (longest session): Ingrid
+  📜 Bragi (most achievements): Bjorn
 ```
 
 | Key | Shows |
 |---|---|
-| `players` | Players online (skipped if you already have a [status channel](#status-voice-channel)) |
+| `players` | Who's online, by name ("+2 more" when the names don't fit in 100 characters) |
 | `server` | Online / offline and the version; ⬆️ when the updater has found an update |
 | `join_code` | The crossplay join code (known after the first join since the last restart) |
 | `uptime` | Time since the server started |
+| `saved` | The last world save and how long it took |
 | `backup` | When Valheim last made a world backup |
+| `disk` | Free space on the save disk |
 | `peak_today` | Most players online at once today |
 | `hours_week` | Hours played this week (since Monday), all players together |
 | `deaths_week` | Deaths this week |
 | `last_raid` | The most recent raid and its day |
-| `vikings` | Characters that have ever played |
 | `next_plan` | The next game night from `/valheim plan` |
-| `titles` | The [title](#title-roles) holders, a different one every 10 minutes (only with titles on) |
+| `vikings` | Characters that have ever played |
 | `achievements` | Steam achievements unlocked, all players together |
+| `title_owner` | Odin: the Discord server's owner |
+| `title_time`, `title_deaths`, `title_sessions`, `title_longest`, `title_achievements` | The [title](#title-roles) holders: Heimdall, Hel, Sleipnir, Thor, Bragi (`titles` means all of them) |
 
 **Setup:** add this to the `admin_bot` block, then `docker compose up -d --force-recreate`:
 ```json
 "stat_channels": { "enabled": true }
 ```
-The bot needs **Manage Channels** and `guild_id`. It creates a "📊 Valheim" category and
-the channels within a minute.
+The bot needs **Manage Channels** and `guild_id`. The categories and channels appear
+within a minute.
 
-- **Choosing channels:** `"show": ["server", "join_code", "deaths_week"]` lists the ones
-  you want, in order. Without `show` you get all of them.
+- **Your status channel moves in.** If you have a `status_channel`, it becomes the
+  `players` channel: moved into Heimdall's Watch, locked, and renamed with names. Nothing is
+  duplicated, and the old status channel updater stops.
+- **The status board isn't needed** with these: everything it showed is here. Remove the
+  `status_board` line from `config.json` and delete its message or channel.
+- **Choosing channels:** `"show": ["players", "join_code", "deaths_week", "titles"]` lists
+  the ones you want, in order. Without `show` you get all of them (the title channels only
+  when [titles](#title-roles) are on).
+- **One category instead of three:** `"layout": "single"` puts them all in one category,
+  named by `"category"` (default "📊 Valheim").
+- **Category names:** `"categories": {"watch": "…", "saga": "…", "hall": "…"}` sets them at
+  creation. Renaming or moving them later in Discord is fine; the bot remembers everything
+  by ID.
 - **Removing one:** take it out of `show` first, then delete the channel. If you delete a
   channel that's still in `show`, the bot recreates it.
-- **Renaming the category** or moving the channels in Discord is fine; the bot remembers them
-  by ID. Use `"category": "Server stats"` for a different category name at creation.
 - **Update speed:** Discord allows each channel 2 renames per 10 minutes, so a channel lags
   a change by up to 5 minutes. Values are kept coarse (hours, days) so they don't hit the
   limit.
-- Most channels need the stats database; the live ones (`server`, `join_code`, `uptime`,
-  `backup`, `last_raid`, `players`) don't.
+- The live channels (`players`, `server`, `join_code`, `uptime`, `saved`, `backup`, `disk`,
+  `last_raid`) and Odin don't need the stats database; the rest do.
 
 ### Players & community
 
@@ -1344,8 +1369,10 @@ or run it in a terminal.
 | `admin_bot.online_role` | — | `true` (or a role name): the bot creates the "In Valheim" role, given to linked players while they're in-game. |
 | `admin_bot.online_role_id` | — | Use this existing role instead (takes precedence over `online_role`). |
 | `admin_bot.stat_channels.enabled` | false | Locked voice channels showing the server's numbers ([stat channels](#stat-channels)). |
-| `admin_bot.stat_channels.show` | all | Which ones, in order: `players`, `server`, `join_code`, `uptime`, `backup`, `peak_today`, `hours_week`, `deaths_week`, `last_raid`, `vikings`, `next_plan`, `titles`, `achievements`. |
-| `admin_bot.stat_channels.category` | 📊 Valheim | Name of the category the bot creates for them. |
+| `admin_bot.stat_channels.show` | all | Which ones, in order ([keys](#stat-channels)); `titles` = all the title channels. |
+| `admin_bot.stat_channels.layout` | split | `split`: three categories (live, this week, titles). `single`: one. |
+| `admin_bot.stat_channels.categories` | — | Category names for `split`: `{"watch": …, "saga": …, "hall": …}`. |
+| `admin_bot.stat_channels.category` | 📊 Valheim | Category name for `single`. |
 | `admin_bot.owner_role` | — | `true` (or a role name): an "Odin" role for the Discord server's owner. |
 | `admin_bot.lfg.reminder_minutes` | 15 | Ping game-night signups this long before the start. |
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
