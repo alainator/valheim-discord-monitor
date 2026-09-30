@@ -57,6 +57,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Game nights get a thread and time polls** ("sat 20:00, sun 18:00" → a vote, then a
+  signup). The **weekly recap gets a chart**, the bot **reacts** to raids, welcomes and
+  titles, `/valheim setup` **pins the guide** and sets the **AFK channel**, handled admin
+  notices are **tidied**, and `/valheim link` can set **nicknames** (opt-in).
 - **[Bot permissions](#bot-permissions):** the full list, with what each one is for, the
   ones to leave off, and ready-made invite links.
 - **The bot handles Huginn's webhook:** `/valheim setup` moves it into #huginns-watch, or
@@ -480,6 +484,9 @@ lists are doing their job. There are two ways to receive it:
   A new name on a known account, or a friend's friend on a new account, is easy to tell
   apart before you click.
 
+  **Tidy:** once someone has pressed Permit, Ban or Ignore, the notice is deleted a day later
+  (`tidy_notices_hours`), so Odin's Seat only shows what still needs a decision.
+
   **The player is told why.** If the bot knows who it is, it DMs them: "Your join to
   Alheim as Frankeem was refused: you're not on the permitted list. The admins have been
   told…". Banned players aren't told. There's at most one DM per player per 30 minutes,
@@ -521,7 +528,7 @@ in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visib
 | `/valheim notify <when> [player]` | Anyone | DM me when the first player joins an empty server, or when a given character joins; `off` / `list` | Stats database |
 | `/valheim link <character>` / `unlink` | Anyone | Link your Discord account to your character (stats, role, mentions) | Stats database |
 | `/valheim request-access <character>` | Anyone | New player: "I'll join as …". The admins' refused-join notice then says who it is | Stats database |
-| `/valheim plan <title> <when>` | Anyone | Game night with Going / Maybe / Can't buttons and a reminder ping | Stats database |
+| `/valheim plan <title> <when>` | Anyone | Game night with Going / Maybe / Can't buttons, a planning thread and a reminder ping. Several times (`sat 20:00, sun 18:00`) start a poll for the time | Stats database |
 | `/valheim map` | Anyone | World seed and a map link (spoilers; only the asker sees it) | `save_dir` |
 | `/valheim permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
 | `/valheim ban <id>` | Admin | Ban, and remove from the permitted list | `save_dir` |
@@ -594,18 +601,20 @@ permissions; it doesn't add a second bot.
 | Manage Server | Moving Discord's "Yay you made it" join messages (optional) |
 | Manage Events | Discord Events for game nights, with `lfg.discord_event` (optional) |
 
-**For features that may come later** (harmless to grant now):
+**Used by the optional extras** (game-night threads, polls, reactions, the recap chart,
+pinning, tidying, nicknames), and harmless to grant now:
 
 | Permission | Would allow |
 |---|---|
-| Attach Files | Images: a world-map snapshot, stats charts, a recap card |
-| Add Reactions, Use External Emojis | Reacting to posts, themed emoji |
-| Create Polls | Voting on game-night times or the next boss |
-| Create Public Threads, Send Messages in Threads, Manage Threads | A thread per game night or boss attempt |
-| Manage Messages, Pin Messages | Cleaning up old notices, pinning the channel guide |
+| Attach Files | The weekly recap's chart (posted by the webhook, which needs no permission; kept for future images) |
+| Add Reactions, Use External Emojis | Reacting to Huginn's raid, welcome, milestone and title posts |
+| Create Polls | Time polls for game nights |
+| Create Public Threads, Send Messages in Threads, Manage Threads | A thread per game night, where the reminder is posted |
+| Pin Messages | Pinning the channel guide |
+| Manage Messages | Tidying handled refused-join notices |
 | Create Events | The newer half of the events permission |
-| Connect, Move Members | Moving idle voice users to 🎣 Fishing Hut (AFK) |
-| Manage Nicknames | Setting a member's nickname to their character on `/valheim link` |
+| Connect, Move Members | Not used yet: Discord moves idle voice users to the AFK channel by itself |
+| Manage Nicknames | Setting a member's nickname to their character on `/valheim link` (opt-in) |
 
 **Don't grant:**
 - **Administrator.** It overrides everything, and a leaked token would mean full control
@@ -855,16 +864,18 @@ The [stat channels](#stat-channels) stay on top.
   it at #the-gates, and undo puts it back. That needs **Manage Server**. Without it, the
   result tells you to change it in Server Settings → Engagement → System Messages Channel.
 - **It posts a "📖 A guide to the realm" message** in #the-gates listing every channel and
-  what it's for. Running setup again updates that message instead of posting a new one.
+  what it's for, and pins it. Running setup again updates that message instead of posting
+  a new one.
+- **It makes 🎣 Fishing Hut the AFK channel** if the server has none: Discord itself then
+  moves anyone idle in voice for 15 minutes there. Undo clears it again.
 - **Run it again any time,** for example after a bot update adds channels. It remembers
   its channels by ID, so channels you renamed afterwards keep their place and aren't
   renamed back. A second run on an organised server changes nothing.
 
 **Needs:** Manage Channels and Manage Roles (Discord needs Manage Roles to change channel
 permissions). Optional: **Manage Webhooks** to create or move Huginn's webhook, and
-**Manage Server** to move Discord's join messages; without them you're told what to do by
-hand. To make the Fishing Hut the server's
-AFK channel, set it yourself in Server Settings → Overview → Inactive Channel.
+**Manage Server** to move Discord's join messages and set the AFK channel, and **Pin
+Messages** to pin the guide; without them you're told what to do by hand.
 
 ### Players & community
 
@@ -879,6 +890,9 @@ These need the stats database (`database.path`), which the bot and the monitor s
   - run `/valheim stats` with no name;
   - get an @mention in your welcome and milestone posts;
   - get the "In Valheim" role (below).
+
+  With `"link_nickname": true`, linking also sets your server nickname to the character,
+  if you don't have one yet.
 
   A character can only be linked to one account. Anyone can claim an unlinked character,
   since the log can't prove who owns it; admins can `/valheim unlink` anyone's.
@@ -927,7 +941,13 @@ These need the stats database (`database.path`), which the bot and the monitor s
   with **✅ Going / ❔ Maybe / ❌ Can't** buttons.
   - Times are read in the container's time zone (`TZ`), and shown to everyone in their own
     time zone. It accepts `20:00`, `8pm`, `tomorrow 8pm`, `sat 20:00` and `in 2h`.
-  - Everyone going or maybe is pinged `lfg.reminder_minutes` (15) before it starts.
+  - **A thread** opens on the signup ("🗺️ Bonemass run") for planning who brings what.
+  - Everyone going or maybe is pinged `lfg.reminder_minutes` (15) before it starts, in the
+    thread (or the channel, if the thread is gone).
+  - **Can't agree on a time?** Give several: `/valheim plan "Bonemass run" "sat 20:00, sun 18:00"`
+    posts a Discord poll instead. It closes an hour before the earliest option (at most a
+    week), and the most-voted time becomes the signup automatically; a tie goes to the
+    earlier time. Nobody voting means nothing is planned.
   - With `"lfg": {"discord_event": true}` it also creates a Discord Event; the bot needs
     **Manage Events** for that.
 - **Map.** `/valheim map` reads the world seed from the save folder and links to a map of the
@@ -1161,6 +1181,13 @@ switched on by adding their name to `events` in `config.json`:
 | `update` | ✅ "Valheim updated: l-1.0.16 → l-1.0.17" when the server comes back on a new version, plus the [auto-updater](#auto-updates-and-restarts-from-discord)'s "update available" and "installing" posts | `Valheim version:` at boot |
 
 `welcome`, `milestone` and `weekly_recap` need the stats database (`database.path`).
+
+**Reactions:** with the admin bot on, it reacts to some of Huginn's posts so people can join
+in: ⚔️ raids, 👋 welcomes, 🏆 milestones, 🏅 achievements, 👑 titles, 📜 the weekly recap, ⚠️
+version mismatches. It needs Add Reactions in that channel.
+
+**The weekly recap has a chart:** a bar chart of hours played per day, drawn with Pillow
+(included in the Docker image). Without Pillow, the recap is posted without it.
 
 **Session summaries and milestones only count sessions the monitor saw start.** Someone who
 was already online when the monitor started gets a plain leave message.
@@ -1574,6 +1601,8 @@ or run it in a terminal.
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
 | `admin_bot.map.seed` | "" | Use this seed instead of reading it from the world file. |
+| `admin_bot.link_nickname` | false | `/valheim link` sets the member's server nickname to their character, if they have no nickname yet (needs Manage Nicknames; the server owner's can't be changed). |
+| `admin_bot.tidy_notices_hours` | 24 | Delete refused-join notices this long after someone pressed Permit, Ban or Ignore (needs Manage Messages). `0` keeps them. |
 | `admin_bot.titles.enabled` | false | Weekly title roles for the `/valheim top` leaders. |
 | `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |
 | `admin_bot.titles.day` / `hour` | sunday / 18 | When to reassign the titles (container time zone). |
