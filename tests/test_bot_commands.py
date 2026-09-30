@@ -66,6 +66,54 @@ class BotCommandsTest(unittest.TestCase):
         self.assertEqual(before, (None, None))
         self.assertTrue(all(after))
 
+    def test_stat_channels_are_created_once_and_locked(self):
+        import admin_bot
+        import extras
+
+        class Channel:
+            def __init__(self, cid, name, overwrites, category=None):
+                self.id, self.name, self.overwrites, self.category = cid, name, overwrites, category
+
+            async def edit(self, name=None, reason=None):
+                self.name = name
+
+        class Guild:
+            def __init__(self):
+                self.default_role, self.me = "everyone", "bot"
+                self.categories, self.voice = [], []
+
+            def get_channel(self, cid):
+                return next((c for c in self.categories + self.voice if c.id == cid), None)
+
+            async def create_category(self, name, overwrites=None, position=None, reason=None):
+                self.categories.append(Channel(500 + len(self.categories), name, overwrites))
+                return self.categories[-1]
+
+            async def create_voice_channel(self, name, category=None, overwrites=None, position=None, reason=None):
+                self.voice.append(Channel(600 + len(self.voice), name, overwrites, category))
+                return self.voice[-1]
+
+        with tempfile.TemporaryDirectory() as d:
+            bot = admin_bot.AdminBot({"token": "x", "channel_id": "1", "guild_id": "9", "admin_user_ids": [5],
+                                      "save_dir": d, "stat_channels": {"enabled": True,
+                                                                        "show": ["join_code", "deaths_week"]}}, "S")
+            bot.attach(db_path=os.path.join(d, "s.db"))
+            live = extras.LiveState()
+            live.join_code, live.count = "482913", 1
+            bot.live = live
+            guild = Guild()
+            bot.client = type("C", (), {"get_guild": lambda self, gid: guild})()
+            bot.stats_show = ["join_code", "deaths_week"]
+            first = asyncio.run(bot._ensure_stat_channels())
+            again = asyncio.run(bot._ensure_stat_channels())
+        self.assertEqual([c.name for c in guild.categories], ["📊 Valheim"])
+        self.assertEqual([c.name for c in guild.voice], ["🔑 Join code: 482913", "💀 Deaths this week: 0"])
+        self.assertEqual({k: c.id for k, c in first.items()}, {k: c.id for k, c in again.items()})
+        locked = guild.voice[0].overwrites["everyone"]
+        self.assertFalse(locked.connect)
+        self.assertTrue(locked.view_channel)
+        self.assertTrue(guild.voice[0].overwrites["bot"].manage_channels)
+
     def test_title_roles_move_with_the_leaders(self):
         import datetime as dt
         import admin_bot
