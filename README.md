@@ -192,12 +192,14 @@ The container runs as root, so it can read and edit those files anyway.
 
 **Next steps**, each optional:
 1. [Set up the admin bot](#setting-up-the-bot): refused-join alerts and `/valheim` commands.
-2. Add a [status voice channel](#status-voice-channel), a [status board](#status-board), and
-   the bot-made [stat channels](#stat-channels) (`"stat_channels": {"enabled": true}`).
-3. Turn on the [extras](#extras-raids-summaries-milestones-recap-board-backups): raids,
+2. Organise your Discord with [`/valheim setup`](#server-setup-valheim-setup): themed
+   channels, previewed first and undoable.
+3. Turn on the bot-made [stat channels](#stat-channels) (`"stat_channels": {"enabled": true}`)
+   and the [roles](#roles--names).
+4. Turn on the [extras](#extras-raids-summaries-milestones-recap-board-backups): raids,
    summaries, milestones, weekly recap. They're just names in `events`.
-4. [Copy world backups](#world-backup-copies) to another disk.
-5. Link your update script and world settings ([host/README.md](host/README.md)) for
+5. [Copy world backups](#world-backup-copies) to another disk.
+6. Link your update script and world settings ([host/README.md](host/README.md)) for
    `/valheim restart`, update posts and `/valheim modifier`.
 
 ### Keeping secrets safe
@@ -781,6 +783,14 @@ These need the stats database (`database.path`), which the bot and the monitor s
   - The bot needs **Manage Roles**. A role it creates sits below its own role, so that
     works by itself. A role you made must be **below** the bot's role in Server Settings →
     Roles. You can rename, recolour or move the role later; the bot remembers it by ID.
+  - **It follows who's online.** It's given at login and taken at logout, and every 5
+    minutes the bot also checks everyone it gave the role to. Anyone the monitor no longer
+    sees in the game loses it, so a failed removal or a bot restart can't leave it stuck.
+  - **Quitting straight to desktop:** on crossplay servers Valheim doesn't always log *who*
+    left, only that the player count dropped. The monitor then can't tell who to remove
+    until the server is empty. When that happens it writes the surrounding server log lines
+    to its own log (`Someone left but the log didn't say who…`). Please share them in an
+    issue so the pattern can be added.
 - **Odin, the owner's role.** With `"owner_role": true`, the bot gives the Discord server's
   owner a role named **Odin** (the Allfather, ruler of Asgard).
   - The bot creates it, shows it separately in the member list, and moves it up to just below
@@ -891,7 +901,9 @@ at the top of the member list. Options:
 
 ### Roles & names
 
-Everything the bot adds to your Discord server follows one theme from Norse mythology:
+Everything the bot adds to your Discord server follows one theme from Norse mythology.
+The channels have themed names too: see [server setup](#server-setup-valheim-setup) and
+[stat channels](#stat-channels).
 
 | Name | What it is | Why the name | Turned on with |
 |---|---|---|---|
@@ -990,6 +1002,9 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | Stat channels don't appear; log says `can't create the stat channels` | The bot lacks Manage Channels | Give its role Manage Channels (Server Settings → Roles) |
 | A stat channel shows an old value | Discord's limit of 2 renames per channel per 10 minutes | Expected: it catches up within 5 minutes |
 | `can't give the owner role` | The bot lacks Manage Roles, or the Odin role was moved above the bot's role | Give it Manage Roles and keep the bot's role above Odin |
+| "In Valheim" stays on someone who quit | Valheim didn't log who left (quit to desktop on crossplay) | It's removed once the server is empty. Check `docker compose logs \| grep "didn't say who"` and share those lines in an issue |
+| `/valheim setup` says some changes failed | The bot lacks Manage Channels or Manage Roles, or a channel's permissions deny it | Give its role both permissions (Server Settings → Roles), then run `/valheim setup apply` again; it only redoes what's missing |
+| `/valheim setup` picked the wrong channel for a slot | It matched by name | Run `/valheim setup undo`, rename that channel so it doesn't match (or give the right one the slot's name, e.g. `rules`), then preview and apply again |
 | `can't change the In-Valheim role` | The bot lacks Manage Roles, or its role is below the "In Valheim" role | Give it Manage Roles and drag the bot's role above that role in Server Settings → Roles |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
 | `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |

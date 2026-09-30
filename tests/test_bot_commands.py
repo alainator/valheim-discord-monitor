@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -257,6 +258,24 @@ class BotCommandsTest(unittest.TestCase):
         asyncio.run(bot._rename_old_titles())
         self.assertEqual(sleipnir.name, "Sleipnir")
         self.assertEqual(sum(r.name == "Sleipnir" for r in guild.roles), 1)
+        # The role follows who's online: a holder who isn't in the game any more loses it.
+        live = __import__("extras").LiveState()
+        live.count, live.online = 1, {"Ingrid": 1.0}
+        bot.live = live
+        guild.log.clear()
+        bot._meta("online_role:holders", json.dumps(["42", "77"]))       # 77 (Bjorn) left unnoticed
+        asyncio.run(bot._sync_online_role())
+        self.assertEqual(guild.log, [("remove", 77, "In Valheim")])
+        self.assertEqual(json.loads(bot._meta("online_role:holders")), ["42"])
+        # First run with this version (no list yet): every linked player is checked.
+        bot.db.execute("DELETE FROM meta WHERE key = 'online_role:holders'")
+        guild.log.clear()
+        asyncio.run(bot._sync_online_role())
+        self.assertEqual(guild.log, [("remove", 77, "In Valheim")])
+        # Empty server: everyone loses it.
+        live.online, live.count = {}, 0
+        asyncio.run(bot._sync_online_role())
+        self.assertIn(("remove", 42, "In Valheim"), guild.log)
         # Owner role: created once, moved up under the bot's role, and follows a change of owner.
         bot.owner_role_name = "Odin"
         asyncio.run(bot._sync_owner_role())
