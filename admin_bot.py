@@ -42,6 +42,10 @@ import threading
 import time
 from typing import Optional
 
+# Commands with public replies, and the /valheim setup channel they belong in. Others (their
+# replies are private) work anywhere; admins can run anything anywhere.
+COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "plan": "plans"}
+
 # Huginn's posts the bot reacts to, so people can react along.
 REACTIONS = {"raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
              "weekly_recap": "📜", "version_mismatch": "⚠️"}
@@ -350,6 +354,12 @@ class AdminBot:
         self.map_seed = str((cfg.get("map") or {}).get("seed") or "").strip()
         # /valheim link sets a member's server nickname to the character (only if they have none).
         self.link_nickname = bool(cfg.get("link_nickname", False))
+        # Commands used in the wrong channel get a private "run it in #…" instead. true: the
+        # channels /valheim setup made; false: off; {"stats": "<channel id>", …}: overrides.
+        cc = cfg.get("command_channels", True)
+        self.command_channels_on = cc is not False
+        self.command_channel_ids = {k: int(v) for k, v in cc.items() if str(v).isdigit()} \
+            if isinstance(cc, dict) else {}
         # Handled refused-join notices are deleted this many hours later (0 keeps them).
         self.tidy_hours = float(cfg.get("tidy_notices_hours", 24))
         # Weekly title roles for the /valheim top leaders (community.TITLES).
@@ -1790,10 +1800,20 @@ class AdminBot:
         intents = discord.Intents.none()
         intents.guilds = True                 # enough for buttons + slash commands; no privileged intents
 
+        class Tree(app_commands.CommandTree):
+            async def interaction_check(self, it: discord.Interaction) -> bool:
+                where = bot.wrong_channel(it)
+                if where:
+                    await it.response.send_message(
+                        f"Run `/{it.command.qualified_name}` in <#{where}>, please. It keeps the chat tidy.",
+                        ephemeral=True)
+                    return False
+                return True
+
         class Client(discord.Client):
             def __init__(self):
                 super().__init__(intents=intents)
-                self.tree = app_commands.CommandTree(self)
+                self.tree = Tree(self)
 
             async def setup_hook(self):
                 bot._register_commands(self.tree)
@@ -1893,6 +1913,29 @@ class AdminBot:
             except discord.HTTPException as e:
                 log.debug("admin_bot: couldn't react to a %s post: %s", kind, e)
         asyncio.run_coroutine_threadsafe(react(), self.loop)
+
+    def command_channel(self, name: str) -> Optional[int]:
+        """The channel a /valheim command belongs in, or None when it works anywhere."""
+        if not self.command_channels_on or name not in COMMAND_PLACES:
+            return None
+        if name in self.command_channel_ids:
+            return self.command_channel_ids[name]
+        cid = self._meta(f"layout:ch:{COMMAND_PLACES[name]}") if self._attached else None
+        return int(cid) if cid and str(cid).isdigit() else None
+
+    def wrong_channel(self, it) -> Optional[int]:
+        """The channel to send someone to when they run a command in the wrong one; None
+        when it's fine here (right channel or a thread in it, or they're an admin)."""
+        cmd = getattr(it, "command", None)
+        name = getattr(cmd, "name", None)
+        if not name or self._is_admin(it.user):
+            return None
+        want = self.command_channel(name)
+        if want is None:
+            return None
+        channel = getattr(it, "channel", None)
+        here = {getattr(it, "channel_id", None), getattr(channel, "parent_id", None)}
+        return None if want in here else want
 
     def _register_commands(self, tree) -> None:
         import discord
