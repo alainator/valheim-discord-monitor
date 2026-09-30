@@ -55,6 +55,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **"In Valheim" no longer gets stuck.** The monitor remembers who's online across restarts
+  and rebuilds, and every 5 minutes the bot takes the role from anyone who isn't in the
+  game. Roles already stuck clear on their own after updating
+  ([details](#players--community)).
 - **`/valheim setup`:** organises your whole Discord into Valheim-themed categories and
   channels (The Gates, The Mead Hall, The Wilds, The Longhouses, Odin's Seat). It previews
   first, never deletes anything, and can be undone ([server setup](#server-setup-valheim-setup)).
@@ -1370,8 +1374,9 @@ Setup:
 ## Running it permanently
 
 **Docker Compose**: see the [self-hosted quick start](#self-hosted-linux-server-quick-start).
-`docker-compose.yml` bind-mounts the repo, so `config.json`, `monitor_state.json` and the
-stats database live next to the code and survive rebuilds. If `docker compose` rejects
+`docker-compose.yml` bind-mounts the repo, so `config.json`, the state files
+(`monitor_state.json`, `parser_state.json`) and the stats database live next to the code
+and survive rebuilds. If `docker compose` rejects
 `env_file` / `required`, your Compose is older than 2.24; delete the `env_file:` block and
 pass secrets another way.
 
@@ -1473,6 +1478,7 @@ or run it in a terminal.
 | `discord.show_player_count` | true | Footer with the current online count. |
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |
 | `state_file` | `monitor_state.json` | Where the read offset is remembered. |
+| `parser_state_file` | `parser_state.json` (next to `state_file`) | Who's online and which player IDs are whose, so a restart doesn't lose track of them. |
 
 ## Notes
 - Names come from the character, not the Steam account.
@@ -1480,6 +1486,9 @@ or run it in a terminal.
   `Destroying abandoned … owner <id>` line; the monitor emits one logout per player.
 - If the server restarts, it starts a fresh log and the monitor starts over with it
   automatically.
+- If the *monitor* restarts (a rebuild, `docker compose restart`), it carries on where it
+  left off: the read position is in `monitor_state.json` and who's online in
+  `parser_state.json`. Players who leave meanwhile are still logged out.
 - `docker stop` / `docker compose down` stop the monitor straight away (it handles SIGTERM).
 - Player names in Discord messages can't ping anyone: mentions are disabled on every post,
   and markdown in names is escaped.
