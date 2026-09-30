@@ -391,7 +391,8 @@ class Discord:
               "server_restart": 0xE0A13C, "maintenance_start": 0x5865F2, "maintenance_done": 0x57F287,
               "maintenance_failed": 0xED4245, "maintenance_pending": 0xE0A13C, "join_refused": 0xE67E22,
               "raid": 0xED4245, "version_mismatch": 0xE0A13C, "logout_summary": 0x95A5A6, "welcome": 0x57F287,
-              "milestone": 0xF1C40F, "weekly_recap": 0x5865F2, "update": 0x5865F2}
+              "milestone": 0xF1C40F, "weekly_recap": 0x5865F2, "update": 0x5865F2,
+              "titles": 0xF1C40F}
     EMOJI = {"login": "🟢", "logout": "🔴", "death": "💀", "respawn": "🔥", "server_up": "🛡️",
              "player_joined": "🟢", "player_left": "🔴", "server_online": "🟢", "server_offline": "🔴",
              "server_restart": "🔻", "maintenance_start": "🛠️", "maintenance_done": "✅",
@@ -1361,6 +1362,7 @@ def main():
             upd.bot_dir = ""
     if admin:
         admin.attach(live=live, backups=backups, updater=upd, announce=post_update,
+                     post_embed=lambda embed: discord.post_embed("titles", embed, {"titles"}),
                      db_path=db_cfg["path"] if db_enabled else None)
 
     health = extras.HealthWatch(cfg.get("health") or {})

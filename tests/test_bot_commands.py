@@ -34,7 +34,82 @@ class BotCommandsTest(unittest.TestCase):
                                            "update-check", "restart", "restart-cancel", "lists", "join",
                                            "settings", "modifier", "preset", "setkey",
                                            "stats", "top", "notify", "link", "unlink", "request-access",
-                                           "plan", "map"]))
+                                           "plan", "map", "titles"]))
+
+    def test_title_roles_move_with_the_leaders(self):
+        import datetime as dt
+        import admin_bot
+        import community
+        import stats_db
+
+        class Member:
+            def __init__(self, uid, log):
+                self.id, self.log = uid, log
+
+            async def add_roles(self, role, reason=None):
+                self.log.append(("add", self.id, role.name))
+
+            async def remove_roles(self, role, reason=None):
+                self.log.append(("remove", self.id, role.name))
+
+        class Role:
+            def __init__(self, rid, name):
+                self.id, self.name = rid, name
+
+        class Guild:
+            def __init__(self):
+                self.roles, self.log = [], []
+
+            def get_role(self, rid):
+                return next((r for r in self.roles if r.id == rid), None)
+
+            async def create_role(self, name, colour=None, reason=None):
+                self.roles.append(Role(len(self.roles) + 100, name))
+                return self.roles[-1]
+
+            async def fetch_member(self, uid):
+                return Member(uid, self.log)
+
+        with tempfile.TemporaryDirectory() as d:
+            st = stats_db.Store(os.path.join(d, "s.db"))
+            st.login("Ingrid", 1000)
+            st.logout("Ingrid", 8200)
+            st.death("Bjorn", 1100)
+            st.login("Bjorn", 2000)
+            st.logout("Bjorn", 2100)
+            community.link_player(st.conn, "Ingrid", 42)
+            st.close()
+            bot = admin_bot.AdminBot({"token": "x", "channel_id": "1", "guild_id": "9", "admin_user_ids": [5],
+                                      "save_dir": d, "titles": {"enabled": True}}, "S")
+            bot.attach(db_path=os.path.join(d, "s.db"))
+            guild = Guild()
+
+            class Client:
+                def get_guild(self, gid):
+                    return guild
+            bot.client = Client()
+
+            async def run():
+                first = await bot._sync_titles(recompute=True)
+                community.link_player(bot.db, "Bjorn", 77)        # Bjorn links later
+                await bot._sync_titles(recompute=False)
+                return first
+            holders, changed = asyncio.run(run())
+        self.assertEqual(changed, {"time", "deaths", "sessions", "longest"})
+        self.assertEqual(holders["time"], {"player": "Ingrid", "user_id": "42", "v": 7200})
+        self.assertEqual(holders["deaths"]["user_id"], None)                 # not linked yet
+        self.assertEqual(sorted(r.name for r in guild.roles), ["Heimdall", "Hel", "Huginn", "Thor"])
+        self.assertIn(("add", 42, "Heimdall"), guild.log)
+        self.assertIn(("add", 77, "Hel"), guild.log)                          # given after linking
+        self.assertIn(("add", 77, "Huginn"), guild.log)                       # tied on visits: first by name
+        # Weekly schedule: first run right away, then only on the configured day and hour.
+        self.assertIsNotNone(bot._titles_due())
+        community.set_meta(bot.db, "titles_week", "2026-W39")
+        sunday = dt.datetime(2026, 10, 4, 18, 5)
+        self.assertEqual(bot._titles_due(sunday), "2026-W40")
+        self.assertIsNone(bot._titles_due(sunday.replace(hour=17)))
+        community.set_meta(bot.db, "titles_week", "2026-W40")
+        self.assertIsNone(bot._titles_due(sunday))
 
 
 if __name__ == "__main__":

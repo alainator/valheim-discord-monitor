@@ -7,6 +7,7 @@ Community features for the Discord bot, stored in the stats database:
     character joins;
   * access requests: "I'll join as Ingrid", so a refused-join notice can say who it is;
   * game-night plans with RSVPs and a reminder;
+  * weekly title roles for the /valheim top leaders (Heimdall, Hel, Huginn, Thor);
   * reading the world seed for a map link.
 
 Functions take an sqlite3 connection (stats_db.connect) so the monitor thread and the
@@ -164,6 +165,95 @@ TOP = {
 
 def top(conn, category: str, limit: int = 10) -> list:
     return _rows(conn, TOP[category][1], (limit,))
+
+
+# ---------------------------------------------------------------------------
+# Title roles: one Discord role per /valheim top category, held by its leader
+# ---------------------------------------------------------------------------
+# category -> (role name, why it fits, role colour)
+TITLES = {
+    "time": ("Heimdall", "never leaves his post: most time played", 0xF1C40F),
+    "deaths": ("Hel", "keeper of the dead: most deaths", 0x71368A),
+    "sessions": ("Huginn", "flies out every day and always returns: most visits", 0x607D8B),
+    "longest": ("Thor", "drank from the sea and lowered it: longest single session", 0x3498DB),
+}
+_TITLE_SQL = {
+    "time": "SELECT player, SUM(duration_seconds) AS v FROM play_sessions WHERE login_at >= ? GROUP BY player",
+    "deaths": "SELECT player, COUNT(*) AS v FROM deaths WHERE died_at >= ? GROUP BY player",
+    "sessions": "SELECT player, COUNT(*) AS v FROM play_sessions WHERE login_at >= ? GROUP BY player",
+    "longest": "SELECT player, MAX(duration_seconds) AS v FROM play_sessions WHERE login_at >= ? GROUP BY player",
+}
+
+
+def title_holder(conn, category: str) -> Optional[dict]:
+    """{"player", "user_id"} stored for a title: the character that holds it, and the
+    Discord user who was given the role (None when that character isn't linked)."""
+    import json
+    try:
+        v = get_meta(conn, f"title:{category}")
+        return json.loads(v) if v else None
+    except ValueError:
+        return None
+
+
+def set_title_holder(conn, category: str, player: Optional[str], user_id: Optional[str]) -> None:
+    import json
+    set_meta(conn, f"title:{category}", json.dumps({"player": player, "user_id": user_id}))
+
+
+def get_meta(conn, key: str) -> Optional[str]:
+    r = _one(conn, "SELECT value FROM meta WHERE key = ?", (key,))
+    return r["value"] if r else None
+
+
+def set_meta(conn, key: str, value) -> None:
+    conn.execute("INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                 (key, None if value is None else str(value)))
+    conn.commit()
+
+
+def title_value(conn, category: str, player: str, since: int = 0):
+    """One character's score in a title category (for showing the holder's number)."""
+    sql = _TITLE_SQL[category].replace("GROUP BY", "AND player = ? COLLATE NOCASE GROUP BY")
+    r = _one(conn, sql, (since, player))
+    return r["v"] if r else 0
+
+
+def title_leaders(conn, since: int = 0) -> dict:
+    """category -> {"player", "v"} of the leader since the log timestamp `since` (0 = all
+    time), or None with no data. On a tie the current holder keeps the title, so it
+    doesn't flip back and forth; otherwise the first to get there (by name) wins."""
+    out = {}
+    for cat, sql in _TITLE_SQL.items():
+        rows = [r for r in _rows(conn, sql, (since,)) if (r["v"] or 0) > 0]
+        if not rows:
+            out[cat] = None
+            continue
+        best = max(r["v"] for r in rows)
+        tied = sorted((r for r in rows if r["v"] == best), key=lambda r: r["player"].lower())
+        held = (title_holder(conn, cat) or {}).get("player")
+        keep = next((r for r in tied if held and r["player"].lower() == held.lower()), None)
+        out[cat] = keep or tied[0]
+    return out
+
+
+def render_titles(holders: dict, changed: set = frozenset(), period: str = "all") -> dict:
+    """holders: category -> {"player", "v", "user_id"} or None."""
+    lines = []
+    for cat, (role, why, _) in TITLES.items():
+        h = holders.get(cat)
+        if not h:
+            lines.append(f"**{role}**: nobody yet\n*{why}*")
+            continue
+        value = str(h["v"]) if cat in ("deaths", "sessions") else _dur(h["v"])
+        who = f"<@{h['user_id']}> ({h['player']})" if h.get("user_id") else \
+            f"**{h['player']}** (not linked: `/valheim link {h['player']}` to get the role)"
+        new = " 🆕" if cat in changed else ""
+        lines.append(f"**{role}**{new}: {who}, {value}\n*{why}*")
+    return {"title": "🏆 Titles of the realm", "color": 0xF1C40F,
+            "description": "\n".join(lines),
+            "footer": {"text": "Reassigned weekly · " + ("last 7 days" if period == "week" else "all time")
+                               + " · /valheim top"}}
 
 
 def player_stats(conn, player: str) -> Optional[dict]:

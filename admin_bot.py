@@ -32,6 +32,7 @@ Only the users / roles in `admin_user_ids` / `admin_role_ids` can press the butt
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import json
 import logging
 import os
@@ -40,6 +41,8 @@ import tempfile
 import threading
 import time
 from typing import Optional
+
+DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 log = logging.getLogger("valheim-monitor.bot")
 
@@ -299,6 +302,19 @@ class AdminBot:
         self.discord_events = bool(lfg.get("discord_event", False))
         self.map_enabled = bool((cfg.get("map") or {}).get("enabled", True))
         self.map_seed = str((cfg.get("map") or {}).get("seed") or "").strip()
+        # Weekly title roles for the /valheim top leaders (community.TITLES).
+        tc = cfg.get("titles") or {}
+        self.titles_on = bool(tc.get("enabled", False))
+        self.titles_period = "week" if str(tc.get("period", "all")).lower() == "week" else "all"
+        day = str(tc.get("day", "sunday")).lower()
+        self.titles_weekday = DAYS.index(day) if day in DAYS else 6
+        self.titles_hour = int(tc.get("hour", 18))
+        ch = str(tc.get("channel_id", ""))
+        self.titles_channel = int(ch) if ch.isdigit() else None
+        self.title_role_ids = {k: int(v) for k, v in (tc.get("roles") or {}).items() if str(v).isdigit()}
+        self._titles_task = None
+        self._titles_lock = None
+        self.post_embed = None               # posts an embed to the public webhook channel
         self._refused: dict = {}             # platform id -> character name, for Permit follow-ups
         self._dm_sent: dict = {}             # (user, reason) -> time, so a rejoin doesn't spam DMs
         self._plan_task = None
@@ -350,11 +366,13 @@ class AdminBot:
         fut = asyncio.run_coroutine_threadsafe(self._post_refused(name, pid), self.loop)
         fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
 
-    def attach(self, live=None, backups=None, updater=None, announce=None, db_path=None) -> None:
-        """Hand the bot the monitor's live state, backup copier, updater link, a way to post
+    def attach(self, live=None, backups=None, updater=None, announce=None, db_path=None,
+               post_embed=None) -> None:
+        """Hand the bot the monitor's live state, backup copier, updater link, ways to post
         to the public channel, and the stats database (community features)."""
         self.live, self.backups, self.updater, self.announce = live, backups, updater, announce
         self.db_path = db_path
+        self.post_embed = post_embed
 
     @property
     def db(self):
@@ -765,6 +783,130 @@ class AdminBot:
             except Exception as e:  # noqa: BLE001
                 log.warning("admin_bot: plan reminders failed: %s", e)
 
+    # -- title roles -------------------------------------------------------------
+    def _titles_since(self) -> int:
+        """Log timestamp the titles count from: 0 for all time, or 7 days ago."""
+        import community
+        if self.titles_period != "week":
+            return 0
+        return int(time.time()) - community.log_clock_offset(self.db) - 7 * 86400
+
+    def _titles_due(self, now: Optional[_dt.datetime] = None) -> Optional[str]:
+        """The ISO week to reassign for, or None. The first run is immediate."""
+        import community
+        now = now or _dt.datetime.now().astimezone()
+        y, w, _ = now.isocalendar()
+        key = f"{y}-W{w:02d}"
+        last = community.get_meta(self.db, "titles_week")
+        if last is None:
+            return key
+        if now.weekday() != self.titles_weekday or now.hour < self.titles_hour:
+            return None
+        return None if last == key else key
+
+    async def _title_role(self, guild, category: str):
+        """The Discord role for a title: configured, remembered, found by name, or created."""
+        import discord
+        import community
+        name, _, colour = community.TITLES[category]
+        rid = self.title_role_ids.get(category) or community.get_meta(self.db, f"title_role:{category}")
+        role = guild.get_role(int(rid)) if rid else None
+        if role is None:
+            role = discord.utils.get(guild.roles, name=name)
+        if role is None:
+            role = await guild.create_role(name=name, colour=discord.Colour(colour),
+                                           reason=f"Valheim title: {community.TITLES[category][1]}")
+            log.info("admin_bot: created the title role %s", name)
+        community.set_meta(self.db, f"title_role:{category}", role.id)
+        return role
+
+    async def _move_role(self, guild, role, old_uid, new_uid, reason: str) -> None:
+        import discord
+        for uid, add in ((old_uid, False), (new_uid, True)):
+            if not uid:
+                continue
+            try:
+                member = await guild.fetch_member(int(uid))
+                await (member.add_roles if add else member.remove_roles)(role, reason=reason)
+            except discord.NotFound:              # left the Discord server
+                pass
+
+    async def _sync_titles(self, recompute: bool) -> tuple:
+        """Give each title role to the Discord user linked to the title's character.
+        recompute=True picks the leaders again (the weekly run); False only follows
+        links made or removed since. Returns (holders, changed categories)."""
+        import discord
+        import community
+        if self._titles_lock is None:
+            self._titles_lock = asyncio.Lock()
+        async with self._titles_lock:
+            guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+            since = self._titles_since()
+            leaders = community.title_leaders(self.db, since) if recompute else {}
+            holders, changed = {}, set()
+            for cat, (name, _, _) in community.TITLES.items():
+                held = community.title_holder(self.db, cat) or {}
+                if recompute:
+                    player = (leaders.get(cat) or {}).get("player")
+                    if (player or "").lower() != (held.get("player") or "").lower():
+                        changed.add(cat)
+                else:
+                    player = held.get("player")
+                uid = community.linked_user(self.db, player) if player else None
+                if uid != held.get("user_id"):
+                    try:
+                        role = await self._title_role(guild, cat)
+                        await self._move_role(guild, role, held.get("user_id"), uid,
+                                              f"Valheim title {name}: {player or 'nobody'}")
+                    except discord.Forbidden:
+                        log.warning("admin_bot: can't give the %s title role: the bot needs Manage Roles, and "
+                                    "its own role must be above the title roles in Server Settings -> Roles", name)
+                        uid = held.get("user_id")      # try again next time
+                community.set_title_holder(self.db, cat, player, uid)
+                holders[cat] = {"player": player, "user_id": uid,
+                                "v": community.title_value(self.db, cat, player, since)} if player else None
+            return holders, changed
+
+    async def _titles_loop(self) -> None:
+        """Once a week (and right away the first time), hand the titles to the leaders."""
+        import discord
+        import community
+        await asyncio.sleep(15)
+        while True:
+            try:
+                week = self._titles_due()
+                if week:
+                    holders, changed = await self._sync_titles(recompute=True)
+                    community.set_meta(self.db, "titles_week", week)
+                    log.info("admin_bot: titles reassigned for %s (%d changed)", week, len(changed))
+                    if changed:
+                        await self._announce_titles(community.render_titles(holders, changed, self.titles_period))
+            except discord.HTTPException as e:
+                log.warning("admin_bot: title roles failed: %s", e)
+            except Exception as e:  # noqa: BLE001
+                log.warning("admin_bot: title roles failed: %s", e)
+            await asyncio.sleep(300)
+
+    def _titles_relink(self) -> None:
+        """After /valheim link or unlink: move a title role to the newly linked account."""
+        if not self._titles_task:
+            return
+
+        async def run():
+            try:
+                await self._sync_titles(recompute=False)
+            except Exception as e:  # noqa: BLE001
+                log.warning("admin_bot: title roles after a link change failed: %s", e)
+        asyncio.ensure_future(run())
+
+    async def _announce_titles(self, embed: dict) -> None:
+        import discord
+        if self.titles_channel:
+            channel = self.client.get_channel(self.titles_channel) or await self.client.fetch_channel(self.titles_channel)
+            await channel.send(embed=discord.Embed.from_dict(embed), allowed_mentions=discord.AllowedMentions.none())
+        elif self.post_embed:
+            await asyncio.get_running_loop().run_in_executor(None, self.post_embed, embed)
+
     def _build_client(self):
         import discord
         from discord import app_commands
@@ -796,6 +938,11 @@ class AdminBot:
                     bot._board_task = asyncio.ensure_future(bot._board_loop())
                 if bot.db_path and bot._plan_task is None:
                     bot._plan_task = asyncio.ensure_future(bot._plan_loop())
+                if bot.titles_on and bot._titles_task is None:
+                    if not (bot.db_path and bot.guild_id):
+                        log.warning("admin_bot: titles need guild_id and the stats database; titles off")
+                    else:
+                        bot._titles_task = asyncio.ensure_future(bot._titles_loop())
 
             async def on_interaction(self, it: discord.Interaction):
                 cid = (it.data or {}).get("custom_id", "") if it.type == discord.InteractionType.component else ""
@@ -987,6 +1134,32 @@ class AdminBot:
             embed = community.render_top(category, community.top(bot.db, category, 10))
             await it.response.send_message(embed=discord.Embed.from_dict(embed))
 
+        @group.command(name="titles", description="Who holds Heimdall, Hel, Huginn and Thor (the top of each board)")
+        @app_commands.describe(refresh="Admins: reassign the titles now instead of waiting for the weekly run")
+        async def titles(it: discord.Interaction, refresh: bool = False):
+            if not await need_db(it):
+                return
+            if not bot._titles_task:
+                await it.response.send_message("Title roles are off on this server (`admin_bot.titles` in "
+                                                "config.json).", ephemeral=True)
+                return
+            if refresh and not bot._is_admin(it.user):
+                await it.response.send_message("Only the server admins can reassign the titles.", ephemeral=True)
+                return
+            await it.response.defer()
+            try:
+                if refresh:
+                    holders, changed = await bot._sync_titles(recompute=True)
+                    log.info("admin_bot: titles reassigned by %s (%d changed)", it.user, len(changed))
+                else:
+                    holders, changed = (await bot._sync_titles(recompute=False))[0], set()
+            except discord.HTTPException as e:
+                await it.followup.send(f"Couldn't update the title roles: {e}", ephemeral=True)
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(
+                community.render_titles(holders, changed, bot.titles_period)),
+                allowed_mentions=discord.AllowedMentions.none())
+
         @group.command(name="notify", description="Get a DM when someone joins the server")
         @app_commands.describe(when="What to be told about", player="For follow/unfollow: which character")
         @app_commands.choices(when=[app_commands.Choice(name="First player joins an empty server", value="first"),
@@ -1035,6 +1208,8 @@ class AdminBot:
             err = community.link_player(bot.db, name, it.user.id)
             await it.response.send_message(err or f"✅ **{name}** is now linked to you. `/valheim stats` shows "
                                                    "your stats, and milestones will mention you.", ephemeral=True)
+            if not err:
+                bot._titles_relink()
         link.autocomplete("character")(player_choices)
 
         @group.command(name="unlink", description="Unlink a character from your Discord account")
@@ -1048,6 +1223,7 @@ class AdminBot:
                     community.unlink_player(bot.db, n)
                 await it.response.send_message(f"Unlinked {', '.join(mine)}." if mine else "Nothing was linked.",
                                                 ephemeral=True)
+                bot._titles_relink()
                 return
             name = community.known_player(bot.db, character) or character.strip()
             owner = community.linked_user(bot.db, name)
@@ -1058,6 +1234,8 @@ class AdminBot:
             done = community.unlink_player(bot.db, name)
             await it.response.send_message(f"Unlinked **{name}**." if done else f"**{name}** wasn't linked.",
                                             ephemeral=True)
+            if done:
+                bot._titles_relink()
         unlink.autocomplete("character")(player_choices)
 
         @group.command(name="request-access", description="New here? Tell the admins which character you'll join as")
