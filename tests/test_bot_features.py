@@ -219,6 +219,31 @@ class BotFeatureTest(unittest.TestCase):
             self.assertTrue(ch.sent[0].pinned)
             self.assertEqual(ch.sent[0].kw["embed"].title, "📖 A guide to the realm")
 
+    def test_commands_in_the_wrong_channel(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = self.bot(d)
+            b._meta("layout:ch:bots", 300)                        # #muninns-roost
+            b._meta("layout:ch:plans", 400)                       # #war-council
+
+            def it(cmd, channel_id, user=9, parent=None):
+                return type("I", (), {"command": type("C", (), {"name": cmd})(), "channel_id": channel_id,
+                                      "channel": type("Ch", (), {"parent_id": parent})(),
+                                      "user": type("U", (), {"id": user, "roles": []})()})()
+            self.assertEqual(b.wrong_channel(it("stats", 100)), 300)
+            self.assertIsNone(b.wrong_channel(it("stats", 300)))
+            self.assertEqual(b.wrong_channel(it("plan", 300)), 400)
+            self.assertIsNone(b.wrong_channel(it("plan", 999, parent=400)))     # a game-night thread
+            self.assertIsNone(b.wrong_channel(it("join", 100)))                 # private reply: anywhere
+            self.assertIsNone(b.wrong_channel(it("stats", 100, user=5)))        # admins: anywhere
+        with tempfile.TemporaryDirectory() as d:
+            b = self.bot(d)                                       # setup never ran: no rules
+            self.assertIsNone(b.wrong_channel(it("stats", 100)))
+            b = self.bot(d, command_channels={"stats": "777"})    # an override
+            self.assertEqual(b.wrong_channel(it("stats", 100)), 777)
+            b = self.bot(d, command_channels=False)
+            b._meta("layout:ch:bots", 300)
+            self.assertIsNone(b.wrong_channel(it("stats", 100)))
+
     def test_reaction_emoji(self):
         import admin_bot
         self.assertEqual(admin_bot.REACTIONS["raid"], "⚔️")

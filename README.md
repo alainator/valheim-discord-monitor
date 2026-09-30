@@ -57,6 +57,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Commands have a home channel:** `/valheim stats` in the general chat gets a private
+  "run it in #🪶┃muninns-roost" instead of cluttering the chat
+  ([commands](#discord-commands)).
 - **Game nights get a thread and time polls** ("sat 20:00, sun 18:00" → a vote, then a
   signup). The **weekly recap gets a chart**, the bot **reacts** to raids, welcomes and
   titles, `/valheim setup` **pins the guide** and sets the **AFK channel**, handled admin
@@ -517,6 +520,20 @@ effect, `sudo systemctl restart valheimserver`.
 
 All commands are under `/valheim`. **Admin** commands only work for the users and roles
 in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visible to you.
+
+**Commands have a home channel.** After [`/valheim setup`](#server-setup-valheim-setup),
+commands whose replies everyone sees go in their own channel:
+- `stats`, `top`, `titles` and `online` in #🪶┃muninns-roost;
+- `plan` in #🗺️┃war-council, or one of its game-night threads.
+
+Run one anywhere else and only you see "Run `/valheim stats` in #🪶┃muninns-roost, please";
+nothing is posted, so there's nothing to clean up. Commands with private replies (`join`,
+`map`, `link`, `notify`…) work everywhere, and admins can run anything anywhere.
+- Point a command somewhere else with `"command_channels": {"stats": "<channel id>"}`, or
+  turn this off with `"command_channels": false`.
+- To hide commands from other channels entirely, use Discord's own setting instead: Server
+  Settings → Integrations → the bot → pick a command → Channels. Bots can't change that one
+  themselves.
 
 | Command | Who | What it does | Needs |
 |---|---|---|---|
@@ -1606,6 +1623,7 @@ or run it in a terminal.
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
 | `admin_bot.map.seed` | "" | Use this seed instead of reading it from the world file. |
 | `admin_bot.link_nickname` | false | `/valheim link` sets the member's server nickname to their character, if they have no nickname yet (needs Manage Nicknames; the server owner's can't be changed). |
+| `admin_bot.command_channels` | true | Send `stats`, `top`, `titles`, `online` and `plan` to their home channel (from `/valheim setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
 | `admin_bot.tidy_notices_hours` | 24 | Delete refused-join notices this long after someone pressed Permit, Ban or Ignore (needs Manage Messages). `0` keeps them. |
 | `admin_bot.titles.enabled` | false | Weekly title roles for the `/valheim top` leaders. |
 | `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |
