@@ -1,6 +1,7 @@
 # Secrets and runtime state — never commit these
 config.json
 monitor_state.json
+parser_state.json
 .env
 
 # Python
