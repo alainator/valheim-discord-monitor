@@ -48,6 +48,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **The bot creates the "In Valheim" role** with `"online_role": true`, instead of you
+  making it and copying its ID ([players & community](#players--community)).
+- **Odin, the server owner's role:** `"owner_role": true` gives the Discord server's owner
+  an "Odin" role near the top of the member list ([players & community](#players--community)).
 - **Title roles:** the leader of each `/valheim top` board gets a Norse role (Heimdall,
   Hel, Huginn, Thor), reassigned weekly. Turn on with `"titles": {"enabled": true}`
   ([title roles](#title-roles)).
@@ -594,9 +598,23 @@ These need the stats database (`database.path`), which the bot and the monitor s
 
   A character can only be linked to one account. Anyone can claim an unlinked character,
   since the log can't prove who owns it; admins can `/valheim unlink` anyone's.
-- **"In Valheim" role.** Set `admin_bot.online_role_id` to a role's ID, and linked players
-  get it while they're in the game, so the member list shows who's playing. The bot needs
-  **Manage Roles**, and its own role must sit **above** that role in Server Settings → Roles.
+- **"In Valheim" role.** Linked players get it while they're in the game, so the member
+  list shows who's playing.
+  - Turn it on with `"online_role": true`. The bot creates an "In Valheim" role, shown
+    separately in the member list, the first time someone joins. It reuses a role that
+    already has that name. Use `"online_role": "Vikings online"` for a different name.
+  - Or set `online_role_id` to a role you made yourself; that takes precedence.
+  - The bot needs **Manage Roles**. A role it creates sits below its own role, so that
+    works by itself. A role you made must be **below** the bot's role in Server Settings →
+    Roles. You can rename, recolour or move the role later; the bot remembers it by ID.
+- **Odin, the owner's role.** With `"owner_role": true`, the bot gives the Discord server's
+  owner a role named **Odin** (the Allfather, ruler of Asgard).
+  - The bot creates it, shows it separately in the member list, and moves it up to just below
+    its own role, so the owner is listed near the top.
+  - It follows the server's actual owner, checked at start-up and every 6 hours. If
+    ownership is transferred, the role moves with it.
+  - It's a title only: no permissions, and it doesn't make anyone a bot admin (that's still
+    `admin_user_ids`). Use `"owner_role": "Allfather"` for a different name.
 - **Title roles.** See [below](#title-roles).
 - **Notifications (DMs).**
   - `/valheim notify first` DMs you when someone joins an empty server.
@@ -627,7 +645,8 @@ These need the stats database (`database.path`), which the bot and the monitor s
 
 ```json
 "admin_bot": {
-  "online_role_id": "123456789012345678",
+  "online_role": true,
+  "owner_role": true,
   "lfg": { "reminder_minutes": 15, "discord_event": false },
   "map": { "enabled": true },
   "titles": { "enabled": true }
@@ -736,6 +755,7 @@ at the top of the member list. Options:
 | World setting: "the settings file didn't change within 20 s" | The host helper isn't updated, or `/valheim_home` isn't mounted | Re-run the two `install` commands in [host/README.md](host/README.md#one-time-setup); check the mount with `docker compose config` |
 | `can't give the Hel title role` (or another title) | The bot lacks Manage Roles, or a title role was moved above the bot's role | Give it Manage Roles and keep the bot's role above the title roles |
 | `/valheim titles` says title roles are off | `titles.enabled` isn't true, or `guild_id` / the stats database is missing (the log says which) | Fix the config and recreate the container |
+| `can't give the owner role` | The bot lacks Manage Roles, or the Odin role was moved above the bot's role | Give it Manage Roles and keep the bot's role above Odin |
 | `can't change the In-Valheim role` | The bot lacks Manage Roles, or its role is below the "In Valheim" role | Give it Manage Roles and drag the bot's role above that role in Server Settings → Roles |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
 | `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |
@@ -1138,7 +1158,9 @@ or run it in a terminal.
 | `weekly_recap.day` / `hour` | sunday / 18 | When to post the weekly recap (container time zone). |
 | `updater.log` | — | The host updater's log (`update_check.log`), for update posts. |
 | `updater.bot_dir` | — | Folder shared with the host: `status.json` out, `request` for restart/check/settings. |
-| `admin_bot.online_role_id` | — | Role given to linked players while they're in-game. |
+| `admin_bot.online_role` | — | `true` (or a role name): the bot creates the "In Valheim" role, given to linked players while they're in-game. |
+| `admin_bot.online_role_id` | — | Use this existing role instead (takes precedence over `online_role`). |
+| `admin_bot.owner_role` | — | `true` (or a role name): an "Odin" role for the Discord server's owner. |
 | `admin_bot.lfg.reminder_minutes` | 15 | Ping game-night signups this long before the start. |
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
@@ -1239,7 +1261,8 @@ Added here:
 - **World settings from Discord:** preset, modifiers and setkeys, validated on the host.
 - **Community:** `/valheim stats`, `top`, `notify` (DMs), `link` with an "In Valheim" role,
   `request-access`, `plan` (game nights with RSVPs and reminders), `map` (reads the
-  seed from Valheim 1.0 world folders), and weekly title roles (`titles`).
+  seed from Valheim 1.0 world folders), weekly title roles (`titles`), and the
+  bot-created "In Valheim" and Odin (owner) roles.
 - **Server health:** low-disk and slow-save warnings, an optional daily restart, and
   exploration in the weekly recap.
 - **Docker setup:** `Dockerfile`, `docker-compose.yml`, `.env.example` and a self-hosted

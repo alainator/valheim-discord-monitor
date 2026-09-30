@@ -84,17 +84,25 @@ class BotCommandsTest(unittest.TestCase):
 
         class Role:
             def __init__(self, rid, name):
-                self.id, self.name = rid, name
+                self.id, self.name, self.position = rid, name, 1
+
+            async def edit(self, position=None):
+                self.position = position
 
         class Guild:
             def __init__(self):
-                self.roles, self.log = [], []
+                self.roles, self.log, self.owner_id = [], [], 42
+                bot_role = Role(1, "Odin")                  # the bot is called Odin too:
+                bot_role.position, bot_role.managed = 10, True   # its own role must not be reused
+                self.roles.append(bot_role)
+                self.me = type("Me", (), {"top_role": bot_role})()
 
             def get_role(self, rid):
                 return next((r for r in self.roles if r.id == rid), None)
 
-            async def create_role(self, name, colour=None, reason=None):
+            async def create_role(self, name, colour=None, hoist=False, reason=None):
                 self.roles.append(Role(len(self.roles) + 100, name))
+                self.roles[-1].hoist = hoist
                 return self.roles[-1]
 
             async def fetch_member(self, uid):
@@ -128,10 +136,31 @@ class BotCommandsTest(unittest.TestCase):
         self.assertEqual(changed, {"time", "deaths", "sessions", "longest"})
         self.assertEqual(holders["time"], {"player": "Ingrid", "user_id": "42", "v": 7200})
         self.assertEqual(holders["deaths"]["user_id"], None)                 # not linked yet
-        self.assertEqual(sorted(r.name for r in guild.roles), ["Heimdall", "Hel", "Huginn", "Thor"])
+        self.assertEqual(sorted(r.name for r in guild.roles), ["Heimdall", "Hel", "Huginn", "Odin", "Thor"])
         self.assertIn(("add", 42, "Heimdall"), guild.log)
         self.assertIn(("add", 77, "Hel"), guild.log)                          # given after linking
         self.assertIn(("add", 77, "Huginn"), guild.log)                       # tied on visits: first by name
+        # The "In Valheim" role with "online_role": true: created once (shown separately), then reused.
+        bot.online_role_name = "In Valheim"
+        asyncio.run(bot._set_role("Ingrid", True))
+        asyncio.run(bot._set_role("Ingrid", False))
+        online = [r for r in guild.roles if r.name == "In Valheim"]
+        self.assertEqual(len(online), 1)
+        self.assertTrue(online[0].hoist)
+        self.assertIn(("add", 42, "In Valheim"), guild.log)
+        self.assertIn(("remove", 42, "In Valheim"), guild.log)
+        # Owner role: created once, moved up under the bot's role, and follows a change of owner.
+        bot.owner_role_name = "Odin"
+        asyncio.run(bot._sync_owner_role())
+        asyncio.run(bot._sync_owner_role())                                  # no change: no new role
+        odin = [r for r in guild.roles if r.name == "Odin" and not getattr(r, "managed", False)]
+        self.assertEqual(len(odin), 1)
+        self.assertEqual(odin[0].position, 9)
+        self.assertEqual(guild.log.count(("add", 42, "Odin")), 1)
+        guild.owner_id = 77
+        asyncio.run(bot._sync_owner_role())
+        self.assertIn(("remove", 42, "Odin"), guild.log)
+        self.assertIn(("add", 77, "Odin"), guild.log)
         # Weekly schedule: first run right away, then only on the configured day and hour.
         self.assertIsNotNone(bot._titles_due())
         community.set_meta(bot.db, "titles_week", "2026-W39")

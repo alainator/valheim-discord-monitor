@@ -251,6 +251,13 @@ class StatusChannel:
 # ---------------------------------------------------------------------------
 # The bot
 # ---------------------------------------------------------------------------
+def _assignable_role(guild, name: str):
+    """A role with this name that can be handed out. Skips roles Discord manages itself,
+    like the role a bot gets when it joins, which is named after the bot (a bot called
+    "Odin" has a role "Odin" that nobody else can be given)."""
+    return next((r for r in guild.roles if r.name == name and not getattr(r, "managed", False)), None)
+
+
 class AdminBot:
     """Runs a discord.py client on its own thread; the monitor's (synchronous) main
     loop hands it events with notify_refused(), which is thread-safe."""
@@ -295,8 +302,18 @@ class AdminBot:
         # Community features (community.py), stored in the stats database.
         self.db_path = None                  # from attach()
         self._db = None                      # opened lazily on the bot's own thread
+        # "In Valheim" role: a configured role ID, or "online_role": true (or a role name) to
+        # have the bot find or create it.
         role = str(cfg.get("online_role_id", ""))
         self.online_role = int(role) if role.isdigit() else None
+        auto = cfg.get("online_role")
+        self.online_role_name = (auto.strip() if isinstance(auto, str) and auto.strip()
+                                 else "In Valheim" if auto is True else None)
+        # "owner_role": true (or a role name): a role for the Discord server's owner.
+        owner = cfg.get("owner_role")
+        self.owner_role_name = (owner.strip() if isinstance(owner, str) and owner.strip()
+                                else "Odin" if owner is True else None)
+        self._owner_task = None
         lfg = cfg.get("lfg") or {}
         self.remind_minutes = int(lfg.get("reminder_minutes", 15))
         self.discord_events = bool(lfg.get("discord_event", False))
@@ -402,6 +419,11 @@ class AdminBot:
                                              if not ok))
             else:
                 self._titles_task = asyncio.ensure_future(self._titles_loop())
+        if self.owner_role_name and self._owner_task is None:
+            if not (self.db_path and self.guild_id):
+                log.warning("admin_bot: owner_role needs guild_id and the stats database; owner role off")
+            else:
+                self._owner_task = asyncio.ensure_future(self._owner_loop())
 
     @property
     def db(self):
@@ -417,13 +439,13 @@ class AdminBot:
             asyncio.run_coroutine_threadsafe(self._on_login(player, server_was_empty), self.loop)
 
     def on_logout(self, player: str) -> None:
-        if self.loop and self.ready.is_set() and self.db_path and self.online_role:
+        if self.loop and self.ready.is_set() and self.db_path and (self.online_role or self.online_role_name):
             asyncio.run_coroutine_threadsafe(self._set_role(player, False), self.loop)
 
     async def _on_login(self, player: str, server_was_empty: bool) -> None:
         import community
         try:
-            if self.online_role:
+            if self.online_role or self.online_role_name:
                 await self._set_role(player, True)
             now = time.time()
             for uid, reason in community.who_to_notify(self.db, player, server_was_empty).items():
@@ -455,7 +477,11 @@ class AdminBot:
         try:
             guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
             member = await guild.fetch_member(int(uid))
-            role = guild.get_role(self.online_role) or discord.Object(id=self.online_role)
+            if self.online_role:
+                role = guild.get_role(self.online_role) or discord.Object(id=self.online_role)
+            else:
+                role = await self._ensure_role(guild, "online_role", None, self.online_role_name, 0x57F287,
+                                               hoist=True, reason="Shows who's playing Valheim right now")
             if on:
                 await member.add_roles(role, reason=f"Playing Valheim as {player}")
             else:
@@ -833,21 +859,68 @@ class AdminBot:
             return None
         return None if last == key else key
 
-    async def _title_role(self, guild, category: str):
-        """The Discord role for a title: configured, remembered, found by name, or created."""
+    async def _ensure_role(self, guild, key: str, configured, name: str, colour: int,
+                           hoist: bool = False, reason: str = ""):
+        """A role the bot manages: the configured ID, the one it remembered (by ID, so it can
+        be renamed), an existing role with that name, or a new one it creates."""
         import discord
         import community
-        name, _, colour = community.TITLES[category]
-        rid = self.title_role_ids.get(category) or community.get_meta(self.db, f"title_role:{category}")
+        rid = configured or community.get_meta(self.db, f"role:{key}")
         role = guild.get_role(int(rid)) if rid else None
         if role is None:
-            role = discord.utils.get(guild.roles, name=name)
+            role = _assignable_role(guild, name)
         if role is None:
-            role = await guild.create_role(name=name, colour=discord.Colour(colour),
-                                           reason=f"Valheim title: {community.TITLES[category][1]}")
-            log.info("admin_bot: created the title role %s", name)
-        community.set_meta(self.db, f"title_role:{category}", role.id)
+            role = await guild.create_role(name=name, colour=discord.Colour(colour), hoist=hoist, reason=reason)
+            log.info("admin_bot: created the %s role", name)
+        if str(role.id) != str(rid):
+            community.set_meta(self.db, f"role:{key}", role.id)
         return role
+
+    async def _sync_owner_role(self) -> None:
+        """Give the owner role to whoever owns the Discord server, and take it from a
+        previous owner. A new role is moved up to just below the bot's own role, so its
+        holder is listed near the top of the member list."""
+        import discord
+        import community
+        guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+        created = community.get_meta(self.db, "role:owner") is None and \
+            _assignable_role(guild, self.owner_role_name) is None
+        role = await self._ensure_role(guild, "owner", None, self.owner_role_name, 0x206694, hoist=True,
+                                       reason="The Discord server's owner")
+        if created and getattr(guild, "me", None) is not None:
+            try:
+                await role.edit(position=max(1, guild.me.top_role.position - 1))
+            except discord.HTTPException as e:
+                log.info("admin_bot: couldn't move the %s role up: %s", role.name, e)
+        owner, held = str(guild.owner_id), community.get_meta(self.db, "role_holder:owner")
+        if owner != held:
+            await self._move_role(guild, role, held, owner, f"{role.name}: owner of this Discord server")
+            community.set_meta(self.db, "role_holder:owner", owner)
+            log.info("admin_bot: gave the %s role to the server owner", role.name)
+
+    async def _owner_loop(self) -> None:
+        """At start-up, then every 6 hours in case the server changes hands."""
+        import discord
+        await asyncio.sleep(10)
+        while True:
+            try:
+                await self._sync_owner_role()
+            except discord.Forbidden:
+                log.warning("admin_bot: can't give the owner role: the bot needs Manage Roles, and its own "
+                            "role must be above that role in Server Settings -> Roles")
+            except Exception as e:  # noqa: BLE001
+                log.warning("admin_bot: owner role failed: %s", e)
+            await asyncio.sleep(6 * 3600)
+
+    async def _title_role(self, guild, category: str):
+        """The Discord role for a title: configured, remembered, found by name, or created."""
+        import community
+        name, why, colour = community.TITLES[category]
+        configured = (self.title_role_ids.get(category)
+                      or community.get_meta(self.db, f"role:title:{category}")
+                      or community.get_meta(self.db, f"title_role:{category}"))     # before 2026-10
+        return await self._ensure_role(guild, f"title:{category}", configured, name, colour,
+                                       reason=f"Valheim title: {why}")
 
     async def _move_role(self, guild, role, old_uid, new_uid, reason: str) -> None:
         import discord

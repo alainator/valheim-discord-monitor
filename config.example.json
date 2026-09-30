@@ -62,7 +62,8 @@
       "address": "YOUR.PUBLIC.IP:2456",
       "note": "New here? Ask in #general to be added to the server."
     },
-    "online_role_id": "YOUR-IN-VALHEIM-ROLE-ID (optional)",
+    "online_role": true,
+    "owner_role": true,
     "lfg": {
       "reminder_minutes": 15,
       "discord_event": false
