@@ -63,6 +63,7 @@
       "note": "New here? Ask in #general to be added to the server."
     },
     "online_role": true,
+    "owner_role": true,
     "lfg": {
       "reminder_minutes": 15,
       "discord_event": false
