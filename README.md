@@ -1212,6 +1212,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/valheim stats`, `/valheim plan` or `/valheim permit` are gone | The commands were split into groups | Use `/muninn stats` (and `top`, `titles`, `online`), `/warcouncil plan`, and `/odin` for the admin commands. Press Ctrl+R if Discord still shows the old ones |
 | You can see `/muninn`, `/warcouncil` and `/odin` in every channel | You're the owner or an admin: Discord shows them everything | Members don't; check with a friend or a second account |
 | A bot admin can't see `/odin` | Discord hides it from anyone without Manage Server | Server Settings → Integrations → the bot → `/odin` → add their role |
+| A Steam player's achievement wasn't posted | Their game details are private (Steam's default is Friends only), `"achievement"` isn't in `events`, or it's been under 30 minutes | `/muninn stats <character>` says "private" if it's privacy: they set Game details to Public. Otherwise check `events` |
+| Someone was posted as leaving while still playing | The log line that looked like their leave belonged to an earlier connection of theirs (fixed), or a pattern the monitor doesn't know | Update; if it happens again, share the monitor's log lines around their `EVENT logout` in an issue |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
 | `/valheim map` can't read the seed | The world file isn't in `<save_dir>/worlds_local`, or its format changed | Check `save_dir` (the monitor looks for `<world>/_main.*.fwl2` and `*.fwl`), or set `admin_bot.map.seed` |
 | No backups copied | `source_dir` isn't Valheim's `worlds_local`, or `dest_dir` isn't mounted | Check both, then see what the log says after `Backup created` (`Backups: copied N backup(s)`) |
@@ -1486,13 +1488,17 @@ You don't need the web page for this.
 - Achievements are checked every 30 minutes (`steam.refresh_seconds`), so a post can
   arrive up to half an hour after the unlock.
 - The first check for a player only records what they already have, so nobody gets a
-  flood of old achievements. Only achievements unlocked after that are posted.
+  flood of old achievements. Only achievements unlocked after that are posted. For a
+  **new player** (first seen on the server this week), what they unlocked since they first
+  joined is posted too, so their first half hour isn't lost.
 - A Steam account is shown under the character it played most recently.
 - **Steam only.** Xbox and Game Pass players have no Steam ID. Microsoft has no free public
   achievements API, so Xbox support would need a third-party service such as OpenXBL.
   PlayStation has no public trophy API, and Nintendo consoles have no achievements at all.
 - Players need a **public Steam profile with public game details**. Otherwise
-  `/muninn stats` says it's private.
+  `/muninn stats` says it's private. Steam's default for game details is **Friends only**,
+  which the API can't see: the player sets Steam → Profile → Edit Profile → Privacy
+  Settings → Game details → **Public**.
 
 ### Achievements on the stats web page
 

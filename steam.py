@@ -123,15 +123,40 @@ def fetch_achievements(key: str, steam_id: str):
     return len(unlocks), len(ach), unlocks, None
 
 
-def new_unlocks(store, steam_id: str, unlocks: list) -> list:
+NEW_PLAYER_DAYS = 7
+
+
+def _first_seen(store, steam_id: str):
+    """When this Steam account's characters first played here (real time), or None."""
+    r = store.conn.execute("SELECT MIN(s.login_at) FROM player_steam ps JOIN play_sessions s ON s.player = ps.player "
+                           "WHERE ps.steam_id = ?", (steam_id,)).fetchone()
+    if not r or r[0] is None:
+        return None
+    try:
+        offset = int(store.get_meta("log_clock_offset") or 0)      # real time - log time
+    except (TypeError, ValueError):
+        offset = 0
+    return int(r[0]) + offset
+
+
+def new_unlocks(store, steam_id: str, unlocks: list, now: float = None) -> list:
     """The unlocks in `unlocks` that are new since this player's last refresh, as
-    (apiname, unlocktime). Empty on a player's first refresh (their existing
-    achievements are the baseline, not news), and anything unlocked before the last
-    refresh (e.g. while the profile was private) is skipped too."""
+    (apiname, unlocktime). Anything unlocked before the last refresh (e.g. while the
+    profile was private) is skipped.
+
+    A player's first refresh is the baseline (their existing achievements aren't news),
+    except for a new player (first seen here in the last week): then what they unlocked
+    since they first joined is news, so the first half hour on the server isn't lost."""
     prev = store.conn.execute("SELECT unlocked, updated_at FROM steam_profile WHERE steam_id=?",
                               (steam_id,)).fetchone()
     known = {r[0] for r in store.conn.execute("SELECT apiname FROM steam_unlock WHERE steam_id=?", (steam_id,))}
-    if prev is None or (not known and prev["unlocked"] != 0):
+    if prev is None:
+        first = _first_seen(store, steam_id)
+        now = time.time() if now is None else now
+        if first is None or now - first > NEW_PLAYER_DAYS * 86400:
+            return []
+        return [(a, t) for a, t in unlocks if t >= first - 600]
+    if not known and prev["unlocked"] != 0:
         return []
     since = int(prev["updated_at"] or 0) - 3600      # an hour of slack for clock differences
     return [(a, t) for a, t in unlocks if a not in known and t >= since]

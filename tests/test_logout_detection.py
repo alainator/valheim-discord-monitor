@@ -86,6 +86,32 @@ class LogoutDetectionTest(unittest.TestCase):
         self.assertEqual(self.feed(blank, ["09/30/2026 11:10:39: Destroying abandoned non persistent zdo "
                                            "2107543341:5863 owner 2107543341"]), [])
 
+    def test_leftovers_from_an_earlier_connection_are_not_a_leave(self):
+        """Someone reconnects without a leave line we recognise: their character spawns
+        with a new owner id, and the old id's objects are cleaned up later. That cleanup
+        must not log them out; only their current owner id's does."""
+        p = self.two_online()
+        got = self.feed(p, ["09/14/2026 08:10:00: PlayFab listen socket child connected to remote player CCCC3333DDDD4444",
+                            "09/14/2026 08:10:20: Got character ZDOID from Bjorn : 333:1",
+                            "09/14/2026 08:11:00: Destroying abandoned non persistent zdo 222:9 owner 222"])
+        self.assertEqual(got, [])
+        self.assertIn("Bjorn", p.s.online)
+        got = self.feed(p, ["09/14/2026 09:00:00: Destroying abandoned non persistent zdo 333:4 owner 333"])
+        self.assertEqual(got, [("logout", "Bjorn")])
+
+    def test_a_second_connection_ending_is_not_a_leave(self):
+        """Steam: a player who's in connects again (e.g. Join Game from their friends list);
+        that extra connection ending doesn't mean they left."""
+        p = vdm.ValheimLogParser()
+        self.feed(p, ["09/14/2026 07:44:34: Got connection SteamID 76561198017275560",
+                      "09/14/2026 07:45:02: Got character ZDOID from Sven : 444:1"])
+        got = self.feed(p, ["09/14/2026 08:00:00: Got connection SteamID 76561198017275560",
+                            "09/14/2026 08:00:05: Peer 76561198017275560 disconnected"])
+        self.assertEqual(got, [])
+        self.assertIn("Sven", p.s.online)
+        got = self.feed(p, ["09/14/2026 09:00:00: Peer 76561198017275560 disconnected"])
+        self.assertEqual(got, [("logout", "Sven")])
+
     def test_bad_saved_state_is_ignored(self):
         p = vdm.ValheimLogParser()
         p.load_state({"online": 5})

@@ -195,6 +195,16 @@ class SteamAchievementsTest(DB):
         self.assertEqual(first, [])
         self.assertEqual([(x["steam_id"], [a for a, _ in x["unlocks"]]) for x in second], [("7656", ["boss2"])])
 
+    def test_new_players_first_refresh_announces_what_they_unlocked_here(self):
+        """A friend joins and unlocks something before the first Steam check: the first
+        check is still news for someone first seen here this week."""
+        self.st.login("Sven", 50000)
+        self.st.link_steam("Sven", "7657", 50000)
+        unlocks = [("boss1", 1000), ("boss2", 51000)]                # one from long ago, one here
+        self.assertEqual(self.steam.new_unlocks(self.st, "7657", unlocks, now=52000), [("boss2", 51000)])
+        # A regular's first check (first seen weeks ago) stays a silent baseline.
+        self.assertEqual(self.steam.new_unlocks(self.st, "7657", unlocks, now=50000 + 30 * 86400), [])
+
     def test_zero_achievements_is_a_baseline(self):
         self.refresh([], now=6000)
         self.assertEqual(self.refresh([("boss1", 7000)], now=8000), [("boss1", 7000)])
