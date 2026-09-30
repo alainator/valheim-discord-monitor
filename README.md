@@ -186,7 +186,8 @@ The container runs as root, so it can read and edit those files anyway.
 
 **Next steps**, each optional:
 1. [Set up the admin bot](#setting-up-the-bot): refused-join alerts and `/valheim` commands.
-2. Add a [status voice channel](#status-voice-channel) and a [status board](#status-board).
+2. Add a [status voice channel](#status-voice-channel), a [status board](#status-board), and
+   the bot-made [stat channels](#stat-channels) (`"stat_channels": {"enabled": true}`).
 3. Turn on the [extras](#extras-raids-summaries-milestones-recap-board-backups): raids,
    summaries, milestones, weekly recap. They're just names in `events`.
 4. [Copy world backups](#world-backup-copies) to another disk.
@@ -550,15 +551,18 @@ A player who keeps retrying triggers only one notice per `repeat_cooldown_second
 The bot keeps a **voice** channel's **name** showing the server's state, so everyone sees it
 in the channel list without opening anything.
 
-**Two features, easy to mix up:**
+**Three features, easy to mix up:**
 
 | Setting | Channel type | What you get |
 |---|---|---|
-| `status_channel` (this section) | **Voice** channel | The channel's *name* changes: `🟢 Valheim: 3 online` |
+| `status_channel` (this section) | **Voice** channel you make | The channel's *name* changes: `🟢 Valheim: 3 online` |
+| [`stat_channels`](#stat-channels) | **Voice** channels the bot makes | A category of locked channels, each named after one number: join code, uptime, deaths this week… |
 | [`status_board`](#status-board) | **Text** channel | One *message* the bot keeps editing, with who's on, version, uptime, last save, backup and raid |
 
-You can use either or both, but each needs its own channel of the right type. The bot
-won't rename a text channel: it logs a warning and skips it.
+You can use any or all of them. `status_channel` and `status_board` each need their own
+channel of the right type; the bot won't rename a text channel (it logs a warning and skips
+it). The stat channels need no setup in Discord, and they leave out the player count when
+you already have a `status_channel`.
 
 **The channel shows one of three names at a time**, whichever matches the server right now:
 
