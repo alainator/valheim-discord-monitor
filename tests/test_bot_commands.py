@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -35,6 +36,35 @@ class BotCommandsTest(unittest.TestCase):
                                            "settings", "modifier", "preset", "setkey",
                                            "stats", "top", "notify", "link", "unlink", "request-access",
                                            "plan", "map", "titles"]))
+
+    def test_database_tasks_start_after_attach(self):
+        """start() waits for on_ready, and attach() hands over the database only after that,
+        so the plan and title loops must start from attach(), not just from on_ready."""
+        import admin_bot
+        with tempfile.TemporaryDirectory() as d:
+            bot = admin_bot.AdminBot({"token": "x", "channel_id": "1", "guild_id": "9", "admin_user_ids": [5],
+                                      "save_dir": d, "titles": {"enabled": True}}, "S")
+
+            async def idle():
+                await asyncio.sleep(3600)
+            bot._plan_loop = bot._titles_loop = idle
+
+            async def run():
+                bot.loop = asyncio.get_running_loop()
+                bot._start_tasks()                       # on_ready: no database yet
+                before = (bot._plan_task, bot._titles_task)
+                bot.ready.set()
+                bot.attach(db_path=os.path.join(d, "s.db"))
+                await asyncio.sleep(0)                   # let call_soon_threadsafe run
+                after = (bot._plan_task, bot._titles_task)
+                for t in after:
+                    t.cancel()
+                return before, after
+            with mock.patch.object(admin_bot.log, "warning") as warn:
+                before, after = asyncio.run(run())
+        warn.assert_not_called()
+        self.assertEqual(before, (None, None))
+        self.assertTrue(all(after))
 
     def test_title_roles_move_with_the_leaders(self):
         import datetime as dt
