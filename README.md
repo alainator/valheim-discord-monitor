@@ -31,8 +31,9 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   server before anything is written ([world settings](#auto-updates-and-restarts-from-discord)).
 - **Community:** `/valheim stats` and `/valheim top`, DMs when friends come online, an
   "In Valheim" role, weekly **title roles** for the leaderboard leaders (Heimdall, Hel,
-  Sleipnir, Thor), game-night signups with reminders, a world map link, and a smoother
-  first join ([players & community](#players--community)).
+  Sleipnir, Thor), an **Odin** role for the server owner, game-night signups with
+  reminders, a world map link, and a smoother first join
+  ([players & community](#players--community), [roles & names](#roles--names)).
 - **Server health:** warnings before the save disk fills up or saves get slow, and an
   optional daily restart while nobody's on ([server health](#server-health)).
 
@@ -48,6 +49,8 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **[Roles & names](#roles--names):** one overview of the bot (Muninn), the announcer
+  (Huginn), and every role the bot hands out.
 - **Sleipnir replaces Huginn** as the "most visits" title. The bot renames the existing
   role, so nothing to do ([title roles](#title-roles)).
 - **The bot creates the "In Valheim" role** with `"online_role": true`, instead of you
@@ -79,6 +82,7 @@ And without the bot:
 - **Admin bot:** [Join alerts & setup](#join-attempt-alerts--discord-admin-bot) ·
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Players & community](#players--community) · [Title roles](#title-roles) ·
+  [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
   [Troubleshooting](#troubleshooting)
 - **Extras:** [Raids, summaries, milestones, recap](#extras-raids-summaries-milestones-recap-board-backups) ·
@@ -477,6 +481,7 @@ This takes about five minutes in Discord's developer portal.
 
 **1. Create the bot.**
 1. Go to <https://discord.com/developers/applications> → **New Application** → give it a name.
+   **Muninn** fits the theme (see [roles & names](#roles--names)).
 2. Open **Bot** → **Reset Token** → **Copy**.
 3. Put the token in `.env` as `DISCORD_BOT_TOKEN=<token>`: no quotes, no spaces.
    - It must be the token from the **Bot** page: about 70 characters with two dots. The
@@ -490,7 +495,11 @@ This takes about five minutes in Discord's developer portal.
 **2. Invite it.**
 1. Open **OAuth2** → **URL Generator**.
 2. Under scopes, tick **`bot`** and **`applications.commands`**.
-3. Under bot permissions, tick **View Channels**, **Send Messages** and **Embed Links**.
+3. Under bot permissions, tick **View Channels**, **Send Messages**, **Embed Links** and
+   **Read Message History**. Also tick:
+   - **Manage Channels**, for the [status voice channel](#status-voice-channel);
+   - **Manage Roles**, for the ["In Valheim", Odin and title roles](#roles--names);
+   - **Manage Events**, only if game nights should create Discord Events.
 4. Open the generated URL, pick your Discord server, and click **Authorize**.
 
 **3. Make a private admin channel.** For example `#valheim-admin`, with Private Channel on.
@@ -670,7 +679,7 @@ mythology:
 **Naming tip:** to keep the theme, call the announcement webhook **Huginn** (`"discord":
 {"username": "Huginn"}`) and the bot **Muninn** (developer portal → Bot → Username). They're
 Odin's two ravens, Thought and Memory, who fly over the world and report back to him, and
-the Odin role goes to the server owner (below).
+the Odin role goes to the server owner. See [roles & names](#roles--names) for the full set.
 
 **How it works:**
 - **Weekly.** Every week (default Sunday 18:00, container time zone) the bot looks at the
@@ -715,6 +724,57 @@ at the top of the member list. Options:
 - **`channel_id`:** where to post the changes. Empty posts through the webhook, to the same
   channel as logins and deaths.
 - **`roles`:** use roles you already have instead of the bot creating them (role IDs).
+
+### Roles & names
+
+Everything the bot adds to your Discord server follows one theme from Norse mythology:
+
+| Name | What it is | Why the name | Turned on with |
+|---|---|---|---|
+| **Muninn** | The bot | Odin's raven of Memory: watches the server and remembers everything | The bot's name in the developer portal |
+| **Huginn** | The webhook that posts logins, deaths, raids, recaps and titles | Odin's raven of Thought: flies out and tells everyone what happened | `"discord": {"username": "Huginn"}` |
+| **Odin** | Role for the Discord server's owner, given automatically | The Allfather, ruler of Asgard | `"owner_role": true` |
+| **In Valheim** | Role for linked players while they're in the game | (says what it is) | `"online_role": true` |
+| **Heimdall** | Title role: most time played | The watchman who never leaves his post | `"titles": {"enabled": true}` |
+| **Hel** | Title role: most deaths | Ruler of the realm of the dead | 〃 |
+| **Sleipnir** | Title role: most visits | Odin's horse, always carrying riders between the worlds and back | 〃 |
+| **Thor** | Title role: longest single session | Drank from a horn linked to the sea and lowered the ocean | 〃 |
+
+Title roles go to whoever leads that `/valheim top` board at the weekly check
+([details](#title-roles)).
+
+**All of it at once**, in the `admin_bot` block of `config.json` (plus `"username":
+"Huginn"` in the `discord` block):
+```json
+"online_role": true,
+"owner_role": true,
+"titles": { "enabled": true }
+```
+Then `docker compose up -d --force-recreate`. The bot creates the roles itself the first
+time it hands each one out. None of them grant any permissions.
+
+**What it needs:**
+- **Manage Roles** permission, and `guild_id` set.
+- The stats database, for everything except Odin.
+- Players have to run `/valheim link <character>` once to get "In Valheim" or a title.
+
+**Role order** (Server Settings → Roles, top to bottom):
+1. **Muninn**, the bot's own role (it has the bot icon). It must stay **above** every role
+   it hands out.
+2. **Odin**. The bot moves it here when it creates it.
+3. **Heimdall, Hel, Sleipnir, Thor, In Valheim**, in any order.
+
+Roles the bot creates start at the bottom of the list, so they're below its own role and it
+can hand them out. If you drag one above Muninn, the log says `can't give the … role`.
+
+**Renaming and recolouring:**
+- The bot remembers its roles by ID, so you can rename, recolour or reorder them in
+  Discord. The exception: the title posts and `/valheim titles` use the names above.
+- **Display role members separately** is on for the Odin and In Valheim roles when the bot
+  creates them. Turn it on for a title role to list its holder near the top of the member
+  list too.
+- **Renamed the bot?** Its own role keeps the name it had when it was invited. Rename that
+  role by hand: Server Settings → Roles → the role with the bot icon.
 
 ### Testing it
 
@@ -1125,6 +1185,7 @@ or run it in a terminal.
 |---|---|---|
 | `events` | mode default | Log mode: `login`, `logout`, `death`, `respawn`, `server_up`, `join_refused`, and the [extras](#extras-raids-summaries-milestones-recap-board-backups) `raid`, `version_mismatch`, `session_summary`, `welcome`, `milestone`, `weekly_recap`. Count mode: `player_joined`, `player_left`, `server_online`, `server_offline`. |
 | `poll_interval_seconds` | 15 | How often to poll. |
+| `discord.username` | Valheim | Name the webhook posts under (the examples use **Huginn**, see [roles & names](#roles--names)). |
 | `source.offline_after` | 3 | Count mode: failed queries in a row before "offline". |
 | `source.api_key` | — | `steamapi` only; or `STEAM_API_KEY` env var. |
 | `steam.enabled` | false | Pull public Steam achievements onto the page. |

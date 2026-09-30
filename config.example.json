@@ -22,7 +22,7 @@
   },
   "discord": {
     "webhook_url": "https://discord.com/api/webhooks/XXXX/YYYY",
-    "username": "Valheim",
+    "username": "Huginn",
     "embeds": true,
     "show_player_count": true,
     "messages": {
