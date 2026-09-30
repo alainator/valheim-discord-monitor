@@ -55,6 +55,7 @@
     "owner_role": true,
     "link_nickname": false,
     "tidy_notices_hours": 24,
+    "welcome_dm": false,
     "stat_channels": {
       "enabled": false
     },

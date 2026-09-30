@@ -57,6 +57,15 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **A calmer, friendlier feed:** **quiet hours** hold joins and leaves overnight and post
+  them as one summary in the morning, a **digest** groups a burst of joins into one post,
+  and milestones now include **play streaks** ("5-day streak 🔥") and **anniversaries**
+  ([feed options](#quiet-hours-and-digests)).
+- **New commands:** `/muninn compare` (two characters side by side), `/muninn uptime`
+  (how much the server was up, and restarts) and `/odin announce` (post as Huginn, optionally
+  pinging @everyone). There's also an `uptime_week` [stat channel](#stat-channels).
+- **"Come join" DMs:** `/valheim notify crowd 3` DMs you when 3 players are on. And the bot
+  can **DM new Discord members** a welcome with how to join (`welcome_dm`, opt-in).
 - **Commands are split into four groups:** `/valheim` (join, map, link, notify…),
   `/muninn` (stats, top, titles, online), `/warcouncil plan` and `/odin` (admin, hidden from
   members). Each group can be limited to its channel in Discord's settings
@@ -527,9 +536,9 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan` | #🗺️┃war-council and its game-night threads |
-| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup` | Admins, anywhere: replies are private |
+| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce` | Admins, anywhere: replies are private |
 
 **Admins:** `/odin` only works for the users and roles in `admin_user_ids` /
 `admin_role_ids`. Discord also hides it from anyone without **Manage Server**. If one of
@@ -558,8 +567,10 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn online` | Anyone | Who's on right now, and since when | The bot |
 | `/muninn stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen, Steam achievements. No name = your linked character | Stats database |
 | `/muninn top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, or Steam achievements | Stats database |
+| `/muninn compare <player> [other]` | Anyone | Two characters side by side: time played, visits, longest session, deaths, achievements, with the leader of each marked. No `other` = your linked character | Stats database |
+| `/muninn uptime` | Anyone | Share of time the server was up this week, the last 7 and 30 days, with restarts and downtime | Stats database |
 | `/muninn titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
-| `/valheim notify <when> [player]` | Anyone | DM me when the first player joins an empty server, or when a given character joins; `off` / `list` | Stats database |
+| `/valheim notify <when> [player] [players]` | Anyone | DM me when the first player joins an empty server, when `players` are online (`crowd`), or when a given character joins; `off` / `list` | Stats database |
 | `/valheim link <character>` / `unlink` | Anyone | Link your Discord account to your character (stats, role, mentions) | Stats database |
 | `/valheim request-access <character>` | Anyone | New player: "I'll join as …". The admins' refused-join notice then says who it is | Stats database |
 | `/warcouncil plan <title> <when>` | Anyone | Game night with Going / Maybe / Can't buttons, a planning thread and a reminder ping. Several times (`sat 20:00, sun 18:00`) start a poll for the time | Stats database |
@@ -572,6 +583,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/odin update-check` | Admin | Check for a Valheim update now | [host helper](host/README.md) |
 | `/odin restart [minutes] [reason]` | Admin | Restart (installs any waiting update); warns players at N/5/1 min, early if everyone leaves | [host helper](host/README.md) |
 | `/odin restart-cancel` | Admin | Stop a restart countdown | — |
+| `/odin announce <message> [title] [ping]` | Admin | Post an announcement as Huginn in the feed channel; `ping` adds @everyone. `\n` starts a new line | Huginn's webhook |
 | `/odin setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-odin-setup)) | Manage Channels, Manage Roles (Manage Webhooks for Huginn's webhook, Manage Server for Discord's join messages) |
 | `/odin settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
 | `/odin modifier <name> <value>` | Admin | Change a modifier, e.g. `raids more`; `normal` resets it | world settings |
@@ -597,7 +609,8 @@ This takes about five minutes in Discord's developer portal.
      **Client Secret** on the OAuth2 page (32 characters, no dots) won't work.
    - Every **Reset Token** click invalidates the previous token.
    - Treat the token like a password; anyone who has it controls the bot.
-4. Leave the **Privileged Gateway Intents** off; the bot doesn't need them.
+4. Leave the **Privileged Gateway Intents** off; the bot doesn't need them. (Only for
+   [welcome DMs](#players--community): turn on **Server Members Intent**.)
 5. Optional: switch off **Public Bot** so nobody else can invite it. If Discord complains,
    first set **Installation** → **Install Link** to **None**.
 
@@ -804,6 +817,7 @@ voice channels or categories.
 | `peak_today` | Most players online at once today |
 | `hours_week` | Hours played this week (since Monday), all players together |
 | `deaths_week` | Deaths this week |
+| `uptime_week` | Share of this week the server was up, and restarts ("📶 Up 99.4% this week · 1 restart") |
 | `last_raid` | The most recent raid and its day |
 | `next_plan` | The next game night from `/warcouncil plan` |
 | `vikings` | Characters that have ever played |
@@ -966,10 +980,19 @@ These need the stats database (`database.path`), which the bot and the monitor s
 - **Notifications (DMs).**
   - `/valheim notify first` DMs you when someone joins an empty server.
   - `/valheim notify follow Ingrid` DMs you whenever Ingrid joins.
+  - `/valheim notify crowd 3` DMs you "come join!" when 3 players are on (not if you're
+    one of them), at most every 3 hours.
   - `/valheim notify off` stops everything; `list` shows what you have.
 
   At most one DM per player per 30 minutes, so a reconnect doesn't spam. The user needs DMs
   from server members allowed.
+- **Welcome DMs.** With `"welcome_dm": true`, people who join the Discord server get a DM
+  pointing them at `/valheim join`, `request-access` and `link`. Or write your own:
+  `"welcome_dm": "Welcome {member}! Read #rules, then /valheim join."` (`{member}`,
+  `{guild}` and `{server}` are filled in).
+  - This needs the **Server Members Intent**: developer portal → your app → Bot →
+    Privileged Gateway Intents. Without it the bot logs a warning and runs without welcome
+    DMs.
 - **Smoother first joins.** A new player runs `/valheim request-access <character>` before
   joining:
   - the admin channel gets a heads-up;
@@ -1223,7 +1246,7 @@ switched on by adding their name to `events` in `config.json`:
 | `version_mismatch` | ⚠️ "Someone tried to join with a **newer** version of Valheim: the server needs an update." (or *older*: they need to update). At most once an hour. | `Network version check, their:41, mine:40` |
 | `session_summary` | Replaces the plain leave message: "**Ingrid** left Alheim after 2h 14m and died 3 times." | the player's join and leave |
 | `welcome` | Replaces the join message on someone's **first ever** visit: "🎉 **Ingrid** arrived for the first time. Welcome, viking!" | stats database |
-| `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths | stats database |
+| `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths. At login: "**Ingrid** is on a **7-day streak** 🔥" (3, 5, 7, 10, 14, 21, 30… days in a row) or "first set sail here **1 year ago** today 🎂" (100 days, then yearly), at most once a day | stats database |
 | `weekly_recap` | 📜 A weekly embed with a **chart of hours played per day**: top players by time, most deaths, raids, new vikings, total hours, peak online, and exploration ("12 new areas discovered: 3 sunken crypts, 1 fuling village") | stats database, `Placed location` lines |
 | `update` | ✅ "Valheim updated: l-1.0.16 → l-1.0.17" when the server comes back on a new version, plus the [auto-updater](#auto-updates-and-restarts-from-discord)'s "update available" and "installing" posts | `Valheim version:` at boot |
 
@@ -1246,6 +1269,26 @@ was already online when the monitor started gets a plain leave message.
 - It posts once per week, at or after that hour in the container's time zone (`TZ` in `.env`).
 - A restart doesn't post it twice. A missed day is skipped rather than posted late.
 - Quiet weeks with nobody playing post nothing.
+
+### Quiet hours and digests
+
+Two ways to keep the feed calm, in the `discord` section:
+
+```json
+"discord": {
+  "quiet_hours": { "from": "23:00", "to": "08:00", "timezone": "Europe/Oslo" },
+  "digest_seconds": 120
+}
+```
+
+- **Quiet hours:** joins, leaves, session summaries and respawns during that window aren't
+  posted one by one. When it ends, they go out as one "🌙 While it was quiet" post.
+  - Everything else (deaths, raids, restarts) still posts. Choose what's held with
+    `"events": ["login", "logout", "logout_summary", "respawn", "death"]`.
+  - `timezone` is optional (default: the container's `TZ`). The window can cross midnight.
+- **Digest:** joins and leaves are collected for `digest_seconds` after the first one, then
+  posted together. Handy when a whole group logs in at once. `0` (default) posts each one.
+- Pings for linked players aren't sent for held or digested posts.
 
 ### Status board
 
@@ -1649,7 +1692,7 @@ or run it in a terminal.
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
 | `admin_bot.map.seed` | "" | Use this seed instead of reading it from the world file. |
 | `admin_bot.link_nickname` | false | `/valheim link` sets the member's server nickname to their character, if they have no nickname yet (needs Manage Nicknames; the server owner's can't be changed). |
-| `admin_bot.command_channels` | true | Send `stats`, `top`, `titles`, `online` and `plan` to their home channel (from `/odin setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
+| `admin_bot.command_channels` | true | Send `stats`, `top`, `titles`, `online`, `compare`, `uptime` and `plan` to their home channel (from `/odin setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
 | `admin_bot.tidy_notices_hours` | 24 | Delete refused-join notices this long after someone pressed Permit, Ban or Ignore (needs Manage Messages). `0` keeps them. |
 | `admin_bot.titles.enabled` | false | Weekly title roles for the `/muninn top` leaders. |
 | `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |
@@ -1662,6 +1705,9 @@ or run it in a terminal.
 | `admin_bot.world_settings.file` | `/valheim_home/world-settings.env` | The host's world settings file, as mounted in the container (read-only). |
 | `discord.embeds` | true | Coloured embed vs plain text. |
 | `discord.show_player_count` | true | Footer with the current online count. |
+| `discord.quiet_hours` | — | `{"from": "23:00", "to": "08:00", "timezone": …, "events": […]}`: hold those posts and summarise them when it ends ([quiet hours](#quiet-hours-and-digests)). |
+| `discord.digest_seconds` | 0 | Group joins and leaves within this many seconds into one post. |
+| `admin_bot.welcome_dm` | false | `true` or your own text: DM people who join the Discord server (needs the Server Members Intent). |
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |
 | `state_file` | `monitor_state.json` | Where the read offset is remembered. |
 | `parser_state_file` | `parser_state.json` (next to `state_file`) | Who's online and which player IDs are whose, so a restart doesn't lose track of them. |

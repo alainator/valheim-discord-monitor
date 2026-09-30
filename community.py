@@ -128,17 +128,44 @@ def set_follow(conn, user_id, player: str, on: bool) -> None:
     conn.commit()
 
 
+def crowd_thresholds(conn) -> dict:
+    """{user_id: players} for "DM me when this many are online" (kept in meta)."""
+    import json
+    try:
+        return {str(k): int(v) for k, v in json.loads(get_meta(conn, "notify_crowd") or "{}").items()}
+    except (ValueError, TypeError):
+        return {}
+
+
+def set_notify_crowd(conn, user_id, players: Optional[int]) -> None:
+    import json
+    crowd = crowd_thresholds(conn)
+    if players:
+        crowd[str(user_id)] = int(players)
+    else:
+        crowd.pop(str(user_id), None)
+    set_meta(conn, "notify_crowd", json.dumps(crowd))
+
+
+def who_to_nudge(conn, before: int, now: int, online: list = ()) -> list:
+    """Users whose "this many online" threshold the count just reached (before < n <= now),
+    except those whose own character is one of the players online."""
+    here = {linked_user(conn, p) for p in online}
+    return [uid for uid, n in crowd_thresholds(conn).items() if before < n <= now and uid not in here]
+
+
 def notify_off(conn, user_id) -> None:
     conn.execute("DELETE FROM notify_first WHERE user_id = ?", (str(user_id),))
     conn.execute("DELETE FROM follows WHERE user_id = ?", (str(user_id),))
     conn.commit()
+    set_notify_crowd(conn, user_id, None)
 
 
 def my_notifications(conn, user_id) -> dict:
     first = bool(_one(conn, "SELECT 1 AS x FROM notify_first WHERE user_id = ?", (str(user_id),)))
     follows = [r["player"] for r in _rows(conn, "SELECT player FROM follows WHERE user_id = ? ORDER BY player",
                                           (str(user_id),))]
-    return {"first": first, "follows": follows}
+    return {"first": first, "follows": follows, "crowd": crowd_thresholds(conn).get(str(user_id))}
 
 
 def who_to_notify(conn, player: str, server_was_empty: bool) -> dict:
@@ -354,6 +381,91 @@ def render_unlocks(conn, steam_id: str, unlocks: list) -> dict:
     if icon:
         out["thumbnail"] = {"url": icon}
     return {k: v for k, v in out.items() if v is not None}
+
+
+# ---------------------------------------------------------------------------
+# Streaks, anniversaries, comparisons, uptime
+# ---------------------------------------------------------------------------
+STREAK_MARKS = (3, 5, 7, 10, 14, 21, 30, 50, 75, 100)
+
+
+def play_days(conn, player: str, offset: int = 0) -> set:
+    """The local dates a character started a session on (log time + offset = real time)."""
+    return {_dt.datetime.fromtimestamp(r["login_at"] + offset).astimezone().date()
+            for r in _rows(conn, "SELECT login_at FROM play_sessions WHERE player = ? COLLATE NOCASE", (player,))}
+
+
+def streak(conn, player: str, today: _dt.date, offset: int = 0) -> int:
+    """Days in a row, up to and including today, with at least one session."""
+    days, n = play_days(conn, player, offset), 0
+    while today - _dt.timedelta(days=n) in days:
+        n += 1
+    return n
+
+
+def anniversary(first_seen: _dt.date, today: _dt.date) -> Optional[str]:
+    """ "100 days" / "1 year" / "2 years" when today is that day since the first visit."""
+    if (today - first_seen).days == 100:
+        return "100 days"
+    years = today.year - first_seen.year
+    if years >= 1 and (today.month, today.day) == (first_seen.month, first_seen.day):
+        return f"{years} year{'s' if years > 1 else ''}"
+    return None
+
+
+def login_milestone(conn, player: str, now: _dt.datetime, offset: int = 0) -> Optional[str]:
+    """A streak or anniversary worth announcing at this login, at most once per player per
+    day (remembered in meta), or None."""
+    today = now.date()
+    key = f"login_milestone:{player.lower()}"
+    if get_meta(conn, key) == today.isoformat():
+        return None
+    detail = None
+    n = streak(conn, player, today, offset)
+    if n in STREAK_MARKS:
+        detail = f"is on a **{n}-day streak** 🔥"
+    first = _one(conn, "SELECT MIN(login_at) AS t FROM play_sessions WHERE player = ? COLLATE NOCASE", (player,))
+    if not detail and first and first["t"]:
+        when = anniversary(_dt.datetime.fromtimestamp(first["t"] + offset).astimezone().date(), today)
+        if when:
+            detail = f"first set sail here **{when} ago** today 🎂"
+    if detail:
+        set_meta(conn, key, today.isoformat())
+    return detail
+
+
+def render_compare(a: dict, b: dict) -> dict:
+    """/muninn compare: two player_stats() side by side, with the leader of each row marked."""
+    rows = [("Time played", "seconds", _dur), ("Visits", "sessions", str), ("Longest session", "longest", _dur),
+            ("Deaths", "deaths", str)]
+    lines = []
+    for label, key, fmt in rows:
+        x, y = a.get(key) or 0, b.get(key) or 0
+        mark = (" ⬅️", "") if x > y else ("", " ➡️") if y > x else ("", "")
+        lines.append(f"**{label}**: {fmt(x)}{mark[0]} · {fmt(y)}{mark[1]}")
+    ax, bx = (a.get("steam") or {}).get("unlocked"), (b.get("steam") or {}).get("unlocked")
+    if ax is not None or bx is not None:
+        lines.append(f"**Achievements**: {ax if ax is not None else '-'} · {bx if bx is not None else '-'}")
+    return {"title": f"⚔️ {a['player']} vs {b['player']}", "color": 0xC27C0E, "description": "\n".join(lines)}
+
+
+def uptime(conn, since: int, until: int) -> dict:
+    """Share of [since, until] the server was up, from the "up"/"down" server events
+    (log timestamps). {"fraction", "restarts", "down_seconds"}."""
+    state = _one(conn, "SELECT kind FROM server_events WHERE kind IN ('up', 'down') AND at < ? "
+                       "ORDER BY at DESC, id DESC LIMIT 1", (since,))
+    up, t, down, restarts = (state or {}).get("kind", "up") == "up", since, 0, 0
+    for r in _rows(conn, "SELECT at, kind FROM server_events WHERE kind IN ('up', 'down') AND at >= ? AND at <= ? "
+                         "ORDER BY at, id", (since, until)):
+        if not up:
+            down += r["at"] - t
+        if r["kind"] == "down" and up:
+            restarts += 1
+        up, t = r["kind"] == "up", r["at"]
+    if not up:
+        down += until - t
+    span = max(until - since, 1)
+    return {"fraction": max(0.0, 1 - down / span), "restarts": restarts, "down_seconds": down}
 
 
 # ---------------------------------------------------------------------------

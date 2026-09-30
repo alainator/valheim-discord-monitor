@@ -45,7 +45,7 @@ class LinksAndNotifyTest(DB):
         self.assertEqual(community.who_to_notify(self.c, "Ingrid", True), {"1": "first", "2": "follow"})
         self.assertEqual(community.who_to_notify(self.c, "Ingrid", False), {"2": "follow"})
         community.notify_off(self.c, 2)
-        self.assertEqual(community.my_notifications(self.c, 2), {"first": False, "follows": []})
+        self.assertEqual(community.my_notifications(self.c, 2), {"first": False, "follows": [], "crowd": None})
 
     def test_access_requests_expire(self):
         community.request_access(self.c, "Newbie", 9)

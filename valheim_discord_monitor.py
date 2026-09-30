@@ -466,13 +466,21 @@ def _escape_md(text: Optional[str]) -> Optional[str]:
     return re.sub(r"([\\*_~`|>])", r"\\\1", text) if text else text
 
 
+def _hhmm(text: str) -> int:
+    """"23:30" -> minutes after midnight."""
+    h, m = str(text).strip().split(":")
+    if not (0 <= int(h) < 24 and 0 <= int(m) < 60):
+        raise ValueError(text)
+    return int(h) * 60 + int(m)
+
+
 class Discord:
     COLORS = {"login": 0x57F287, "logout": 0x95A5A6, "death": 0xED4245, "respawn": 0xFEE75C, "server_up": 0x5865F2,
               "player_joined": 0x57F287, "player_left": 0x95A5A6, "server_online": 0x57F287, "server_offline": 0xED4245,
               "server_restart": 0xE0A13C, "maintenance_start": 0x5865F2, "maintenance_done": 0x57F287,
               "maintenance_failed": 0xED4245, "maintenance_pending": 0xE0A13C, "join_refused": 0xE67E22,
               "raid": 0xED4245, "version_mismatch": 0xE0A13C, "logout_summary": 0x95A5A6, "welcome": 0x57F287,
-              "milestone": 0xF1C40F, "weekly_recap": 0x5865F2, "update": 0x5865F2,
+              "milestone": 0xF1C40F, "weekly_recap": 0x5865F2, "announcement": 0xC27C0E, "update": 0x5865F2,
               "titles": 0xF1C40F, "achievement": 0xE67E22}
     EMOJI = {"login": "🟢", "logout": "🔴", "death": "💀", "respawn": "🔥", "server_up": "🛡️",
              "player_joined": "🟢", "player_left": "🔴", "server_online": "🟢", "server_offline": "🔴",
@@ -507,14 +515,72 @@ class Discord:
         "maintenance_failed": "**{server}** maintenance had a problem: {detail}",
     }
 
+    # Chatty events that quiet hours hold back and digests group, unless configured otherwise.
+    BATCHED = ("login", "logout", "logout_summary", "respawn")
+
     def __init__(self, webhook_url: str, username: str = "Valheim", show_count: bool = True,
-                 use_embeds: bool = True, messages: Optional[dict] = None):
+                 use_embeds: bool = True, messages: Optional[dict] = None,
+                 quiet_hours: Optional[dict] = None, digest_seconds: float = 0, clock=time.time):
         self.url = webhook_url
         self.on_posted = None            # callable(kind, channel_id, message_id), set by the admin bot
         self.username = username
         self.show_count = show_count
         self.use_embeds = use_embeds
         self.messages = {**self.DEFAULT_MESSAGES, **(messages or {})}
+        self.clock = clock
+        # Quiet hours: {"from": "23:00", "to": "08:00", "timezone": "...", "events": [...]}.
+        # Those events are held and posted as one summary when quiet hours end.
+        q = quiet_hours or {}
+        self.quiet = None
+        if q.get("from") and q.get("to"):
+            try:
+                self.quiet = (_hhmm(q["from"]), _hhmm(q["to"]))
+            except ValueError:
+                log.warning("quiet_hours from/to must be HH:MM; quiet hours are off")
+        self.quiet_tz = None
+        if q.get("timezone"):
+            try:
+                from zoneinfo import ZoneInfo
+                self.quiet_tz = ZoneInfo(q["timezone"])
+            except Exception:  # noqa: BLE001
+                log.warning("Unknown quiet_hours.timezone %r; using the local time zone", q["timezone"])
+        self.quiet_events = set(q.get("events") or self.BATCHED)
+        # Digest: joins/leaves within digest_seconds of the first one go out as one message.
+        self.digest_seconds = float(digest_seconds or 0)
+        self.held: list = []             # (kind, line) waiting for the end of quiet hours
+        self.digest: list = []           # lines waiting for the digest window to close
+        self.digest_since = 0.0
+
+    def is_quiet(self, now: Optional[datetime] = None) -> bool:
+        if not self.quiet:
+            return False
+        now = now or datetime.fromtimestamp(self.clock(), timezone.utc).astimezone(self.quiet_tz)
+        t, (a, b) = now.hour * 60 + now.minute, self.quiet
+        return a <= t < b if a <= b else t >= a or t < b
+
+    def flush(self, now: Optional[datetime] = None) -> None:
+        """Post what quiet hours held back (once they're over) and a due digest. Called
+        from the main loop."""
+        if self.held and not self.is_quiet(now):
+            lines, self.held = self.held, []
+            self._post_lines("🌙 While it was quiet", lines)
+        if self.digest and self.clock() - self.digest_since >= self.digest_seconds:
+            lines, self.digest = self.digest, []
+            self._post_lines(None, lines)
+
+    def _post_lines(self, title: Optional[str], lines: list) -> None:
+        if len(lines) > 40:
+            lines = lines[:39] + [f"…and {len(lines) - 39} more"]
+        text = "\n".join(lines)
+        if self.use_embeds:
+            embed = {"description": text[:4000], "color": self.COLORS.get("logout", 0),
+                     "timestamp": datetime.now(timezone.utc).isoformat()}
+            if title:
+                embed["title"] = title
+            payload = {"username": self.username, "embeds": [embed]}
+        else:
+            payload = {"username": self.username, "content": ((f"**{title}**\n" if title else "") + text)[:2000]}
+        self.send(payload)
 
     def post(self, ev: Event, server_name: str, event_filter: set) -> None:
         if ev.kind not in event_filter or ev.kind not in self.messages:
@@ -527,6 +593,14 @@ class Discord:
                             "server": server_name or ev.extra.get("server", "the server")})
         text = self.messages[ev.kind].format_map(fields)
         emoji = self.EMOJI.get(ev.kind, "")
+        if ev.kind in self.quiet_events and self.is_quiet():
+            self.held.append(f"{emoji} {text}".strip())
+            return
+        if self.digest_seconds and ev.kind in self.BATCHED:
+            if not self.digest:
+                self.digest_since = self.clock()
+            self.digest.append(f"{emoji} {text}".strip())
+            return
         footer = f"{ev.extra['count']} player(s) online" if self.show_count and "count" in ev.extra else None
         if self.use_embeds:
             embed = {"description": f"{emoji} {text}".strip(), "color": self.COLORS.get(ev.kind, 0),
@@ -545,13 +619,19 @@ class Discord:
             payload["allowed_mentions"] = {"parse": [], "users": [str(uid)]}
         self.send(payload, kind=ev.kind)
 
-    def post_embed(self, kind: str, embed: dict, event_filter: set, file: Optional[tuple] = None) -> None:
-        """Post a ready-made embed (the weekly recap), optionally with an attached file
-        (name, bytes) that the embed can show as attachment://name."""
+    def post_embed(self, kind: str, embed: dict, event_filter: set, file: Optional[tuple] = None,
+                   content: Optional[str] = None, allowed_mentions: Optional[dict] = None) -> None:
+        """Post a ready-made embed (the weekly recap, an /odin announce), optionally with an
+        attached file (name, bytes) that the embed can show as attachment://name."""
         if kind not in event_filter:
             return
         embed = {"color": self.COLORS.get(kind, 0), "timestamp": datetime.now(timezone.utc).isoformat(), **embed}
-        self.send({"username": self.username, "embeds": [embed]}, kind=kind, file=file)
+        payload = {"username": self.username, "embeds": [embed]}
+        if content:
+            payload["content"] = content
+        if allowed_mentions:
+            payload["allowed_mentions"] = allowed_mentions
+        self.send(payload, kind=kind, file=file)
 
     def send(self, payload: dict, kind: Optional[str] = None, file: Optional[tuple] = None) -> None:
         if not self.url:
@@ -1227,6 +1307,9 @@ def record_event(store, ev: "Event") -> None:
         store.server_event("location", f"{ev.extra['loc']}|{ev.extra['zone']}", ts)
     elif ev.kind == "count" and ev.extra.get("count") is not None:
         store.concurrency(int(ev.extra["count"]), ts)
+    elif ev.kind in ("server_restart", "server_online"):
+        # For /muninn uptime: when the server went down and came back.
+        store.server_event("down" if ev.kind == "server_restart" else "up", None, ts)
 
 
 def load_config(path: str) -> dict:
@@ -1287,7 +1370,8 @@ def main():
         webhook_url = ""
     discord = Discord(webhook_url, d.get("username", "Valheim"),
                       show_count=d.get("show_player_count", True), use_embeds=d.get("embeds", True),
-                      messages=d.get("messages"))
+                      messages=d.get("messages"), quiet_hours=d.get("quiet_hours"),
+                      digest_seconds=d.get("digest_seconds", 0))
 
     def set_webhook(url: str) -> None:
         """Called by the admin bot after it created Huginn's webhook: use it and keep it."""
@@ -1542,7 +1626,7 @@ def main():
             upd.bot_dir = ""
     if admin:
         admin.attach(live=live, backups=backups, updater=upd, announce=post_update,
-                     post_embed=lambda embed: discord.post_embed("titles", embed, {"titles"}),
+                     post_embed=lambda embed, kind="titles", **kw: discord.post_embed(kind, embed, {kind}, **kw),
                      db_path=db_cfg["path"] if db_enabled else None, webhook_url=discord.url,
                      set_webhook=set_webhook)
         discord.on_posted = admin.react_to        # the bot reacts to some of Huginn's posts
@@ -1578,9 +1662,10 @@ def main():
                 log.warning("DB write failed for %s: %s", ev.kind, e)
         prev_version = live.version
         was_empty = live.count == 0 and not live.online
+        before = max(live.count or 0, len(live.online))
         summary = live.observe(ev)
         if admin and ev.kind == "login":
-            admin.on_login(ev.player, was_empty)
+            admin.on_login(ev.player, was_empty, before, max(live.count or 0, len(live.online)), list(live.online))
         elif admin and ev.kind == "logout":
             admin.on_logout(ev.player)
         elif admin and ev.kind == "version_mismatch" and ev.extra.get("platform_id"):
@@ -1613,6 +1698,17 @@ def main():
             discord.post(Event("version_mismatch", None, {**ev.extra, "detail": detail}), server_name, events)
         else:
             discord.post(ev, server_name, events)
+        if store and "milestone" in events and ev.kind == "login" and not first_visit:
+            try:
+                import community
+                off = int(store.get_meta("log_clock_offset") or 0)
+                detail = community.login_milestone(store.conn, ev.player, datetime.now().astimezone(), off)
+            except Exception as e:  # noqa: BLE001
+                log.debug("streak check failed: %s", e)
+                detail = None
+            if detail:
+                discord.post(Event("milestone", ev.player, {"detail": detail, "mention": mention_for(ev.player)}),
+                             server_name, events)
         if store and "milestone" in events and ev.kind in ("logout", "death") and not ev.extra.get("stale"):
             totals = stats_db.player_totals(store.conn, ev.player)
             detail = None
@@ -1678,6 +1774,7 @@ def main():
                         booted = True
             backoff = interval
             save_parser_state()
+            discord.flush()
             now = time.time()
             count = parser.s.server_count
             if count is None and (parser.s.online or booted):
