@@ -57,6 +57,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **The bot handles Huginn's webhook:** `/valheim setup` moves it into #huginns-watch, or
+  creates it on a fresh install, and the bot warns you at start-up if it posts into the
+  private admin channel ([server setup](#server-setup-valheim-setup)).
 - **Discord's own join messages** ("Yay you made it, …") no longer end up hidden in the
   private admin channel: `/valheim setup` moves them to #the-gates
   ([server setup](#server-setup-valheim-setup)).
@@ -161,7 +164,9 @@ if you enable the admin bot, edits the ban and permitted lists in the save dir.
    ```
    - In `config.json`, set `server_name`.
    - In `.env`, set `DISCORD_WEBHOOK_URL` (channel → Edit Channel → Integrations →
-     Webhooks → New Webhook → Copy Webhook URL) and `TZ`.
+     Webhooks → New Webhook → Copy Webhook URL) and `TZ`. Using the admin bot? You can
+     leave the webhook out: [`/valheim setup`](#server-setup-valheim-setup) creates one in
+     the right channel.
    - If you don't want the admin bot yet, set `admin_bot.enabled` to `false`.
      Otherwise follow [Setting up the bot](#setting-up-the-bot).
 
@@ -225,6 +230,7 @@ Keep both in `.env` only:
 - `.env` wins over `config.json`: when `DISCORD_WEBHOOK_URL` or `DISCORD_BOT_TOKEN` is
   set there, `webhook_url` / `admin_bot.token` in `config.json` are ignored.
 - `.env` and `config.json` are git-ignored, so neither is committed. Keep it that way.
+  The same goes for `webhook.json`, where the bot keeps a webhook it created.
 - When asking for help, share `config.json` without the secrets, and never paste `.env`.
   To check that a token is loaded without printing it, use the
   [length check](#troubleshooting) instead.
@@ -523,7 +529,7 @@ in `admin_user_ids` / `admin_role_ids`. Replies to admin commands are only visib
 | `/valheim update-check` | Admin | Check for a Valheim update now | [host helper](host/README.md) |
 | `/valheim restart [minutes] [reason]` | Admin | Restart (installs any waiting update); warns players at N/5/1 min, early if everyone leaves | [host helper](host/README.md) |
 | `/valheim restart-cancel` | Admin | Stop a restart countdown | — |
-| `/valheim setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-valheim-setup)) | Manage Channels, Manage Roles (Manage Server to move Discord's join messages) |
+| `/valheim setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-valheim-setup)) | Manage Channels, Manage Roles (Manage Webhooks for Huginn's webhook, Manage Server for Discord's join messages) |
 | `/valheim settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
 | `/valheim modifier <name> <value>` | Admin | Change a modifier, e.g. `raids more`; `normal` resets it | world settings |
 | `/valheim preset <name>` | Admin | Change the preset; `default` removes it | world settings |
@@ -562,7 +568,9 @@ This takes about five minutes in Discord's developer portal.
    - **Manage Roles**, for the ["In Valheim", Odin and title roles](#roles--names);
    - **Manage Events**, only if game nights should create Discord Events;
    - **Manage Server**, only if `/valheim setup` should move Discord's join messages
-     ("Yay you made it") out of a private channel.
+     ("Yay you made it") out of a private channel;
+   - **Manage Webhooks**, so `/valheim setup` can create Huginn's webhook or move it to
+     #huginns-watch.
 4. Open the generated URL, pick your Discord server, and click **Authorize**.
 
 **3. Make a private admin channel.** For example `#valheim-admin`, with Private Channel on.
@@ -784,9 +792,16 @@ The [stat channels](#stat-channels) stay on top.
   Channels", "Voice Channels") and common names (`rules`, `memes`, `bot-commands`, `lfg`,
   `afk`…).
 - **It knows the bot's own channels:** the admin channel (`channel_id`), and the channel
-  Huginn's webhook posts to (looked up from the webhook). If the webhook posts into your
-  general chat, that stays your chat; a new #huginns-watch is created, and the preview
-  tells you how to move the webhook there.
+  Huginn's webhook posts to (looked up from the webhook).
+- **It takes care of Huginn's webhook:**
+  - **Moves it.** If the webhook posts anywhere but #huginns-watch (your general chat, or
+    the admin channel where only admins would see it), it's moved there. That channel keeps
+    its job. The URL doesn't change, so there's nothing to update in `.env`.
+  - **Creates it.** With no webhook URL configured at all, setup creates a "Huginn" webhook
+    in #huginns-watch and the monitor starts using it. Its URL is kept in `webhook.json`,
+    git-ignored and readable only by its owner.
+  - Both need **Manage Webhooks**; without it, the result says how to do it by hand. Undo
+    moves the webhook back.
 - **It sets topics** on text channels that don't have one, and keeps topics you wrote.
 - **Permissions:** Odin's Seat is made private (only admins and the bot can see it), and
   #runestone is read-only for members. Other channels keep their permissions.
@@ -801,8 +816,9 @@ The [stat channels](#stat-channels) stay on top.
   renamed back. A second run on an organised server changes nothing.
 
 **Needs:** Manage Channels and Manage Roles (Discord needs Manage Roles to change channel
-permissions). **Manage Server** is optional: it only lets setup move Discord's join
-messages; without it you're told to do that by hand. To make the Fishing Hut the server's
+permissions). Optional: **Manage Webhooks** to create or move Huginn's webhook, and
+**Manage Server** to move Discord's join messages; without them you're told what to do by
+hand. To make the Fishing Hut the server's
 AFK channel, set it yourself in Server Settings → Overview → Inactive Channel.
 
 ### Players & community
@@ -1053,6 +1069,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | A stat channel shows an old value | Discord's limit of 2 renames per channel per 10 minutes | Expected: it catches up within 5 minutes |
 | `can't give the owner role` | The bot lacks Manage Roles, or the Odin role was moved above the bot's role | Give it Manage Roles and keep the bot's role above Odin |
 | "In Valheim" stays on someone who quit | Before this version: they left while the monitor was restarting. Otherwise Valheim didn't log who left | Update; the bot's 5-minute check clears it. If it still happens, check `docker compose logs \| grep "didn't say who"` and share those lines in an issue |
+| Logins, deaths and other posts show up in the admin channel, not #huginns-watch | The webhook was created in the admin channel; a webhook always posts where it was made, whatever `config.json` says. The bot warns about this at start-up | `/valheim setup apply` moves it (needs Manage Webhooks), or channel settings → Integrations → Webhooks → Huginn → Channel |
 | Discord's "Yay you made it" join messages only show up in the admin channel | The server's System Messages Channel is the admin channel, which setup made private | Server Settings → Engagement → System Messages Channel → #the-gates. Or give the bot Manage Server and run `/valheim setup apply` again |
 | `/valheim setup` says some changes failed | The bot lacks Manage Channels or Manage Roles, or a channel's permissions deny it | Give its role both permissions (Server Settings → Roles), then run `/valheim setup apply` again; it only redoes what's missing |
 | `/valheim setup` picked the wrong channel for a slot | It matched by name | Run `/valheim setup undo`, rename that channel so it doesn't match (or give the right one the slot's name, e.g. `rules`), then preview and apply again |
@@ -1526,6 +1543,7 @@ or run it in a terminal.
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |
 | `state_file` | `monitor_state.json` | Where the read offset is remembered. |
 | `parser_state_file` | `parser_state.json` (next to `state_file`) | Who's online and which player IDs are whose, so a restart doesn't lose track of them. |
+| `webhook_file` | `webhook.json` (next to `state_file`) | The webhook the bot created with `/valheim setup`, used when `DISCORD_WEBHOOK_URL` isn't set. |
 
 ## Notes
 - Names come from the character, not the Steam account.

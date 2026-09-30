@@ -106,6 +106,10 @@ class ApplyUndoTest(unittest.TestCase):
                 self.category_id, self.overwrites, self.topic = category_id, overwrites or {}, topic
                 self.position = cid
 
+            async def create_webhook(self, name=None, reason=None):
+                self.guild.hooks.append((self.id, name))
+                return type("Hook", (), {"url": f"https://discord.com/api/webhooks/77/tok-{self.id}"})()
+
             async def edit(self, name=None, category=False, overwrites=None, topic=False, reason=None):
                 if name is not None:
                     self.name = name.lower().replace(" ", "-") if self.type == T.text else name
@@ -125,12 +129,14 @@ class ApplyUndoTest(unittest.TestCase):
 
         class Guild:
             id = 9
+            hooks: list
             system_channel_id = 41             # Discord's join messages go to the admin channel
 
             async def edit(self, system_channel=None, reason=None):
                 self.system_channel_id = system_channel.id if system_channel else None
 
             def __init__(self):
+                self.hooks = []
                 self.default_role = discord.Object(1, type=discord.Role)
                 self.me = discord.Object(2, type=discord.Member)
                 self._state = type("S", (), {"http": Http()})()
@@ -177,7 +183,8 @@ class ApplyUndoTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             bot = admin_bot.AdminBot({"token": "x", "channel_id": "41", "guild_id": "9", "admin_user_ids": [5],
                                       "save_dir": d}, "S")
-            bot.attach(db_path=os.path.join(d, "s.db"))
+            given = []
+            bot.attach(db_path=os.path.join(d, "s.db"), set_webhook=given.append)     # no webhook yet
 
             async def run():
                 p = await bot._layout_plan(guild)
@@ -186,6 +193,11 @@ class ApplyUndoTest(unittest.TestCase):
             p, problems = asyncio.run(run())
             self.assertEqual(problems, [])
             byid = {c.id: c for c in guild.all}
+            # No webhook was configured: Huginn's is created in #huginns-watch and handed over.
+            feed = next(c for c in guild.all if c.name == "🐦┃huginns-watch")
+            self.assertEqual(guild.hooks, [(feed.id, "Huginn")])
+            self.assertEqual(given, [f"https://discord.com/api/webhooks/77/tok-{feed.id}"])
+            self.assertIn("will be created in #🐦┃huginns-watch", __import__("server_layout").render(p))
             self.assertEqual(byid[40].name, "🍺┃mead-hall")
             self.assertEqual(byid[41].name, "👁️┃odins-seat")
             self.assertEqual(byid[50].name, "🍺 The Longhouse")
@@ -215,6 +227,57 @@ class ApplyUndoTest(unittest.TestCase):
             self.assertEqual(byid[41].overwrites, {})             # permissions back as they were
             self.assertEqual(guild.system_channel_id, 41)
             self.assertGreaterEqual(len(created), 10)             # listed, not deleted
+
+
+    def test_webhook_in_the_admin_channel_moves_and_undo_moves_it_back(self):
+        import admin_bot
+        guild = self.fake_guild()
+
+        class Hook:
+            channel_id = 41                        # made in the admin channel by mistake
+
+            async def edit(self, channel=None, reason=None):
+                self.channel_id = channel.id
+        hook = Hook()
+        with tempfile.TemporaryDirectory() as d:
+            bot = admin_bot.AdminBot({"token": "x", "channel_id": "41", "guild_id": "9", "admin_user_ids": [5],
+                                      "save_dir": d}, "S")
+            bot.attach(db_path=os.path.join(d, "s.db"), webhook_url="https://discord.com/api/webhooks/555/abc")
+            bot._feed_channel_id = lambda: 41
+
+            async def fetch_webhook(wid):
+                self.assertEqual(wid, 555)
+                return hook
+            bot.client = type("C", (), {"fetch_webhook": staticmethod(fetch_webhook)})()
+
+            async def run():
+                p = await bot._layout_plan(guild)
+                return p, await bot._layout_apply(guild, p)
+            p, problems = asyncio.run(run())
+            self.assertEqual(problems, [])
+            byid = {c.id: c for c in guild.all}
+            self.assertEqual(byid[41].name, "👁️┃odins-seat")            # the admin channel keeps its job
+            feed = next(c for c in guild.all if c.name == "🐦┃huginns-watch")
+            self.assertEqual(hook.channel_id, feed.id)                    # and Huginn moved out of it
+            self.assertEqual(guild.hooks, [])                             # nothing new created
+            self.assertIn("it'll be moved to #🐦┃huginns-watch", __import__("server_layout").render(p))
+            asyncio.run(bot._layout_undo(guild))
+            self.assertEqual(hook.channel_id, 41)
+
+
+    def test_startup_warns_when_the_webhook_posts_into_the_admin_channel(self):
+        import admin_bot
+        with tempfile.TemporaryDirectory() as d:
+            bot = admin_bot.AdminBot({"token": "x", "channel_id": "41", "guild_id": "9", "admin_user_ids": [5],
+                                      "save_dir": d}, "S")
+            told = []
+            bot.post_admin = told.append
+            for where, warned in ((41, True), (42, False), (None, False)):
+                told.clear()
+                bot._feed_channel_id = lambda where=where: where
+                asyncio.run(bot._check_webhook())
+                self.assertEqual(bool(told), warned, where)
+        self.assertEqual(told, [])
 
 
 if __name__ == "__main__":
