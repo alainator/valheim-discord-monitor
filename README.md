@@ -55,6 +55,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Refused-join notices say who it is** (the linked Discord member, other characters on that
+  account), and the player gets a DM explaining why. Players on the wrong game version get a
+  DM too. The stat channels gain **☀️ Day 142**
+  ([join alerts](#join-attempt-alerts--discord-admin-bot), [stat channels](#stat-channels)).
 - **"In Valheim" no longer gets stuck.** The monitor remembers who's online across restarts
   and rebuilds, and every 5 minutes the bot takes the role from anyone who isn't in the
   game. Roles already stuck clear on their own after updating
@@ -454,6 +458,31 @@ lists are doing their job. There are two ways to receive it:
   the server is open to everyone who isn't banned, and adding the first ID would lock
   everyone else out, so in that case Permit only unbans.
 
+  **Who is it?** The monitor remembers every platform ID (Steam, Xbox, PlayStation,
+  Switch) each character has joined with. So the notice also says, when it knows:
+  - the **Discord member**, if that account's character is linked (`/valheim link`) or was
+    announced with `/valheim request-access`;
+  - the **other characters** that account has played as.
+
+  A new name on a known account, or a friend's friend on a new account, is easy to tell
+  apart before you click.
+
+  **The player is told why.** If the bot knows who it is, it DMs them: "Your join to
+  Alheim as Frankeem was refused: you're not on the permitted list. The admins have been
+  told…". Banned players aren't told. There's at most one DM per player per 30 minutes,
+  and the notice says when a DM was sent.
+
+  **Wrong game version.** When someone's game is older or newer than the server's, the
+  public channel already gets a note (`version_mismatch` in `events`). If the bot knows who
+  it is, from the crossplay handshake's platform ID, it also DMs them: update the game, or
+  wait for the server to update.
+
+  **Why not a Steam-verified whitelist?** Some bots let players add themselves using the
+  Steam account linked in their Discord profile. Reading that needs Discord's OAuth login,
+  and so a public HTTPS website for the login redirect. That's a lot to run next to a game
+  server, so this bot keeps the admin in the loop with Permit/Ban and shows who the player
+  is instead.
+
 The bot edits the list files directly, so it has to run **on the same machine as
 the server** (self-hosted, `file` source) with write access to the save dir. It
 writes Steam IDs **in the style your list files already use**. Valheim 1.0's lists say
@@ -637,6 +666,7 @@ voice channels or categories.
   🟢 Server online · l-1.0.16
   🔑 Join code: 482913
   ⏱ Up 3 d
+  ☀️ Day 142
   💾 World saved today 12:04 (1.2 s)
   🗄 Backup: today 04:10
   💽 Disk free: 412 GB
@@ -663,6 +693,7 @@ voice channels or categories.
 | `server` | Online / offline and the version; ⬆️ when the updater has found an update |
 | `join_code` | The crossplay join code (known after the first join since the last restart) |
 | `uptime` | Time since the server started |
+| `day` | The in-game day. Valheim logs it when everyone sleeps, so it updates each morning in game |
 | `saved` | The last world save and how long it took |
 | `backup` | When Valheim last made a world backup |
 | `disk` | Free space on the save disk |
@@ -701,8 +732,8 @@ within a minute.
 - **Update speed:** Discord allows each channel 2 renames per 10 minutes, so a channel lags
   a change by up to 5 minutes. Values are kept coarse (hours, days) so they don't hit the
   limit.
-- The live channels (`players`, `server`, `join_code`, `uptime`, `saved`, `backup`, `disk`,
-  `last_raid`) and Odin don't need the stats database; the rest do.
+- The live channels (`players`, `server`, `join_code`, `uptime`, `day`, `saved`, `backup`,
+  `disk`, `last_raid`) and Odin don't need the stats database; the rest do.
 
 ### Server setup: `/valheim setup`
 

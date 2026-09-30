@@ -870,8 +870,61 @@ class AdminBot:
             if asked:
                 embed.add_field(name="Requested by", value=f"<@{asked}> (`/valheim request-access`). "
                                 "Permit links the character to them and lets them know.", inline=False)
+        who = {"characters": [], "users": []}
+        if self.db_path:
+            who = community.who_is(self.db, pid, name)
+            known = [u for u in who["users"] if u != asked]
+            others = [c for c in who["characters"] if c.lower() != name.lower()]
+            if known or others:
+                lines = []
+                if known:
+                    lines.append("Discord: " + ", ".join(f"<@{u}>" for u in known) + " (linked character)")
+                if others:
+                    lines.append("Played before as: " + ", ".join(f"**{discord.utils.escape_markdown(c)}**"
+                                                                  for c in others[:5]))
+                embed.add_field(name="Who this is", value="\n".join(lines)[:1024], inline=False)
+        # Tell the player why, unless they're banned (no need to explain that to them).
+        if who["users"] and "ban" not in reason:
+            why = f"you're {reason}" if reason.startswith("not ") else "the server refused it"
+            if await self._dm_once(who["users"][0], "refused", (
+                    f"🚪 Your join to **{self.server_name}** as **{name}** was refused: {why}. "
+                    "The admins have been told and can let you in from Discord. You'll get a DM when they "
+                    "do if you've used `/valheim request-access`.")):
+                embed.set_footer(text="The player was told why by DM.")
         embed.timestamp = discord.utils.utcnow()
-        await channel.send(embed=embed, view=self._buttons(pid))
+        await channel.send(embed=embed, view=self._buttons(pid),
+                           allowed_mentions=discord.AllowedMentions.none())
+
+    async def _dm_once(self, uid, reason: str, text: str, every: float = 1800) -> bool:
+        """A DM at most once per `every` seconds for the same user and reason."""
+        now = time.time()
+        if now - self._dm_sent.get((str(uid), reason), 0) < every:
+            return False
+        self._dm_sent[(str(uid), reason)] = now
+        return await self._dm(uid, text)
+
+    def notify_version(self, extra: dict) -> None:
+        """Thread-safe: someone tried to join with another game version. If the bot knows
+        who (their platform id matches a linked or requested character), DM them."""
+        if self.loop and self.ready.is_set() and self.db_path:
+            asyncio.run_coroutine_threadsafe(self._version_dm(extra), self.loop)
+
+    async def _version_dm(self, extra: dict) -> None:
+        import community
+        try:
+            who = community.who_is(self.db, extra.get("platform_id"))
+            if not who["users"]:
+                return
+            if extra.get("newer"):
+                advice = "Your game is newer than the server's. The server will update soon; try again later."
+            else:
+                advice = ("Your game is older than the server's. Update Valheim (on PC restart Steam; on "
+                          "Xbox, PlayStation or Switch check for updates), then join again.")
+            await self._dm_once(who["users"][0], "version", f"⚠️ Couldn't join **{self.server_name}**: "
+                                f"game version mismatch (yours: {extra.get('their')}, server: "
+                                f"{extra.get('mine')}). {advice}")
+        except Exception as e:  # noqa: BLE001
+            log.warning("admin_bot: version-mismatch DM failed: %s", e)
 
     async def _welcome_requester(self, name: Optional[str]) -> str:
         """After a Permit: link the character to whoever asked for access as it, and DM them."""

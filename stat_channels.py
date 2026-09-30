@@ -23,6 +23,7 @@ GROUPS = [
         "server": "online/offline, version, update waiting",
         "join_code": "the crossplay join code",
         "uptime": "time since the server started",
+        "day": "the in-game day (updated when everyone sleeps)",
         "saved": "the last world save and how long it took",
         "backup": "when Valheim last made a world backup",
         "disk": "free space on the save disk",
@@ -165,6 +166,8 @@ def name_for(key: str, snap: Optional[dict], conn=None, now: Optional[_dt.dateti
             return "🔑 Join code: server offline"
         code = snap.get("join_code")
         return f"🔑 Join code: {code}" if code else "🔑 Join code: after next join"
+    if key == "day":
+        return f"☀️ Day {snap['day']}" if snap.get("day") else "☀️ Day: after the next sleep"
     if key == "uptime":
         if down:
             return "⏱ Down"

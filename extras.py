@@ -69,6 +69,7 @@ class LiveState:
     booted: bool = False                               # saw a boot, so the count starts at 0
     join_code: Optional[str] = None                    # crossplay join code; new on every restart
     server_ip: Optional[str] = None                    # "a.b.c.d:2456", when the server logs it
+    day: Optional[int] = None                          # in-game day, logged when everyone sleeps
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def observe(self, ev, now: Optional[float] = None) -> Optional[dict]:
@@ -113,6 +114,8 @@ class LiveState:
                 self.online.clear()
             elif k == "server_version":
                 self.version = ev.extra.get("version")
+            elif k == "world_day":
+                self.day = ev.extra.get("day")
             elif k == "world_saved":
                 self.last_save = now
                 self.last_save_ms = ev.extra.get("ms")
@@ -132,7 +135,7 @@ class LiveState:
                     "up_since": self.up_since, "version": self.version, "last_save": self.last_save,
                     "last_save_ms": self.last_save_ms, "disk_free": self.disk_free,
                     "last_backup": self.last_backup, "last_raid": self.last_raid,
-                    "join_code": self.join_code, "server_ip": self.server_ip,
+                    "join_code": self.join_code, "server_ip": self.server_ip, "day": self.day,
                     # up_since alone isn't enough: it can come from reading old log lines.
                     "known": self.count is not None or bool(names) or self.booted}
 

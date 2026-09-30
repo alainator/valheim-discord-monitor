@@ -110,6 +110,8 @@ RE_DISK = re.compile(_TS + r"Available space to current user: (?P<avail>\d+)\. S
 RE_LOCATION = re.compile(_TS + r"Placed location (?P<loc>\S+) in zone (?P<zone>-?\d+,-?\d+)")
 RE_BACKUP = re.compile(_TS + r"Backup created in (?P<name>\S+)")
 RE_VERSION = re.compile(_TS + r"Valheim version: ?(?P<version>\S+)")
+# Printed when everyone sleeps through the night: "Time 25920.5, day:15    nextm:27000 …".
+RE_DAY = re.compile(_TS + r"Time [\d.]+, day:\s*(?P<day>\d+)")
 RE_REFUSED = re.compile(_TS + r"Player (?P<name>.+?) : (?P<id>\S+) is blacklisted or not in whitelist")
 
 
@@ -151,6 +153,8 @@ class ParserState:
     pending_ids: list = field(default_factory=list)  # Steam connection ids not yet paired with a name
     id_to_name: dict = field(default_factory=dict)   # Steam connection id -> name
     id_to_steam: dict = field(default_factory=dict)  # connection id -> SteamID64 (crossplay handshake)
+    id_to_platform: dict = field(default_factory=dict)  # connection id -> "Steam_…"/"Nintendo_…"/"Xbox_…"/…
+    last_platform: Optional[str] = None              # the latest handshake's platform id (version checks)
     server_count: Optional[int] = None               # authoritative count from the server's own log lines
     down: bool = False                               # True after a shutdown, until the next boot
     join_code: Optional[str] = None                  # crossplay join code of this server session
@@ -182,6 +186,7 @@ class ValheimLogParser:
         s = self.s
         return {"online": s.online, "owner_to_name": s.owner_to_name, "dead": sorted(s.dead),
                 "pending_ids": s.pending_ids, "id_to_name": s.id_to_name, "id_to_steam": s.id_to_steam,
+                "id_to_platform": s.id_to_platform,
                 "server_count": s.server_count, "down": s.down, "join_code": s.join_code}
 
     def load_state(self, d: dict) -> None:
@@ -191,6 +196,7 @@ class ValheimLogParser:
                                  dead=set(d.get("dead") or ()), pending_ids=list(d.get("pending_ids") or ()),
                                  id_to_name=dict(d.get("id_to_name") or {}),
                                  id_to_steam=dict(d.get("id_to_steam") or {}),
+                                 id_to_platform=dict(d.get("id_to_platform") or {}),
                                  server_count=d.get("server_count"), down=bool(d.get("down")),
                                  join_code=d.get("join_code"))
         except (TypeError, ValueError) as e:
@@ -308,7 +314,10 @@ class ValheimLogParser:
         if m:
             their, mine = int(m.group("their")), int(m.group("mine"))
             if their != mine:
-                yield Event("version_mismatch", None, {"their": their, "mine": mine, "newer": their > mine})
+                # The handshake just before names the player's platform id, if crossplay.
+                yield Event("version_mismatch", None, {"their": their, "mine": mine, "newer": their > mine,
+                                                       "platform_id": self.s.last_platform})
+            self.s.last_platform = None
             return
         m = RE_SAVED.search(line)
         if m:
@@ -329,6 +338,10 @@ class ValheimLogParser:
         m = RE_VERSION.search(line)
         if m:
             yield Event("server_version", None, {"version": m.group("version")})
+            return
+        m = RE_DAY.search(line)
+        if m:
+            yield Event("world_day", None, {"day": int(m.group("day"))})
             return
 
         m = RE_REFUSED.search(line)
@@ -364,14 +377,17 @@ class ValheimLogParser:
                 return
             self.s.online[name] = owner
             self.s.owner_to_name[owner] = name
-            steam_id = None
+            steam_id = platform_id = None
             if self.s.pending_ids:
                 cid = self.s.pending_ids.pop(0)
                 self.s.id_to_name[cid] = name
                 steam_id = self.s.id_to_steam.get(cid) or (cid if cid.startswith("7656") and cid.isdigit() else None)
+                platform_id = self.s.id_to_platform.get(cid) or (f"Steam_{steam_id}" if steam_id else None)
             extra = self._count()
             if steam_id:
                 extra["steam_id"] = steam_id
+            if platform_id:
+                extra["platform_id"] = platform_id
             yield Event("login", name, extra)
             return
 
@@ -386,6 +402,8 @@ class ValheimLogParser:
         m = RE_PLATFORM_ID.search(line)
         if m:
             platform = m.group("platform")
+            self.s.id_to_platform[m.group("pf")] = platform
+            self.s.last_platform = platform
             for prefix in ("V_", "Steam_"):      # Steam: "V_" since Valheim 1.0, "Steam_" before
                 if platform.startswith(prefix):
                     self.s.id_to_steam[m.group("pf")] = platform[len(prefix):]
@@ -1113,6 +1131,7 @@ def prime_live_state(live, source) -> None:
         return
     last_ts = boot = shutdown = save = backup = None
     raid = code = None
+    day = None
     try:
         with open(source.path, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -1131,6 +1150,8 @@ def prime_live_state(live, source) -> None:
                     backup = last_ts
                 elif (m := RE_RAID.search(line)):
                     raid = (raid_name(m.group("event")), last_ts)
+                elif (m := RE_DAY.search(line)):
+                    day = int(m.group("day"))
                 if (m := RE_JOINCODE.search(line)):
                     code = (m.group("code"), m.group("ip") or (code[1] if code else None))
         mtime = os.path.getmtime(source.path)
@@ -1148,6 +1169,8 @@ def prime_live_state(live, source) -> None:
         live.up_since = real(boot)
     if code:
         live.join_code, live.server_ip = code
+    if day is not None:
+        live.day = day
     live.last_save, live.last_backup = real(save), real(backup)
     if raid and raid[1] is not None:
         live.last_raid = (raid[0], real(raid[1]))
@@ -1165,6 +1188,11 @@ def record_event(store, ev: "Event") -> None:
                 store.link_steam(ev.player, ev.extra["steam_id"], ts)
             except Exception as e:
                 log.warning("steam link failed for %s: %s", ev.player, e)
+        if ev.extra.get("platform_id"):
+            try:
+                store.link_platform(ev.player, ev.extra["platform_id"], ts)
+            except Exception as e:
+                log.warning("platform link failed for %s: %s", ev.player, e)
     elif ev.kind == "logout":
         (store.logout_stale if ev.extra.get("stale") else store.logout)(ev.player, ts)
     elif ev.kind == "death":
@@ -1503,6 +1531,8 @@ def main():
             admin.on_login(ev.player, was_empty)
         elif admin and ev.kind == "logout":
             admin.on_logout(ev.player)
+        elif admin and ev.kind == "version_mismatch" and ev.extra.get("platform_id"):
+            admin.notify_version(ev.extra)
         alert = health.observe(ev)
         if alert:
             log.warning("HEALTH %s", alert)

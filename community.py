@@ -75,6 +75,35 @@ def linked_user(conn, player: str) -> Optional[str]:
     return r["user_id"] if r else None
 
 
+def platform_characters(conn, platform_id: str) -> list:
+    """Characters that have joined with this platform id (any prefix: V_/Steam_/N_/Nintendo_…)."""
+    import stats_db
+    try:
+        return [r["player"] for r in _rows(conn, "SELECT player FROM player_platform WHERE platform_key = ? "
+                                                 "ORDER BY updated_at DESC", (stats_db.platform_key(platform_id),))]
+    except Exception:  # noqa: BLE001  (a database from before this table)
+        return []
+
+
+def who_is(conn, platform_id: Optional[str] = None, character: Optional[str] = None) -> dict:
+    """What the bot knows about a player from a platform id and/or character name:
+    {"characters": [...], "users": [Discord user ids, most likely first]}. Users come from
+    /valheim link on any of the characters, then /valheim request-access for the name."""
+    chars = platform_characters(conn, platform_id) if platform_id else []
+    if character and character not in chars:
+        chars = [character] + chars
+    users = []
+    for c in chars:
+        u = linked_user(conn, c)
+        if u and u not in users:
+            users.append(u)
+    if character:
+        asked = access_request(conn, character)
+        if asked and asked not in users:
+            users.append(asked)
+    return {"characters": chars, "users": users}
+
+
 def linked_players(conn, user_id) -> list:
     return [r["player"] for r in _rows(conn, "SELECT player FROM discord_links WHERE user_id = ? "
                                              "ORDER BY linked_at", (str(user_id),))]
