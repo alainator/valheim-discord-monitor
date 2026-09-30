@@ -147,7 +147,7 @@ class TitlesTest(DB):
                                      "sessions": None, "longest": None}, {"time"})
         self.assertIn("**Heimdall** 🆕: <@42> (Ingrid), 2h", e["description"])
         self.assertIn("/valheim link Bjorn", e["description"])
-        self.assertIn("**Huginn**: nobody yet", e["description"])
+        self.assertIn("**Sleipnir**: nobody yet", e["description"])
         self.assertIn("all time", e["footer"]["text"])
 
 

@@ -7,7 +7,7 @@ Community features for the Discord bot, stored in the stats database:
     character joins;
   * access requests: "I'll join as Ingrid", so a refused-join notice can say who it is;
   * game-night plans with RSVPs and a reminder;
-  * weekly title roles for the /valheim top leaders (Heimdall, Hel, Huginn, Thor);
+  * weekly title roles for the /valheim top leaders (Heimdall, Hel, Sleipnir, Thor);
   * reading the world seed for a map link.
 
 Functions take an sqlite3 connection (stats_db.connect) so the monitor thread and the
@@ -174,9 +174,11 @@ def top(conn, category: str, limit: int = 10) -> list:
 TITLES = {
     "time": ("Heimdall", "never leaves his post: most time played", 0xF1C40F),
     "deaths": ("Hel", "keeper of the dead: most deaths", 0x71368A),
-    "sessions": ("Huginn", "flies out every day and always returns: most visits", 0x607D8B),
+    "sessions": ("Sleipnir", "carries riders between the worlds and always comes back: most visits", 0x95A5A6),
     "longest": ("Thor", "drank from the sea and lowered it: longest single session", 0x3498DB),
 }
+# Earlier names of the title roles: a role the bot made under one of these is renamed.
+TITLE_OLD_NAMES = {"sessions": ("Huginn",)}
 _TITLE_SQL = {
     "time": "SELECT player, SUM(duration_seconds) AS v FROM play_sessions WHERE login_at >= ? GROUP BY player",
     "deaths": "SELECT player, COUNT(*) AS v FROM deaths WHERE died_at >= ? GROUP BY player",
