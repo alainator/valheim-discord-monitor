@@ -28,22 +28,30 @@ class NamesTest(unittest.TestCase):
 
     def test_live_state(self):
         up = {"known": True, "count": 3, "version": "l-1.0.16", "up_since": T - 3 * 86400 - 60,
+              "online": [("Ingrid", T), ("Bjorn", T)], "last_save": T - 600, "last_save_ms": 1234,
+              "disk_free": 412 * 1024 ** 3,
               "join_code": "482913", "last_backup": T - 3600, "last_raid": ("The Elder's army (greydwarves)",
                                                                            T - 2 * 86400)}
-        self.assertEqual(self.name("players", up), "🟢 Valheim: 3 online")
-        self.assertEqual(self.name("players", {**up, "count": 0}), "🟢 Valheim: empty")
+        self.assertEqual(self.name("players", up), "🟢 3 online: Ingrid, Bjorn, 1 more")
+        self.assertEqual(self.name("players", {**up, "count": 2}), "🟢 2 online: Ingrid, Bjorn")
+        self.assertEqual(self.name("players", {**up, "count": 0, "online": []}), "⚫ Nobody online")
+        self.assertEqual(self.name("saved", up), "💾 World saved today 11:50 (1.2 s)")
+        self.assertEqual(self.name("disk", up), "💽 Disk free: 412 GB")
+        self.assertEqual(self.name("disk", {"disk_free": 3 * 1024 ** 3}), "💽 Disk free: 3.0 GB")
         self.assertEqual(self.name("server", up), "🟢 Server online · l-1.0.16")
         self.assertEqual(self.name("server", up, update_waiting=True), "⬆️ Update waiting · l-1.0.16")
         self.assertEqual(self.name("join_code", up), "🔑 Join code: 482913")
         self.assertEqual(self.name("join_code", {**up, "join_code": None}), "🔑 Join code: after next join")
         self.assertEqual(self.name("uptime", up), "⏱ Up 3 d")
         self.assertEqual(self.name("uptime", {**up, "up_since": T - 5 * 3600}), "⏱ Up 5 h")
-        self.assertEqual(self.name("backup", up), "💾 Backup: today 11:00")
-        self.assertEqual(self.name("backup", {}), "💾 Backup: none yet")
+        self.assertEqual(self.name("backup", up), "🗄 Backup: today 11:00")
+        self.assertEqual(self.name("backup", {}), "🗄 Backup: none yet")
         self.assertEqual(self.name("last_raid", up), "⚔️ Last raid: The Elder's army (Mon)")
         down = {"down": True}
-        for key in ("players", "server", "join_code", "uptime"):
-            self.assertIn("ffline" if key != "uptime" else "Down", self.name(key, down))
+        self.assertEqual(self.name("players", down), "🔴 Nobody online: server down")
+        for key in ("server", "join_code"):
+            self.assertIn("offline", self.name(key, down))
+        self.assertEqual(self.name("uptime", down), "⏱ Down")
         # Nothing known yet (just started): keep the channel's current name.
         self.assertIsNone(self.name("players", {}))
         self.assertIsNone(self.name("uptime", {}))
@@ -78,11 +86,24 @@ class NamesTest(unittest.TestCase):
         self.c.execute("INSERT INTO plans(title, at) VALUES (?, ?)", ("Bonemass run", int(T + 3 * 86400 + 8 * 3600)))
         self.c.execute("INSERT INTO plans(title, at) VALUES (?, ?)", ("Old", int(T - 86400)))
         self.assertEqual(self.name("next_plan"), "📅 Bonemass run · Sat 20:00")
-        self.assertEqual(self.name("titles", titles=[]), "👑 No titles yet")
-        titles = [("Heimdall", "Ingrid"), ("Hel", None), ("Thor", "Bjorn")]
-        seen = {sc.name_for("titles", {}, self.c, now=NOW + dt.timedelta(minutes=10 * i), titles=titles)
-                for i in range(4)}
-        self.assertEqual(seen, {"👑 Heimdall: Ingrid", "👑 Thor: Bjorn"})
+        titles = {"title_owner": ("Odin", "Alain"), "title_time": ("Heimdall", "Ingrid"),
+                  "title_deaths": ("Hel", None), "title_longest": ("Thor", "Bjorn")}
+        self.assertEqual(self.name("title_owner", titles=titles), "👁️ Odin (server owner): Alain")
+        self.assertEqual(self.name("title_time", titles=titles), "🛡️ Heimdall (most hours): Ingrid")
+        self.assertEqual(self.name("title_deaths", titles=titles), "💀 Hel (most deaths): —")
+        self.assertEqual(self.name("title_longest", titles=titles), "⚡ Thor (longest session): Bjorn")
+        self.assertIsNone(self.name("title_sessions", titles=titles))       # unknown: keep the old name
+        self.assertEqual(sc.name_for("title_owner", {}, None, now=NOW, titles=titles),
+                         "👁️ Odin (server owner): Alain")                    # needs no database
+
+    def test_groups_and_aliases(self):
+        self.assertEqual([g for g, _, _ in sc.GROUPS], ["watch", "saga", "hall"])
+        self.assertEqual(sc.expand(["server", "titles", "server", "nope"]),
+                         ["server", "title_owner", "title_time", "title_deaths", "title_sessions",
+                          "title_longest", "title_achievements"])
+        long = sc.names_list([f"Viking{i:02d}" for i in range(20)], "🟢 20 online: ")
+        self.assertLessEqual(len(long), 100)
+        self.assertTrue(long.endswith("more"))
 
     def test_when(self):
         self.assertEqual(sc.when(T - 86400, NOW), "yesterday 12:00")

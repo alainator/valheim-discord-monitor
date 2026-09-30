@@ -317,9 +317,17 @@ class AdminBot:
         # Stat channels (stat_channels.py): locked voice channels the bot creates and renames.
         stc = cfg.get("stat_channels") or {}
         self.stats_on = bool(stc.get("enabled", False))
+        # "split" (default): one category per group (live / this week / titles); "single": one.
+        self.stats_layout = "single" if str(stc.get("layout", "split")).lower() == "single" else "split"
         self.stats_category = str(stc.get("category") or "📊 Valheim")[:100]
+        self.stats_categories = {k: str(v)[:100] for k, v in (stc.get("categories") or {}).items() if v}
         self._stats_show_cfg = stc.get("show")
         self.stats_show: list = []           # set in _start_tasks, once the rest of the config is read
+        import stat_channels
+        # The players channel takes over an existing status_channel (moved into the category).
+        self.stats_take_status = bool(self.stats_on and self.status and (
+            self._stats_show_cfg is None or "players" in stat_channels.expand(self._stats_show_cfg)))
+        self._owner_name: Optional[str] = None
         self._stats_task = None
         self._stat_ids: dict = {}            # channel IDs when there's no database to keep them in
         lfg = cfg.get("lfg") or {}
@@ -409,7 +417,7 @@ class AdminBot:
     def _start_tasks(self) -> None:
         """Start the background loops that aren't running yet. Called on every on_ready
         (it repeats after reconnects) and once attach() has handed over the database."""
-        if self.status and self._status_task is None:
+        if self.status and self._status_task is None and not self.stats_take_status:
             self._status_task = asyncio.ensure_future(self._status_loop())
         if self.board_channel and self._board_task is None:
             self._board_task = asyncio.ensure_future(self._board_loop())
@@ -432,12 +440,12 @@ class AdminBot:
             show = self._stats_show_cfg
             if show is None:                 # everything that makes sense with this config
                 show = [k for k in stat_channels.STATS
-                        if not (k == "players" and self.status) and not (k == "titles" and not self.titles_on)]
-            unknown = [k for k in show if k not in stat_channels.STATS]
+                        if not (k.startswith("title_") and k != "title_owner" and not self.titles_on)]
+            unknown = [k for k in show if k not in stat_channels.STATS and k not in stat_channels.ALIASES]
             if unknown:
                 log.warning("admin_bot: unknown stat_channels.show entries %s; known: %s",
                             unknown, ", ".join(stat_channels.STATS))
-            self.stats_show = [k for k in show if k in stat_channels.STATS]
+            self.stats_show = stat_channels.expand(show)
             if not self.guild_id:
                 log.warning("admin_bot: stat_channels need guild_id; stat channels off")
             else:
@@ -945,8 +953,10 @@ class AdminBot:
         import community
         import stat_channels
         db = self.db if self.db_path else None
-        titles = [(name, (community.title_holder(db, cat) or {}).get("player"))
-                  for cat, (name, _, _) in community.TITLES.items()] if (db and self.titles_on) else []
+        titles = {"title_owner": (self.owner_role_name or "Odin", self._owner_name)}
+        if db:
+            titles.update({f"title_{cat}": (name, (community.title_holder(db, cat) or {}).get("player"))
+                           for cat, (name, _, _) in community.TITLES.items()})
         name = stat_channels.name_for(
             key, self.live.snapshot() if self.live else {}, db,
             offset=community.log_clock_offset(db) if db else 0,
@@ -962,14 +972,21 @@ class AdminBot:
         community.set_meta(self.db, key, value)
 
     async def _ensure_stat_channels(self) -> dict:
-        """Find or create the category and one locked voice channel per stat. They're
-        remembered by ID, so they can be renamed, moved or reordered in Discord."""
+        """Find or create the categories and one locked voice channel per stat, in order.
+        They're remembered by ID, so they can be renamed or moved in Discord. An existing
+        status_channel becomes the players channel and is moved in and locked."""
         import discord
+        import stat_channels
         guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
         locked = {guild.default_role: discord.PermissionOverwrite(view_channel=True, connect=False)}
         me = getattr(guild, "me", None)
         if me is not None:
             locked[me] = discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True)
+        try:
+            owner = await guild.fetch_member(guild.owner_id)
+            self._owner_name = owner.display_name
+        except (discord.HTTPException, AttributeError, TypeError):
+            pass
 
         async def known(meta_key):
             cid = self._meta(meta_key)
@@ -983,21 +1000,46 @@ class AdminBot:
                     return None
             return ch
 
-        category = await known("statchan:category") or             next((c for c in guild.categories if c.name == self.stats_category), None)
-        if category is None:
-            category = await guild.create_category(self.stats_category, overwrites=locked, position=0,
-                                                   reason="Valheim stat channels")
-            log.info("admin_bot: created the %s category", self.stats_category)
-        self._meta("statchan:category", category.id)
+        # Earlier versions: one "📊 Valheim" category and a rotating "titles" channel.
+        if not self._meta("statchan:cat:watch") and self._meta("statchan:category"):
+            self._meta("statchan:cat:watch", self._meta("statchan:category"))
+        if not self._meta("statchan:title_owner") and self._meta("statchan:titles"):
+            self._meta("statchan:title_owner", self._meta("statchan:titles"))
+        if self.stats_take_status and not self._meta("statchan:players"):
+            self._meta("statchan:players", self.status.channel_id)
+
+        groups = [(g, self.stats_categories.get(g, title)) for g, title, _ in stat_channels.GROUPS]
+        if self.stats_layout == "single":
+            groups = [("watch", self.stats_category)]
+        categories = {}
+        for pos, (group, title) in enumerate(groups):
+            if not any(self.stats_layout == "single" or stat_channels.GROUP_OF[k] == group
+                       for k in self.stats_show):
+                continue
+            cat = await known(f"statchan:cat:{group}") or next((c for c in guild.categories if c.name == title), None)
+            if cat is None:
+                cat = await guild.create_category(title, overwrites=locked, position=pos,
+                                                  reason="Valheim stat channels")
+                log.info("admin_bot: created the %s category", title)
+            elif self.stats_layout == "split" and cat.name != title and group == "watch" and \
+                    cat.name == self.stats_category:
+                await cat.edit(name=title, reason="Valheim stat channels")   # the old single category
+            self._meta(f"statchan:cat:{group}", cat.id)
+            categories[group] = cat
+
         out = {}
         for i, key in enumerate(self.stats_show):
+            cat = categories["watch" if self.stats_layout == "single" else stat_channels.GROUP_OF[key]]
             ch = await known(f"statchan:{key}")
             if ch is None:
-                ch = await guild.create_voice_channel(self._stat_name(key) or f"… {key}", category=category,
+                ch = await guild.create_voice_channel(self._stat_name(key) or f"… {key}", category=cat,
                                                       overwrites=locked, position=i,
                                                       reason="Valheim stat channel")
-                self._meta(f"statchan:{key}", ch.id)
                 log.info("admin_bot: created the stat channel %s", ch.name)
+            elif getattr(ch, "category", None) != cat:
+                await ch.edit(category=cat, overwrites=locked, position=i, reason="Valheim stat channel")
+                log.info("admin_bot: moved %s into %s", ch.name, cat.name)
+            self._meta(f"statchan:{key}", ch.id)
             out[key] = ch
         return out
 

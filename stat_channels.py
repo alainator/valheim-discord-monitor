@@ -1,7 +1,8 @@
 """
 Stat channels: locked voice channels whose names show the server's numbers, e.g.
-"🔑 Join code: 482913" or "💀 Deaths this week: 14". The bot creates them in their
-own category and renames them; members can see them but not join.
+"🔑 Join code: 482913", "💀 Deaths this week: 14" or "⚡ Thor (longest session): Ingrid".
+The bot creates them in three categories (live / this week / titles, or one with
+layout "single") and renames them; members can see them but not join.
 
 This module only works out the names (plain functions, testable without Discord).
 admin_bot.AdminBot creates the channels and applies the names within Discord's
@@ -14,23 +15,71 @@ import datetime as _dt
 import time
 from typing import Callable, Optional
 
-# key -> (what it shows, for docs and logs). Order = order in the category.
-STATS = {
-    "players": "players online",
-    "server": "online/offline, version, update waiting",
-    "join_code": "the crossplay join code",
-    "uptime": "time since the server started",
-    "backup": "when Valheim last made a world backup",
-    "peak_today": "most players online at once today",
-    "hours_week": "hours played this week, all players together",
-    "deaths_week": "deaths this week",
-    "last_raid": "the most recent raid",
-    "vikings": "characters that have ever played",
-    "next_plan": "the next game night (/valheim plan)",
-    "titles": "title holders, one at a time",
-    "achievements": "Steam achievements unlocked, all players together",
+# The stat channels, in three groups (each its own category, or one category with
+# layout "single"). key -> what it shows, for docs and logs. Order = order in Discord.
+GROUPS = [
+    ("watch", "🛡️ Heimdall's Watch · live", {
+        "players": "who's online, by name",
+        "server": "online/offline, version, update waiting",
+        "join_code": "the crossplay join code",
+        "uptime": "time since the server started",
+        "saved": "the last world save and how long it took",
+        "backup": "when Valheim last made a world backup",
+        "disk": "free space on the save disk",
+    }),
+    ("saga", "📜 The Saga · this week", {
+        "peak_today": "most players online at once today",
+        "hours_week": "hours played this week, all players together",
+        "deaths_week": "deaths this week",
+        "last_raid": "the most recent raid",
+        "next_plan": "the next game night (/valheim plan)",
+        "vikings": "characters that have ever played",
+        "achievements": "Steam achievements unlocked, all players together",
+    }),
+    ("hall", "👑 Hall of Champions · titles", {
+        "title_owner": "Odin: the Discord server's owner",
+        "title_time": "Heimdall: most time played",
+        "title_deaths": "Hel: most deaths",
+        "title_sessions": "Sleipnir: most visits",
+        "title_longest": "Thor: longest single session",
+        "title_achievements": "Bragi: most Steam achievements",
+    }),
+]
+STATS = {k: v for _, _, keys in GROUPS for k, v in keys.items()}
+GROUP_OF = {k: g for g, _, keys in GROUPS for k in keys}
+# Older names still accepted in stat_channels.show.
+ALIASES = {"titles": [k for k in STATS if k.startswith("title_")]}
+NEEDS_DB = {"peak_today", "hours_week", "deaths_week", "vikings", "next_plan", "achievements"} | \
+    {k for k in STATS if k.startswith("title_") and k != "title_owner"}
+# title_<category> -> (emoji, what it's for); the role names come from community.TITLES.
+TITLE_LABELS = {
+    "title_owner": ("👁️", "server owner"),
+    "title_time": ("🛡️", "most hours"),
+    "title_deaths": ("💀", "most deaths"),
+    "title_sessions": ("🐎", "most visits"),
+    "title_longest": ("⚡", "longest session"),
+    "title_achievements": ("📜", "most achievements"),
 }
-NEEDS_DB = {"peak_today", "hours_week", "deaths_week", "vikings", "next_plan", "titles", "achievements"}
+
+
+def expand(show) -> list:
+    """stat_channels.show with aliases expanded, unknown and repeated keys dropped."""
+    out = []
+    for k in show:
+        for key in ALIASES.get(k, [k]):
+            if key in STATS and key not in out:
+                out.append(key)
+    return out
+
+
+def names_list(names: list, prefix: str, limit: int = 100) -> str:
+    """"🟢 3 online: Ingrid, Bjorn, Sigrid", cut to fit Discord's 100 characters with "+N more"."""
+    for shown in range(len(names), 0, -1):
+        more = len(names) - shown
+        text = prefix + ", ".join(names[:shown]) + (f" +{more} more" if more else "")
+        if len(text) <= limit:
+            return text
+    return (prefix + f"{len(names)} players")[:limit]
 
 
 def week_start(now: _dt.datetime) -> _dt.datetime:
@@ -69,23 +118,41 @@ def _one(conn, sql, params=()):
 
 
 def name_for(key: str, snap: Optional[dict], conn=None, now: Optional[_dt.datetime] = None,
-             offset: int = 0, update_waiting: bool = False, titles: Optional[list] = None) -> Optional[str]:
+             offset: int = 0, update_waiting: bool = False, titles: Optional[dict] = None) -> Optional[str]:
     """The channel name for one stat, or None when there's nothing to show yet (the
     channel keeps its current name).
 
     snap: extras.LiveState.snapshot(); conn: the stats database; offset: real time minus
-    the log's clock (log timestamps + offset = real); titles: [(role, player)] of the
-    current title holders, for the rotating titles channel."""
+    the log's clock (log timestamps + offset = real); titles: {"title_time": ("Heimdall",
+    "Ingrid"), "title_owner": ("Odin", "Alain"), …}, holder None when nobody has it yet."""
     now = now or _dt.datetime.now().astimezone()
     snap = snap or {}
     down, known = snap.get("down"), snap.get("known")
     if key == "players":
         if down:
-            return "🔴 Valheim: offline"
+            return "🔴 Nobody online: server down"
         if not known:
             return None
-        n = snap.get("count") or 0
-        return f"🟢 Valheim: {n} online" if n else "🟢 Valheim: empty"
+        names = [n for n, _ in snap.get("online") or []]
+        count = max(snap.get("count") or 0, len(names))
+        if not count:
+            return "⚫ Nobody online"
+        if not names:
+            return f"🟢 {count} online"
+        unnamed = count - len(names)                 # online since before the monitor started
+        return names_list(names + ([f"{unnamed} more"] if unnamed else []), f"🟢 {count} online: ")
+    if key == "saved":
+        if not snap.get("last_save"):
+            return None
+        ms = snap.get("last_save_ms")
+        took = f" ({ms / 1000:.1f} s)" if ms else ""
+        return f"💾 World saved {when(snap['last_save'], now)}{took}"
+    if key == "disk":
+        free = snap.get("disk_free")
+        if not free:
+            return None
+        gb = free / 1024 ** 3
+        return f"💽 Disk free: {gb:.0f} GB" if gb >= 10 else f"💽 Disk free: {gb:.1f} GB"
     if key == "server":
         if down:
             return "🔴 Server offline"
@@ -105,13 +172,19 @@ def name_for(key: str, snap: Optional[dict], conn=None, now: Optional[_dt.dateti
             return None
         return f"⏱ Up {uptime(now.timestamp() - snap['up_since'])}"
     if key == "backup":
-        return f"💾 Backup: {when(snap['last_backup'], now)}" if snap.get("last_backup") else "💾 Backup: none yet"
+        return f"🗄 Backup: {when(snap['last_backup'], now)}" if snap.get("last_backup") else "🗄 Backup: none yet"
     if key == "last_raid":
         if not snap.get("last_raid"):
             return None
         raid, at = snap["last_raid"]
         raid = raid.split(" (")[0]                      # "The Elder's army (greydwarves)" -> "The Elder's army"
         return f"⚔️ Last raid: {raid} ({when(at, now).split(' ')[0]})"
+    if key.startswith("title_"):
+        emoji, what = TITLE_LABELS[key]
+        role, holder = (titles or {}).get(key, (None, None))
+        if not role:
+            return None
+        return f"{emoji} {role} ({what}): {holder or '—'}"[:100]
     if conn is None:
         return None
     # The database stores log timestamps; log = real - offset.
@@ -137,12 +210,6 @@ def name_for(key: str, snap: Optional[dict], conn=None, now: Optional[_dt.dateti
         if not r:
             return "📅 No game night planned"
         return f"📅 {r[0][:60]} · {when(r[1], now)}"
-    if key == "titles":
-        held = [(role, player) for role, player in (titles or []) if player]
-        if not held:
-            return "👑 No titles yet"
-        role, player = held[int(now.timestamp() // 600) % len(held)]   # a new one every 10 minutes
-        return f"👑 {role}: {player}"
     if key == "achievements":
         try:
             n = _one(conn, "SELECT COALESCE(SUM(unlocked), 0) FROM steam_profile") or 0
