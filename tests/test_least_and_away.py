@@ -40,8 +40,9 @@ class LeastTest(DB):
         self.play("Ingrid", now - DAY, 600)
         self.play("Ingrid", now - 2 * DAY, 600)
         self.play("Bjorn", now - DAY, 30)
-        self.play("Bjorn", now - 3 * DAY, 30)            # least, and a regular: Hœnir
-        self.play("Newbie", now - DAY, 5)                 # only once: not yet
+        self.play("Bjorn", now - 3 * DAY, 30)            # 1 h: least that counts, Hœnir
+        self.play("Peeker", now - DAY, 1)                 # a minute to take a peek: not counted
+        self.play("Newbie", now - DAY, 70)                # one visit is enough, but has more time
         self.play("Gone", now - 60 * DAY, 1)
         self.play("Gone", now - 61 * DAY, 1)              # not seen for 2 months: not counted
         self.assertEqual(community.title_leaders(self.c)["least"]["player"], "Bjorn")

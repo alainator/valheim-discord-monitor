@@ -68,7 +68,7 @@ And without the bot:
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
 - **Two more roles** with the titles: **Hœnir** for the least time played (among players
-  seen this month with 2+ visits), and **Óðr** for everyone who hasn't been on for 14
+  seen this month with 10+ minutes played), and **Óðr** for everyone who hasn't been on for 14
   days, taken back the moment they log in ([title roles](#title-roles)).
 - **A permanent copy of the server log:** Valheim wipes its log on every server start,
   taking the history with it. The monitor now keeps every line it reads in
@@ -1231,8 +1231,8 @@ mythology:
 | **Bragi** | Most Steam achievements | God of poetry, who sings the great deeds of heroes in Valhalla |
 | **Hœnir** | **Least** time played | The silent god, sent to the Vanir as a hostage, who never decided anything on his own |
 
-**Hœnir** only counts players seen in the last 30 days who have visited at least twice,
-so it doesn't stick to someone who quit or arrived yesterday. It's meant as a friendly
+**Hœnir** only counts players seen in the last 30 days with at least 10 minutes played,
+so it doesn't stick to someone who quit, or who logged on for a few seconds to take a peek. It's meant as a friendly
 "come play more", not a punishment.
 
 **Óðr: away for a while.** Every linked player who hasn't been on for 14 days gets the

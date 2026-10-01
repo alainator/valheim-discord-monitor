@@ -244,10 +244,12 @@ class BotCommandsTest(unittest.TestCase):
                 await bot._sync_titles(recompute=False)
                 return first
             holders, changed = asyncio.run(run())
-        self.assertEqual(changed, {"time", "deaths", "sessions", "longest"})
+        # Hœnir too: Ingrid's 2 h is the least of those with 10+ minutes (Bjorn has 100 s).
+        self.assertEqual(changed, {"time", "deaths", "sessions", "longest", "least"})
         self.assertEqual(holders["time"], {"player": "Ingrid", "user_id": "42", "v": 7200})
         self.assertEqual(holders["deaths"]["user_id"], None)                 # not linked yet
-        self.assertEqual(sorted(r.name for r in guild.roles), ["Heimdall", "Hel", "Odin", "Sleipnir", "Thor"])
+        self.assertEqual(sorted(r.name for r in guild.roles),
+                         ["Heimdall", "Hel", "Hœnir", "Odin", "Sleipnir", "Thor"])
         self.assertIn(("add", 42, "Heimdall"), guild.log)
         self.assertIn(("add", 77, "Hel"), guild.log)                          # given after linking
         self.assertIn(("add", 77, "Sleipnir"), guild.log)                       # tied on visits: first by name
