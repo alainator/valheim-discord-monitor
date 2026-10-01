@@ -26,20 +26,28 @@ BOSSES = [
     ("defeated_goblinking", "Yagluth", "Plains", "💀"),
     ("defeated_queen", "The Queen", "Mistlands", "🕷️"),
     ("defeated_fader", "Fader", "Ashlands", "🔥"),
+    ("defeated_kall", "Kall Fimbulbringer", "Deep North", "❄️"),
 ]
 BOSS_KEYS = [b[0] for b in BOSSES]
 NAMES = {b[0]: b[1] for b in BOSSES}
 RE_KEY = re.compile(rb"defeated_[a-z0-9_]{2,40}")
+# Kall's exact key isn't known yet, so any defeated_* key naming Kall or Fimbul counts as him.
+RE_KALL = re.compile(r"kall|fimbul")
 GZIP = b"\x1f\x8b\x08"
 
 
 def name_of(key: str) -> str:
-    """"defeated_gdking" -> "The Elder"; a key we don't know -> "Writhan"."""
+    """"defeated_gdking" -> "The Elder"."""
     return NAMES.get(key) or key.replace("defeated_", "").replace("_", " ").title()
 
 
 def _keys_in(data: bytes) -> set:
-    return {k.decode() for k in RE_KEY.findall(data)}
+    """The main bosses' keys in the data. Other defeated_* keys aren't bosses (Valheim
+    sets some for other creatures), so they're ignored."""
+    found = {k.decode() for k in RE_KEY.findall(data)}
+    if any(RE_KALL.search(k) for k in found):
+        found.add("defeated_kall")
+    return found & set(BOSS_KEYS)
 
 
 def _unpack(data: bytes, limit: int = 64 << 20) -> bytes:
@@ -91,12 +99,10 @@ def read_keys(save_dir: str, world: Optional[str] = None) -> Optional[set]:
 
 
 def progress(keys: set) -> dict:
-    """{"down": [names, in order], "count", "total", "next": name or None, "extra": [other
-    defeated_* keys, e.g. mini-bosses, as names]}."""
+    """{"down": [names, in order], "count", "total", "next": name or None}."""
     down = [name_of(k) for k in BOSS_KEYS if k in keys]
     nxt = next((name_of(k) for k in BOSS_KEYS if k not in keys), None)
-    extra = sorted(name_of(k) for k in keys if k not in NAMES)
-    return {"down": down, "count": len(down), "total": len(BOSSES), "next": nxt, "extra": extra}
+    return {"down": down, "count": len(down), "total": len(BOSSES), "next": nxt}
 
 
 def channel_name(keys: Optional[set]) -> Optional[str]:
@@ -108,8 +114,7 @@ def channel_name(keys: Optional[set]) -> Optional[str]:
 
 
 def render(keys: set, server_name: str = "", when: Optional[dict] = None) -> dict:
-    """/muninn bosses: every main boss with ✅ or ⬜, when it fell (if the bot saw it), and
-    any other defeated_* keys."""
+    """/muninn bosses: every main boss with ✅ or ⬜, and when it fell (if the bot saw it)."""
     when = when or {}
     lines = []
     for key, name, biome, emoji in BOSSES:
@@ -117,8 +122,6 @@ def render(keys: set, server_name: str = "", when: Optional[dict] = None) -> dic
         at = f" · <t:{int(when[key])}:d>" if done and when.get(key) else ""
         lines.append(f"{'✅' if done else '⬜'} {emoji} **{name}** ({biome}){at}")
     p = progress(keys)
-    if p["extra"]:
-        lines.append("\nAlso defeated: " + ", ".join(p["extra"]))
     return {"title": f"🏆 Boss progress{' in ' + server_name if server_name else ''}: {p['count']}/{p['total']}",
             "description": "\n".join(lines), "color": 0xC27C0E}
 
@@ -126,12 +129,9 @@ def render(keys: set, server_name: str = "", when: Optional[dict] = None) -> dic
 def announcement(key: str, keys: set, server_name: str = "") -> dict:
     """The post when a boss falls."""
     p = progress(keys)
-    boss = next((b for b in BOSSES if b[0] == key), None)
-    if boss:
-        title = f"⚔️ {boss[1]} has fallen!"
-        desc = f"The {boss[2]} boss is defeated{' in ' + server_name if server_name else ''}."
-    else:
-        title, desc = f"⚔️ {name_of(key)} has fallen!", "A new foe is defeated."
+    _, name, biome, _ = next(b for b in BOSSES if b[0] == key)
+    title = f"⚔️ {name} has fallen!"
+    desc = f"The {biome} boss is defeated{' in ' + server_name if server_name else ''}."
     desc += f" **{p['count']}/{p['total']}** bosses down" + (f"; next: **{p['next']}**." if p["next"] else
                                                                ". Every boss is down. Skål! 🍻")
     return {"title": title, "description": desc, "color": 0xC27C0E}
