@@ -65,6 +65,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Pinned command guides:** each command group's channel gets a pinned list of its
+  commands (`/valheim` in #the-gates, `/muninn` in #muninns-roost, `/warcouncil` in
+  #war-council, `/odin` in the admin channel). Already set up? Run
+  `/odin setup action:guides` once; they update themselves after that.
 - **No lost history on an old server:** the first time the monitor starts with an empty
   stats database, it loads every log still on the server (rotated and `.gz` copies too),
   without posting anything. `--backfill` can now be run again safely to fill gaps
@@ -634,7 +638,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/odin bounty-close <bounty>` | Admin | Close an open bounty without a winner | Stats database |
 | `/odin announce <message> [title] [ping] [where]` | Admin | Post an announcement in #runestone (default), Huginn's feed, or both; `ping` adds @everyone. `\n` starts a new line ([rules channel](#the-rules-channel-runestone)) | #runestone, or Huginn's webhook |
 | `/odin rules [text] [show]` | Admin | Post or edit the one pinned rules message in #runestone; no text = a starter set; `show` gives the current text to copy and edit | #runestone |
-| `/odin setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-odin-setup)) | Manage Channels, Manage Roles (Manage Webhooks for Huginn's webhook, Manage Server for Discord's join messages) |
+| `/odin setup [preview\|apply\|undo\|guides]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-odin-setup)); `guides` only pins the command guides | Manage Channels, Manage Roles (Manage Webhooks for Huginn's webhook, Manage Server for Discord's join messages) |
 | `/odin settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
 | `/odin modifier <name> <value>` | Admin | Change a modifier, e.g. `raids more`; `normal` resets it | world settings |
 | `/odin preset <name>` | Admin | Change the preset; `default` removes it | world settings |
@@ -964,6 +968,12 @@ The [stat channels](#stat-channels) stay on top.
   Channel. If that's the admin channel (which setup makes private) or none, setup points
   it at #the-gates, and undo puts it back. That needs **Manage Server**. Without it, the
   result tells you to change it in Server Settings → Engagement → System Messages Channel.
+- **It pins a command guide** in each command group's channel: `/valheim` in #the-gates,
+  `/muninn` in #muninns-roost, `/warcouncil` in #war-council and `/odin` in the admin
+  channel. Each lists the group's commands with what they do, built from the commands
+  themselves, and the bot updates them at start-up so new commands show up.
+  `/odin setup action:guides` posts them without running the rest of setup (or again, if
+  one was deleted).
 - **#runestone** is left for your rules and announcements: fill it with `/odin rules` and
   `/odin announce` ([the rules channel](#the-rules-channel-runestone)).
 - **It posts a "📖 A guide to the realm" message** in #the-gates listing every channel and

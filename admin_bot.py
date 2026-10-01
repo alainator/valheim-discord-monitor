@@ -46,6 +46,27 @@ from typing import Optional
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
                   "uptime": "bots", "bosses": "bots", "plan": "plans", "bounties": "plans"}
+# A pinned guide to each command group, in the channel it belongs to (from /odin setup).
+GUIDES = [
+    ("valheim", "welcome", "🚪 Getting into the game: /valheim",
+     "These work in **any channel**, and only you see the replies."),
+    ("muninn", "bots", "🪶 Ask Muninn: /muninn", "Stats and leaderboards. Run them here; the replies are public."),
+    ("warcouncil", "plans", "🗺️ Plans and bounties: /warcouncil", "Game nights and bounties. Run them here."),
+    ("odin", "admin", "👁️ Admin commands: /odin", "Only the server admins can use these; the replies are private."),
+]
+
+
+def command_guide(group, title: str, intro: str) -> dict:
+    """An embed listing a command group's commands, built from the commands themselves:
+    "`/muninn stats [player]`: Play time, deaths and more…"."""
+    lines = [intro, ""]
+    for cmd in sorted(group.commands, key=lambda c: c.name):
+        params = " ".join(f"<{p.name}>" if p.required else f"[{p.name}]" for p in cmd.parameters)
+        lines.append(f"`/{group.name} {cmd.name}{' ' + params if params else ''}`: {cmd.description}")
+    lines += ["", "`<…>` is required, `[…]` optional. Type `/` to see them as you type."]
+    return {"title": title, "description": "\n".join(lines)[:4000], "color": 0xC27C0E}
+
+
 DEFAULT_RULES = (
     "**1. Be a good shieldmate.** Be kind in chat and in game. No harassment, slurs or drama.\n"
     "**2. No griefing.** Don't destroy, take or move what others built or stored without asking.\n"
@@ -398,6 +419,7 @@ class AdminBot:
         self._voice_lobby_id: Optional[int] = None
         self._voice_temps: set = set()
         self._voice_task = None
+        self._guides_refreshed = False
         self._voice_lock = None
         # The rules channel (#runestone from /odin setup, or announce_channel_id): /odin rules,
         # /odin announce, and with runestone_news big server news (updates, restores, bosses).
@@ -517,6 +539,9 @@ class AdminBot:
             self._status_task = asyncio.ensure_future(self._status_loop())
         if self.board_channel and self._board_task is None:
             self._board_task = asyncio.ensure_future(self._board_loop())
+        if self._attached and self.guild_id and not self._guides_refreshed:
+            self._guides_refreshed = True             # keep posted guides in step with the commands
+            asyncio.ensure_future(self._refresh_guides())
         if self.voice_lobby and self.guild_id and self._voice_task is None:
             self._voice_task = asyncio.ensure_future(self._voice_setup())
         if not self._attached:
@@ -1582,6 +1607,53 @@ class AdminBot:
                     log.info("admin_bot: couldn't pin the channel guide (needs Pin Messages): %s", e)
         except discord.HTTPException as e:
             log.info("admin_bot: couldn't post the channel guide: %s", e)
+
+    async def _command_guides(self, guild, create: bool = True) -> list:
+        """Post (or update) the pinned command guide in each group's channel. create=False
+        only updates guides already posted (at start-up, so new commands show up).
+        Returns the channels written to."""
+        import discord
+        groups = {g.name: g for g in self.client.tree.get_commands() if hasattr(g, "commands")}
+        done = []
+        for name, slot, title, intro in GUIDES:
+            cid = self._meta(f"layout:ch:{slot}") if slot != "admin" else (self._meta("layout:ch:admin")
+                                                                            or self.channel_id)
+            channel = guild.get_channel(int(cid)) if cid and str(cid).isdigit() else None
+            if channel is None or name not in groups:
+                continue
+            embed = discord.Embed.from_dict(command_guide(groups[name], title, intro))
+            key = f"guide:{name}"
+            msg = None
+            try:
+                mid = self._meta(key)
+                if mid and str(mid).isdigit():
+                    try:
+                        msg = await channel.fetch_message(int(mid))
+                        await msg.edit(embed=embed)
+                    except discord.NotFound:
+                        msg = None
+                if msg is None:
+                    if not create:
+                        continue
+                    msg = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+                    self._meta(key, msg.id)
+                if not getattr(msg, "pinned", False):
+                    try:
+                        await msg.pin(reason="Command guide")
+                    except discord.HTTPException as e:
+                        log.info("admin_bot: couldn't pin the %s guide (needs Pin Messages): %s", name, e)
+                done.append(channel)
+            except discord.HTTPException as e:
+                log.info("admin_bot: couldn't post the /%s guide in #%s: %s", name, channel, e)
+        return done
+
+    async def _refresh_guides(self) -> None:
+        await asyncio.sleep(20)
+        try:
+            guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+            await self._command_guides(guild, create=False)
+        except Exception as e:  # noqa: BLE001
+            log.info("admin_bot: couldn't refresh the command guides: %s", e)
 
     async def _layout_undo(self, guild) -> tuple:
         """Put every renamed/moved channel back. Channels the setup created are left (and
@@ -3110,10 +3182,12 @@ class AdminBot:
 
         @odin.command(name="setup", description="Admins: organise this Discord into Valheim-themed channels")
         @app_commands.describe(action="preview: show what would change · apply: do it (asks first) · "
-                                      "undo: put renamed channels back")
+                                      "undo: put renamed channels back · guides: pin the command guides")
         @app_commands.choices(action=[app_commands.Choice(name="preview", value="preview"),
                                       app_commands.Choice(name="apply", value="apply"),
-                                      app_commands.Choice(name="undo", value="undo")])
+                                      app_commands.Choice(name="undo", value="undo"),
+                                      app_commands.Choice(name="guides: (re)post the pinned command guides",
+                                                          value="guides")])
         async def setup(it: discord.Interaction, action: str = "preview"):
             import server_layout
             if not await guard(it):
@@ -3123,6 +3197,12 @@ class AdminBot:
                 return
             await it.response.defer(ephemeral=True, thinking=True)
             guild = it.guild
+            if action == "guides":
+                done = await bot._command_guides(guild)
+                await it.followup.send(("📌 Command guides pinned in " + ", ".join(c.mention for c in done) + ".")
+                                       if done else "No channels to put them in yet: run `/odin setup apply` first.",
+                                       ephemeral=True)
+                return
             if action == "undo":
                 restored, created, problems = await bot._layout_undo(guild)
                 text = f"↩️ Put {restored} channel(s) and categories back as they were."
@@ -3154,6 +3234,7 @@ class AdminBot:
                                                embed=None, view=None)
                 problems = await bot._layout_apply(guild, p)
                 await bot._layout_guide(guild, p)
+                await bot._command_guides(guild)
                 log.info("admin_bot: /odin setup applied by %s (%d problem(s))", it.user, len(problems))
                 text = ("✅ Done. A guide to every channel is posted in the welcome channel. "
                         "Undo with `/odin setup undo`.")
