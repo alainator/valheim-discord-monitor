@@ -46,6 +46,7 @@ GROUPS = [
         "title_sessions": "Sleipnir: most visits",
         "title_longest": "Thor: longest single session",
         "title_achievements": "Bragi: most Steam achievements",
+        "title_least": "Hœnir: least time played (of players seen this month)",
     }),
 ]
 STATS = {k: v for _, _, keys in GROUPS for k, v in keys.items()}
@@ -62,6 +63,7 @@ TITLE_LABELS = {
     "title_sessions": ("🐎", "most visits"),
     "title_longest": ("⚡", "longest session"),
     "title_achievements": ("📜", "most achievements"),
+    "title_least": ("🤫", "least hours"),
 }
 
 

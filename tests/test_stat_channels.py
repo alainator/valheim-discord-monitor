@@ -100,7 +100,7 @@ class NamesTest(unittest.TestCase):
         self.assertEqual([g for g, _, _ in sc.GROUPS], ["watch", "saga", "hall"])
         self.assertEqual(sc.expand(["server", "titles", "server", "nope"]),
                          ["server", "title_owner", "title_time", "title_deaths", "title_sessions",
-                          "title_longest", "title_achievements"])
+                          "title_longest", "title_achievements", "title_least"])
         long = sc.names_list([f"Viking{i:02d}" for i in range(20)], "🟢 20 online: ")
         self.assertLessEqual(len(long), 100)
         self.assertTrue(long.endswith("more"))

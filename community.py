@@ -243,7 +243,15 @@ TITLES = {
     "sessions": ("Sleipnir", "carries riders between the worlds and always comes back: most visits", 0x95A5A6),
     "longest": ("Thor", "drank from the sea and lowered it: longest single session", 0x3498DB),
     "achievements": ("Bragi", "sings the great deeds of heroes: most Steam achievements", 0xE67E22),
+    "least": ("Hœnir", "the silent god who hardly lifts a finger: least time played", 0x7F8C8D),
 }
+# Hœnir only counts players seen in the last LEAST_ACTIVE_DAYS with at least
+# LEAST_MIN_SESSIONS visits, so it doesn't stick to someone who quit or just arrived.
+LEAST_ACTIVE_DAYS = 30
+LEAST_MIN_SESSIONS = 2
+# The "away" role: every linked player who hasn't been on for this long.
+AWAY_ROLE = ("Óðr", "Freyja's wandering husband, gone so long she wept gold for him: not seen for a while",
+             0x546E7A)
 # Earlier names of the title roles: a role the bot made under one of these is renamed.
 TITLE_OLD_NAMES = {"sessions": ("Huginn",)}
 _TITLE_SQL = {
@@ -285,7 +293,8 @@ def set_meta(conn, key: str, value) -> None:
 
 def title_value(conn, category: str, player: str, since: int = 0):
     """One character's score in a title category (for showing the holder's number)."""
-    sql = _TITLE_SQL[category].replace("GROUP BY", "AND player = ? COLLATE NOCASE GROUP BY")
+    sql = _TITLE_SQL["time" if category == "least" else category].replace(
+        "GROUP BY", "AND player = ? COLLATE NOCASE GROUP BY")
     r = _one(conn, sql, (since, player))
     return r["v"] if r else 0
 
@@ -295,12 +304,14 @@ def title_leaders(conn, since: int = 0) -> dict:
     time), or None with no data. On a tie the current holder keeps the title, so it
     doesn't flip back and forth; otherwise the first to get there (by name) wins."""
     out = {}
-    for cat, sql in _TITLE_SQL.items():
-        rows = [r for r in _rows(conn, sql, (since,)) if (r["v"] or 0) > 0]
+    queries = dict(_TITLE_SQL, least=None)
+    for cat, sql in queries.items():
+        rows = least_candidates(conn, since) if cat == "least" else \
+            [r for r in _rows(conn, sql, (since,)) if (r["v"] or 0) > 0]
         if not rows:
             out[cat] = None
             continue
-        best = max(r["v"] for r in rows)
+        best = (min if cat == "least" else max)(r["v"] for r in rows)
         tied = sorted((r for r in rows if r["v"] == best), key=lambda r: r["player"].lower())
         held = (title_holder(conn, cat) or {}).get("player")
         keep = next((r for r in tied if held and r["player"].lower() == held.lower()), None)
@@ -308,8 +319,33 @@ def title_leaders(conn, since: int = 0) -> dict:
     return out
 
 
-def render_titles(holders: dict, changed: set = frozenset(), period: str = "all") -> dict:
-    """holders: category -> {"player", "v", "user_id"} or None."""
+def least_candidates(conn, since: int = 0) -> list:
+    """Hœnir's candidates: [{"player", "v"}] of players seen in the last LEAST_ACTIVE_DAYS
+    (counted back from the newest log activity) with at least LEAST_MIN_SESSIONS visits."""
+    latest = _one(conn, "SELECT MAX(COALESCE(logout_at, last_seen_at)) AS t FROM play_sessions")
+    if not latest or not latest["t"]:
+        return []
+    active_since = latest["t"] - LEAST_ACTIVE_DAYS * 86400
+    rows = _rows(conn, "SELECT player, SUM(duration_seconds) AS v, COUNT(*) AS n, "
+                       "MAX(COALESCE(logout_at, last_seen_at)) AS seen FROM play_sessions "
+                       "WHERE login_at >= ? GROUP BY player", (since,))
+    return [{"player": r["player"], "v": r["v"]} for r in rows
+            if r["n"] >= LEAST_MIN_SESSIONS and (r["seen"] or 0) >= active_since and (r["v"] or 0) > 0]
+
+
+def away_users(conn, cutoff: int) -> dict:
+    """{user_id: last seen (log time)} for linked Discord users none of whose characters
+    has been on since `cutoff` (a log timestamp)."""
+    return {r["user_id"]: r["seen"] for r in _rows(
+        conn, "SELECT d.user_id, MAX(COALESCE(s.logout_at, s.last_seen_at)) AS seen FROM discord_links d "
+              "JOIN play_sessions s ON s.player = d.player COLLATE NOCASE GROUP BY d.user_id HAVING seen < ?",
+        (int(cutoff),))}
+
+
+def render_titles(holders: dict, changed: set = frozenset(), period: str = "all",
+                  away: Optional[list] = None, away_days: float = 14) -> dict:
+    """holders: category -> {"player", "v", "user_id"} or None; away: user ids holding
+    the away role (None leaves that line out)."""
     lines = []
     for cat, (role, why, _) in TITLES.items():
         h = holders.get(cat)
@@ -321,6 +357,10 @@ def render_titles(holders: dict, changed: set = frozenset(), period: str = "all"
             f"**{h['player']}** (not linked: `/valheim link {h['player']}` to get the role)"
         new = " 🆕" if cat in changed else ""
         lines.append(f"**{role}**{new}: {who}, {value}\n*{why}*")
+    if away is not None:
+        name, why, _ = AWAY_ROLE
+        who = ", ".join(f"<@{u}>" for u in sorted(away)[:20]) or "nobody, everyone's been around"
+        lines.append(f"**{name}**: {who}\n*{why.split(':')[0]}: away {away_days:g}+ days*")
     return {"title": "🏆 Titles of the realm", "color": 0xF1C40F,
             "description": "\n".join(lines),
             "footer": {"text": "Reassigned weekly · " + ("last 7 days" if period == "week" else "all time")

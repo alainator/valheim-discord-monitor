@@ -67,6 +67,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Two more roles** with the titles: **Hœnir** for the least time played (among players
+  seen this month with 2+ visits), and **Óðr** for everyone who hasn't been on for 14
+  days, taken back the moment they log in ([title roles](#title-roles)).
 - **A permanent copy of the server log:** Valheim wipes its log on every server start,
   taking the history with it. The monitor now keeps every line it reads in
   `logs_archive/` (one file a day, gzipped), and `--backfill` reads it, so stats can always
@@ -904,7 +907,7 @@ voice channels or categories.
 | `achievements` | Steam achievements unlocked, all players together |
 | `bosses` | Bosses defeated in this world and the next one ("🏆 Bosses: 3/8 · next: Moder"), from the [world save](#boss-progress) |
 | `title_owner` | Odin: the Discord server's owner |
-| `title_time`, `title_deaths`, `title_sessions`, `title_longest`, `title_achievements` | The [title](#title-roles) holders: Heimdall, Hel, Sleipnir, Thor, Bragi (`titles` means all of them) |
+| `title_time`, `title_deaths`, `title_sessions`, `title_longest`, `title_achievements`, `title_least` | The [title](#title-roles) holders: Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir (`titles` means all of them) |
 
 **Setup:** add this to the `admin_bot` block, then `docker compose up -d --force-recreate`:
 ```json
@@ -1226,6 +1229,22 @@ mythology:
 | **Sleipnir** | Most visits | Odin's eight-legged horse carries riders between the worlds, and always comes back |
 | **Thor** | Longest single session | Drank from a horn linked to the sea and lowered the ocean |
 | **Bragi** | Most Steam achievements | God of poetry, who sings the great deeds of heroes in Valhalla |
+| **Hœnir** | **Least** time played | The silent god, sent to the Vanir as a hostage, who never decided anything on his own |
+
+**Hœnir** only counts players seen in the last 30 days who have visited at least twice,
+so it doesn't stick to someone who quit or arrived yesterday. It's meant as a friendly
+"come play more", not a punishment.
+
+**Óðr: away for a while.** Every linked player who hasn't been on for 14 days gets the
+**Óðr** role, after Freyja's husband who wandered off on long journeys while she wept tears
+of gold for him.
+- Unlike the titles it can have many holders, and it's checked every hour rather than weekly.
+- It's taken back **the moment they log in** again.
+- A player with several characters counts as away only when none of them has been on.
+- `/muninn titles` lists who's away.
+- Options in the `titles` block: `"away_days": 14`, `"away_role": "Óðr"` (or `false` to
+  turn it off), and `"away_dm": true` to also DM each player once when they become
+  away ("The longships miss you…"). The DM is off by default.
 
 **Naming tip:** to keep the theme, call the announcement webhook **Huginn** (`"discord":
 {"username": "Huginn"}`) and the bot **Muninn** (developer portal → Bot → Username). They're
@@ -1293,6 +1312,8 @@ The channels have themed names too: see [server setup](#server-setup-odin-setup)
 | **Sleipnir** | Title role: most visits | Odin's horse, always carrying riders between the worlds and back | 〃 |
 | **Thor** | Title role: longest single session | Drank from a horn linked to the sea and lowered the ocean | 〃 |
 | **Bragi** | Title role: most Steam achievements | Sings the great deeds of heroes in Valhalla | 〃 (plus the Steam key) |
+| **Hœnir** | Title role: least time played (players seen this month) | The silent god who hardly lifts a finger | 〃 |
+| **Óðr** | Every linked player away for 14+ days, until they're back | Freyja's wandering husband, always gone | 〃 |
 | **Skadi** | Role for a week after claiming a [bounty](#bounties) | Goddess of the hunt, on skis with her bow | `/odin bounty` (on by default) |
 
 Title roles go to whoever leads that `/muninn top` board at the weekly check
@@ -1317,7 +1338,7 @@ time it hands each one out. None of them grant any permissions.
 1. **Muninn**, the bot's own role (it has the bot icon). It must stay **above** every role
    it hands out.
 2. **Odin**. The bot moves it here when it creates it.
-3. **Heimdall, Hel, Sleipnir, Thor, Bragi, Skadi, In Valheim**, in any order.
+3. **Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir, Óðr, Skadi, In Valheim**, in any order.
 
 Roles the bot creates start at the bottom of the list, so they're below its own role and it
 can hand them out. If you drag one above Muninn, the log says `can't give the … role`.
@@ -1990,7 +2011,8 @@ or run it in a terminal.
 | `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |
 | `admin_bot.titles.day` / `hour` | sunday / 18 | When to reassign the titles (container time zone). |
 | `admin_bot.titles.channel_id` | — | Where to post title changes; empty = the webhook channel. |
-| `admin_bot.titles.roles` | — | Existing role IDs per category (`time`, `deaths`, `sessions`, `longest`, `achievements`); otherwise the bot creates them. |
+| `admin_bot.titles.roles` | — | Existing role IDs per category (`time`, `deaths`, `sessions`, `longest`, `achievements`, `least`); otherwise the bot creates them. |
+| `admin_bot.titles.away_days` / `away_role` / `away_dm` | 14 / Óðr / false | The [away role](#title-roles) for linked players not seen for that long; `away_role: false` turns it off; `away_dm` sends one "come back" DM. |
 | `health.low_disk_gb` | 10 | Warn when the save disk has less free space than this. |
 | `health.slow_save_seconds` | 5 | Warn when a world save takes longer than this. |
 | `daily_restart.time` / `window_minutes` | — / 120 | Restart once a day in this window while nobody's on (needs the host helper). |

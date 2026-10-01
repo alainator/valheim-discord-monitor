@@ -67,6 +67,11 @@ def command_guide(group, title: str, intro: str) -> dict:
     return {"title": title, "description": "\n".join(lines)[:4000], "color": 0xC27C0E}
 
 
+def community_away_name() -> str:
+    import community
+    return community.AWAY_ROLE[0]
+
+
 DEFAULT_RULES = (
     "**1. Be a good shieldmate.** Be kind in chat and in game. No harassment, slurs or drama.\n"
     "**2. No griefing.** Don't destroy, take or move what others built or stored without asking.\n"
@@ -443,6 +448,13 @@ class AdminBot:
         # Weekly title roles for the /muninn top leaders (community.TITLES).
         tc = cfg.get("titles") or {}
         self.titles_on = bool(tc.get("enabled", False))
+        # The "away" role (Óðr) for linked players who haven't been on for away_days.
+        away = tc.get("away_role", True)
+        self.away_role_name = (away.strip() if isinstance(away, str) and away.strip()
+                               else community_away_name() if away is True else None)
+        self.away_days = float(tc.get("away_days", 14))
+        self.away_dm = bool(tc.get("away_dm", False))
+        self._away_checked = 0.0
         self.titles_period = "week" if str(tc.get("period", "all")).lower() == "week" else "all"
         day = str(tc.get("day", "sunday")).lower()
         self.titles_weekday = DAYS.index(day) if day in DAYS else 6
@@ -617,6 +629,8 @@ class AdminBot:
         try:
             if self.online_role or self.online_role_name:
                 await self._set_role(player, True)
+            if self._titles_task and self.away_role_name and self.guild_id:
+                await self._back_from_away(player)
             now = time.time()
             # "Come join": the count just reached someone's /valheim notify crowd threshold.
             for uid in community.who_to_nudge(self.db, before, count, online or [player]):
@@ -2009,7 +2023,72 @@ class AdminBot:
                 log.warning("admin_bot: title roles failed: %s", e)
             except Exception as e:  # noqa: BLE001
                 log.warning("admin_bot: title roles failed: %s", e)
+            if self.away_role_name and time.time() - self._away_checked >= 3600:
+                self._away_checked = time.time()
+                try:
+                    await self._sync_away()
+                except Exception as e:  # noqa: BLE001
+                    log.warning("admin_bot: the %s role failed: %s", self.away_role_name, e)
             await asyncio.sleep(300)
+
+    def _away_holders(self) -> set:
+        try:
+            return set(json.loads(self._meta("away:holders") or "[]"))
+        except ValueError:
+            return set()
+
+    async def _sync_away(self) -> tuple:
+        """Give the away role (Óðr) to every linked player who hasn't been on for away_days,
+        and take it from anyone who has come back. Returns (given, taken)."""
+        import discord
+        import community
+        guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+        cutoff = int(time.time()) - community.log_clock_offset(self.db) - int(self.away_days * 86400)
+        away = set(community.away_users(self.db, cutoff))
+        held = self._away_holders()
+        given, taken = away - held, held - away
+        if not (given or taken):
+            return set(), set()
+        role = await self._ensure_role(guild, "away", None, self.away_role_name, community.AWAY_ROLE[2],
+                                       reason=f"Valheim: not seen for {self.away_days:g} days")
+        for uid, add in [(u, True) for u in given] + [(u, False) for u in taken]:
+            try:
+                member = await guild.fetch_member(int(uid))
+                await (member.add_roles if add else member.remove_roles)(
+                    role, reason=f"Away from Valheim for {self.away_days:g}+ days" if add else "Back in Valheim")
+            except discord.NotFound:              # left the Discord server
+                pass
+            except discord.HTTPException as e:
+                log.warning("admin_bot: couldn't change the %s role for %s: %s", role.name, uid, e)
+                (given if add else taken).discard(uid)
+                continue
+            if add and self.away_dm:
+                await self._dm(uid, f"🛶 The longships miss you on **{self.server_name}**! It's been "
+                                    f"{self.away_days:g}+ days. `/valheim join` has the join code whenever "
+                                    "you're ready to sail again.")
+        self._meta("away:holders", json.dumps(sorted((held | given) - taken)))
+        if given or taken:
+            log.info("admin_bot: %s role: %d given, %d taken back", role.name, len(given), len(taken))
+        return given, taken
+
+    async def _back_from_away(self, player: str) -> None:
+        """At login: take the away role back at once, rather than at the next hourly check."""
+        import discord
+        import community
+        uid = community.linked_user(self.db, player)
+        if not (uid and self.away_role_name and uid in self._away_holders()):
+            return
+        rid = self._meta("role:away")
+        guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+        role = guild.get_role(int(rid)) if rid and str(rid).isdigit() else None
+        if role is not None:
+            try:
+                member = await guild.fetch_member(int(uid))
+                await member.remove_roles(role, reason="Back in Valheim")
+            except discord.HTTPException as e:
+                log.info("admin_bot: couldn't take the %s role back from %s: %s", role.name, uid, e)
+                return
+        self._meta("away:holders", json.dumps(sorted(self._away_holders() - {uid})))
 
     def _titles_relink(self) -> None:
         """After /valheim link or unlink: move a title role to the newly linked account."""
@@ -2687,8 +2766,9 @@ class AdminBot:
             except discord.HTTPException as e:
                 await it.followup.send(f"Couldn't update the title roles: {e}", ephemeral=True)
                 return
+            away = sorted(bot._away_holders()) if bot.away_role_name else None
             await it.followup.send(embed=discord.Embed.from_dict(
-                community.render_titles(holders, changed, bot.titles_period)),
+                community.render_titles(holders, changed, bot.titles_period, away, bot.away_days)),
                 allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="compare", description="Two characters side by side: time, visits, deaths and more")
