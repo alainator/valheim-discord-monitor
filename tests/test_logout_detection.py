@@ -99,6 +99,17 @@ class LogoutDetectionTest(unittest.TestCase):
         got = self.feed(p, ["09/14/2026 09:00:00: Destroying abandoned non persistent zdo 333:4 owner 333"])
         self.assertEqual(got, [("logout", "Bjorn")])
 
+    def test_a_reconnect_keeps_its_connection(self):
+        """Bjorn reconnects: his new connection must not be handed to the next player."""
+        p = self.two_online()
+        self.feed(p, ["09/14/2026 08:10:00: PlayFab listen socket child connected to remote player CCCC3333DDDD4444",
+                      "09/14/2026 08:10:20: Got character ZDOID from Bjorn : 333:1"])
+        self.assertEqual(p.s.pending_ids, [])
+        got = self.feed(p, join("EEEE5555FFFF6666", "Erik", 444, 3)
+                        + ["09/14/2026 09:00:00: PlayFab socket with remote ID playfab/CCCC3333DDDD4444 closed by remote"])
+        self.assertEqual(got, [("login", "Erik"), ("logout", "Bjorn")])
+        self.assertIn("Erik", p.s.online)
+
     def test_a_second_connection_ending_is_not_a_leave(self):
         """Steam: a player who's in connects again (e.g. Join Game from their friends list);
         that extra connection ending doesn't mean they left."""

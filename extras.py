@@ -276,9 +276,9 @@ def _tree_size(path: str) -> int:
     return total
 
 
-def list_backups(folder: str) -> list:
+def list_backups(folder: str, sizes: bool = True) -> list:
     """[(mtime, size, name)] newest first. name is the folder name, or the file stem
-    for an old .db/.fwl pair."""
+    for an old .db/.fwl pair. sizes=False skips walking each backup folder (size 0)."""
     try:
         entries = os.listdir(folder)
     except FileNotFoundError:
@@ -290,7 +290,7 @@ def list_backups(folder: str) -> list:
         path = os.path.join(folder, n)
         try:
             if os.path.isdir(path):
-                out.append((os.stat(path).st_mtime, _tree_size(path), n))
+                out.append((os.stat(path).st_mtime, _tree_size(path) if sizes else 0, n))
             elif n.endswith(LEGACY_EXTS):
                 st = os.stat(path)
                 stem = n.rsplit(".", 1)[0]

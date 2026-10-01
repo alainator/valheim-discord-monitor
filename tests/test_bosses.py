@@ -64,6 +64,24 @@ class SaveTest(unittest.TestCase):
         self.assertEqual(bosses.read_keys(self.d), {"defeated_fader", "defeated_kall"})
         self.assertIn("Kall Fimbulbringer", bosses.render({"defeated_kall"})["description"])
 
+    def test_a_glued_byte_doesnt_hide_a_boss(self):
+        """Strings are length-prefixed with nothing between them: a length byte that's a
+        letter or digit must not turn defeated_bonemass into an unknown key."""
+        folder = os.path.join(self.worlds, "Alheim")
+        os.makedirs(folder)
+        blob = b"\x11defeated_bonemass5preset_combat_hard_deathpenalty_casual_resources_more_x"
+        packed = gzip.compress(blob)
+        with open(os.path.join(folder, "_main.1.db2"), "wb") as f:
+            f.write(struct.pack("<i", 41) + b"\x00" * 8 + struct.pack("<i", len(packed)) + packed)
+        self.assertEqual(bosses.read_keys(self.d), {"defeated_bonemass"})
+
+    def test_unreadable_save_is_none(self):
+        folder = os.path.join(self.worlds, "Alheim")
+        os.makedirs(folder)
+        with open(os.path.join(folder, "_main.1.db2"), "wb") as f:
+            f.write(struct.pack("<i", 41) + b"\x00" * 12 + b"\x1f\x8b\x08garbage")
+        self.assertIsNone(bosses.read_keys(self.d))
+
     def test_no_save(self):
         self.assertIsNone(bosses.read_keys(self.d))
         self.assertIsNone(bosses.channel_name(None))
@@ -104,6 +122,12 @@ class BotTest(unittest.TestCase):
             self.assertIn("defeated_dragon", json.loads(b._meta("bosses:when")))
             self.assertEqual(asyncio.run(b._check_bosses()), [])               # nothing new
             self.assertEqual(len(posts), 1)
+            # /odin restore to before Moder: when he falls again, that's news again.
+            write_db2(world, 1031, REAL)
+            asyncio.run(b._check_bosses())
+            write_db2(world, 1032, REAL + ["defeated_dragon"])
+            self.assertEqual(asyncio.run(b._check_bosses()), ["defeated_dragon"])
+            self.assertEqual(len(posts), 2)
 
 
 if __name__ == "__main__":

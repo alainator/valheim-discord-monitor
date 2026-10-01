@@ -94,6 +94,19 @@ class CompareAndUptimeTest(DB):
         kinds = [r[0] for r in self.c.execute("SELECT kind FROM server_events ORDER BY at")]
         self.assertEqual(kinds, ["down", "up"])
 
+    def test_a_crash_counts_as_downtime(self):
+        """No shutdown line: the server was down from the last thing it logged to the boot."""
+        self.st.uptime_event("up", 1000)
+        self.st.heartbeat(5000)                        # its last "Connections" line
+        self.st.uptime_event("up", 9000, unclean=True)  # boots again without a shutdown line
+        u = community.uptime(self.c, 0, 10000)
+        self.assertEqual((u["restarts"], u["down_seconds"]), (1, 4000))
+        # A clean shutdown, then the boot: one outage, not two.
+        self.st.uptime_event("down", 9500)
+        self.st.uptime_event("down", 9600, unclean=True)
+        self.st.uptime_event("up", 9800)
+        self.assertEqual(community.uptime(self.c, 0, 10000)["restarts"], 2)
+
     def test_stat_channel(self):
         now = local(2026, 9, 30, 12)
         start = int(stat_channels.week_start(now).timestamp())
@@ -144,6 +157,9 @@ class QuietAndDigestTest(unittest.TestCase):
         d.flush()
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0]["embeds"][0]["description"].count("has arrived"), 2)
+
+    def test_send_says_whether_it_went_out(self):
+        self.assertFalse(Discord("").post_embed("announcement", {"description": "x"}, {"announcement"}))
 
     def test_announcement_can_ping_everyone(self):
         d, sent, _ = self.feed()
