@@ -125,7 +125,8 @@ class TitlesTest(DB):
         lead = community.title_leaders(self.c)
         self.assertEqual({k: v and v["player"] for k, v in lead.items()},
                          {"time": "Ingrid", "deaths": "Bjorn", "sessions": "Bjorn", "longest": "Ingrid",
-                          "achievements": None})
+                          "achievements": None,
+                          "least": "Bjorn"})               # Ingrid has played less, but only once
         self.assertEqual(lead["time"]["v"], 7200)
         # A tie keeps the current holder instead of flipping to the first name.
         self.st.death("Ingrid", 1400)
