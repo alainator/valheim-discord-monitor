@@ -246,9 +246,10 @@ TITLES = {
     "least": ("Hœnir", "the silent god who hardly lifts a finger: least time played", 0x7F8C8D),
 }
 # Hœnir only counts players seen in the last LEAST_ACTIVE_DAYS with at least
-# LEAST_MIN_SESSIONS visits, so it doesn't stick to someone who quit or just arrived.
+# LEAST_MIN_SECONDS played in all, so it doesn't stick to someone who quit, or who
+# logged on for a few seconds to take a peek.
 LEAST_ACTIVE_DAYS = 30
-LEAST_MIN_SESSIONS = 2
+LEAST_MIN_SECONDS = 600
 # The "away" role: every linked player who hasn't been on for this long.
 AWAY_ROLE = ("Óðr", "Freyja's wandering husband, gone so long she wept gold for him: not seen for a while",
              0x546E7A)
@@ -321,7 +322,7 @@ def title_leaders(conn, since: int = 0) -> dict:
 
 def least_candidates(conn, since: int = 0) -> list:
     """Hœnir's candidates: [{"player", "v"}] of players seen in the last LEAST_ACTIVE_DAYS
-    (counted back from the newest log activity) with at least LEAST_MIN_SESSIONS visits."""
+    (counted back from the newest log activity) with at least LEAST_MIN_SECONDS played."""
     latest = _one(conn, "SELECT MAX(COALESCE(logout_at, last_seen_at)) AS t FROM play_sessions")
     if not latest or not latest["t"]:
         return []
@@ -330,7 +331,7 @@ def least_candidates(conn, since: int = 0) -> list:
                        "MAX(COALESCE(logout_at, last_seen_at)) AS seen FROM play_sessions "
                        "WHERE login_at >= ? GROUP BY player", (since,))
     return [{"player": r["player"], "v": r["v"]} for r in rows
-            if r["n"] >= LEAST_MIN_SESSIONS and (r["seen"] or 0) >= active_since and (r["v"] or 0) > 0]
+            if (r["v"] or 0) >= LEAST_MIN_SECONDS and (r["seen"] or 0) >= active_since]
 
 
 def away_users(conn, cutoff: int) -> dict:
