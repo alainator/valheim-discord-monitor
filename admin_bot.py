@@ -46,6 +46,16 @@ from typing import Optional
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
                   "uptime": "bots", "bosses": "bots", "plan": "plans", "bounties": "plans"}
+DEFAULT_RULES = (
+    "**1. Be a good shieldmate.** Be kind in chat and in game. No harassment, slurs or drama.\n"
+    "**2. No griefing.** Don't destroy, take or move what others built or stored without asking.\n"
+    "**3. Ask before building close to someone else's base**, and leave portals and roads usable for all.\n"
+    "**4. Shared chests are for sharing.** Take what you need, put back what you can.\n"
+    "**5. Boss fights are group events.** Plan them in #war-council so everyone can come.\n"
+    "**6. No cheats, mods that give an edge, or exploits.**\n"
+    "**7. New here?** `/valheim join` has the join code; `/valheim request-access` tells the admins "
+    "which character you'll play; `/valheim link` links it to your Discord.\n\n"
+    "The admins have the final say. Skål! 🍻")
 WELCOME_DM = ("👋 Welcome to **{guild}**, {member}! We play Valheim on **{server}**.\n"
               "• `/valheim join`: the join code and how to get in\n"
               "• `/valheim request-access`: tell the admins which character you'll play, if the server "
@@ -389,6 +399,11 @@ class AdminBot:
         self._voice_temps: set = set()
         self._voice_task = None
         self._voice_lock = None
+        # The rules channel (#runestone from /odin setup, or announce_channel_id): /odin rules,
+        # /odin announce, and with runestone_news big server news (updates, restores, bosses).
+        ch = str(cfg.get("announce_channel_id", ""))
+        self.runestone_channel = int(ch) if ch.isdigit() else None
+        self.runestone_news = bool(cfg.get("runestone_news", False))
         # Bounties: /odin bounty posts a challenge; whoever an admin confirms gets a role.
         bc = cfg.get("bounties") or {}
         ch = str(bc.get("channel_id", ""))
@@ -1669,6 +1684,8 @@ class AdminBot:
             if self.bosses_announce and self.post_embed:
                 embed = bosses.announcement(key, keys, self.server_name)
                 await asyncio.get_running_loop().run_in_executor(None, lambda e=embed: self.post_embed(e, "boss"))
+            if self.runestone_news:
+                await self._post_news("", bosses.announcement(key, keys, self.server_name))
         self._meta("bosses:when", json.dumps(when))
         return new
 
@@ -2036,6 +2053,60 @@ class AdminBot:
         await it.response.edit_message(embed=embed, view=self._buttons(pid, disabled=True))
         if self.tidy_hours > 0 and it.message:
             self._queue_tidy(it.message.channel.id, it.message.id)
+
+    # -- the rules channel (#runestone) -----------------------------------------
+    async def _runestone(self):
+        """The rules/announcements channel: announce_channel_id, else #runestone from
+        /odin setup, else None."""
+        cid = self.runestone_channel or self._meta("layout:ch:rules")
+        if not (cid and str(cid).isdigit()):
+            return None
+        try:
+            return self.client.get_channel(int(cid)) or await self.client.fetch_channel(int(cid))
+        except Exception:  # noqa: BLE001  (deleted, or no access)
+            return None
+
+    def news(self, text: str, embed: Optional[dict] = None) -> None:
+        """Thread-safe: with runestone_news on, keep big server news (a Valheim update, a
+        restore, a boss kill) in the rules channel too, where it doesn't scroll away."""
+        if self.runestone_news and self.loop and self.ready.is_set():
+            asyncio.run_coroutine_threadsafe(self._post_news(text, embed), self.loop)
+
+    async def _post_news(self, text: str, embed: Optional[dict] = None) -> None:
+        import discord
+        channel = await self._runestone()
+        if channel is None:
+            return
+        e = discord.Embed.from_dict(embed) if embed else discord.Embed(description=text[:4000], color=0xC27C0E)
+        e.timestamp = discord.utils.utcnow()
+        try:
+            await channel.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as err:
+            log.info("admin_bot: couldn't post news in the rules channel: %s", err)
+
+    async def _post_rules(self, channel, text: str):
+        """Post or edit the one pinned rules message. Returns (message, created)."""
+        import discord
+        embed = discord.Embed(title="📜 The laws of the realm", description=text[:4000], color=0xC27C0E)
+        mid = self._meta("rules:message")
+        msg, created = None, False
+        if mid and str(mid).isdigit():
+            try:
+                msg = await channel.fetch_message(int(mid))
+                await msg.edit(embed=embed)
+            except discord.NotFound:
+                msg = None
+        if msg is None:
+            msg = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            self._meta("rules:message", msg.id)
+            created = True
+        self._meta("rules:text", text)
+        if not getattr(msg, "pinned", False):
+            try:
+                await msg.pin(reason="/odin rules")
+            except discord.HTTPException as e:
+                log.info("admin_bot: couldn't pin the rules (needs Pin Messages): %s", e)
+        return msg, created
 
     # -- join-to-create voice ----------------------------------------------------
     def _voice_save(self) -> None:
@@ -2947,34 +3018,95 @@ class AdminBot:
             await it.response.send_message(f"Closed bounty #{bid}.", ephemeral=True)
         bounty_close.autocomplete("bounty")(bounty_choices)
 
-        @odin.command(name="announce", description="Post an announcement as Huginn in the feed channel")
+        @odin.command(name="announce", description="Post an announcement in #runestone (or Huginn's feed)")
         @app_commands.describe(message="What to announce (use \\n for a new line)", title="An optional headline",
-                               ping="Also ping @everyone")
-        async def announce_cmd(it: discord.Interaction, message: str, title: str = "", ping: bool = False):
+                               ping="Also ping @everyone", where="Where to post it (default: #runestone)")
+        @app_commands.choices(where=[app_commands.Choice(name="#runestone (rules and announcements)", value="runestone"),
+                                     app_commands.Choice(name="Huginn's feed (#huginns-watch)", value="feed"),
+                                     app_commands.Choice(name="Both", value="both")])
+        async def announce_cmd(it: discord.Interaction, message: str, title: str = "", ping: bool = False,
+                               where: str = "runestone"):
             if not await guard(it):
                 return
-            if not (bot.post_embed and bot.webhook_url):
-                await it.response.send_message("There's no feed webhook yet: run `/odin setup apply`, or set "
-                                                "`discord.webhook_url`.", ephemeral=True)
+            await it.response.defer(ephemeral=True)
+            text = message.replace("\\n", "\n")[:4000]
+            head = "📣 " + title.strip()[:250] if title.strip() else None
+            done, notes = [], []
+            stone = await bot._runestone() if where in ("runestone", "both") else None
+            if where in ("runestone", "both") and stone is None:
+                notes.append("there's no #runestone (run `/odin setup apply`, or set `announce_channel_id`), "
+                             "so it went to Huginn's feed")
+                where = "feed"
+            if stone is not None:
+                embed = discord.Embed(title=head, description=text, color=0xC27C0E)
+                embed.set_footer(text=f"From {it.user.display_name}")
+                embed.timestamp = discord.utils.utcnow()
+                try:
+                    await stone.send(content="@everyone" if ping else None, embed=embed,
+                                     allowed_mentions=discord.AllowedMentions(everyone=ping, users=False, roles=False))
+                    done.append(stone.mention)
+                    me = getattr(stone.guild, "me", None)
+                    if ping and me is not None and not stone.permissions_for(me).mention_everyone:
+                        notes.append("the @everyone didn't ping anyone: give the bot **Mention Everyone** in that "
+                                     "channel's permissions")
+                except discord.HTTPException as e:
+                    notes.append(f"couldn't post in {stone.mention}: {e}")
+            if where in ("feed", "both"):
+                if not (bot.post_embed and bot.webhook_url):
+                    notes.append("there's no feed webhook yet (run `/odin setup apply`, or set `discord.webhook_url`)")
+                else:
+                    embed = {"description": text, "footer": {"text": f"From {it.user.display_name}"}}
+                    if head:
+                        embed["title"] = head
+                    kw = {"content": "@everyone", "allowed_mentions": {"parse": ["everyone"]}} if ping else {}
+                    try:
+                        ok = await asyncio.get_running_loop().run_in_executor(
+                            None, lambda: bot.post_embed(embed, "announcement", **kw))
+                    except Exception as e:  # noqa: BLE001
+                        ok = False
+                        log.warning("admin_bot: announcement to the feed failed: %s", e)
+                    if ok is False:
+                        notes.append("Huginn's feed didn't take it (the webhook refused it or Discord didn't "
+                                     "answer; see the monitor's log)")
+                    else:
+                        done.append("Huginn's feed")
+            log.info("admin_bot: announcement by %s to %s", it.user, ", ".join(done) or "nowhere")
+            reply = (f"📣 Posted in {' and '.join(done)}." if done else "Couldn't post it anywhere.")
+            if notes:
+                reply += "\n⚠️ " + "\n⚠️ ".join(n[0].upper() + n[1:] + "." for n in notes)
+            await it.followup.send(reply, ephemeral=True)
+
+        @odin.command(name="rules", description="Post or edit the pinned rules in #runestone")
+        @app_commands.describe(text="Your rules (use \\n for new lines). Leave empty for a starter set to edit",
+                               show="Just show the current rules text, to copy and edit")
+        async def rules_cmd(it: discord.Interaction, text: str = "", show: bool = False):
+            if not await guard(it):
                 return
-            embed = {"description": message.replace("\\n", "\n")[:4000],
-                     "footer": {"text": f"From {it.user.display_name}"}}
-            if title.strip():
-                embed["title"] = "📣 " + title.strip()[:250]
-            kw = {"content": "@everyone", "allowed_mentions": {"parse": ["everyone"]}} if ping else {}
+            current = bot._meta("rules:text") or ""
+            if show:
+                body = current or DEFAULT_RULES
+                await it.response.send_message(
+                    ("Current rules" if current else "No rules posted yet; here's the starter set") +
+                    ". Copy, edit, and run `/odin rules text:…` (write new lines as `\\n`):\n```\n" +
+                    body.replace("\n", "\\n")[:1800] + "\n```", ephemeral=True)
+                return
+            stone = await bot._runestone()
+            if stone is None:
+                await it.response.send_message("There's no #runestone yet: run `/odin setup apply`, or set "
+                                                "`announce_channel_id` in config.json.", ephemeral=True)
+                return
+            body = text.replace("\\n", "\n").strip() or current or DEFAULT_RULES
             await it.response.defer(ephemeral=True)
             try:
-                ok = await asyncio.get_running_loop().run_in_executor(
-                    None, lambda: bot.post_embed(embed, "announcement", **kw))
-            except Exception as e:  # noqa: BLE001
-                ok, why = False, str(e)
-            else:
-                why = "the webhook refused it or Discord didn't answer; see the monitor's log"
-            if ok is False:
-                await it.followup.send(f"Couldn't post it: {why}.", ephemeral=True)
+                msg, created = await bot._post_rules(stone, body)
+            except discord.HTTPException as e:
+                await it.followup.send(f"Couldn't post the rules in {stone.mention}: {e}", ephemeral=True)
                 return
-            log.info("admin_bot: announcement by %s", it.user)
-            await it.followup.send("📣 Posted.", ephemeral=True)
+            log.info("admin_bot: rules %s by %s", "posted" if created else "edited", it.user)
+            hint = "" if text.strip() else (" These are the starter rules: `/odin rules show:True` gives you the "
+                                            "text to edit.")
+            await it.followup.send(f"📜 Rules {'posted and pinned' if created else 'updated'} in "
+                                   f"{stone.mention}: {msg.jump_url}{hint}", ephemeral=True)
 
         @odin.command(name="setup", description="Admins: organise this Discord into Valheim-themed channels")
         @app_commands.describe(action="preview: show what would change · apply: do it (asks first) · "

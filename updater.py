@@ -98,7 +98,7 @@ class UpdateWatcher:
         elif (m2 := RE_RESTORE_DONE.search(msg)):
             out.append(("admin", f"✅ World restored from `{m2.group('name')}`. The world as it was before is kept "
                                  f"as `{m2.group('safe')}`, so `/odin restore` can put it back."))
-            out.append(("public", "⏪ The world has been restored from a backup. The server is starting again."))
+            out.append(("news", "⏪ The world has been restored from a backup. The server is starting again."))
         elif (m2 := RE_ERROR.search(msg)):
             err, now = m2.group("err"), self.clock()
             if err not in self.error_posted or now - self.error_posted[err] > 6 * 3600:

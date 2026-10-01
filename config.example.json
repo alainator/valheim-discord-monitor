@@ -69,6 +69,7 @@
     "link_nickname": false,
     "tidy_notices_hours": 24,
     "welcome_dm": false,
+    "runestone_news": false,
     "voice_lobby": false,
     "bounties": { "role": "Skadi", "role_days": 7 },
     "stat_channels": {
