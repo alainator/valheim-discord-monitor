@@ -65,6 +65,16 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Fixes from a second code audit** ([details](#about-this-fork)):
+  - "come join" and "first player online" DMs now arrive (they never fired);
+  - a player who reconnects is no longer mixed up with the next one to join;
+  - `/muninn uptime` counts crashes;
+  - a failed `/odin restore` can't leave the server on an empty world;
+  - muting in the join-to-create lobby no longer makes extra channels;
+  - `/odin announce` says when a post failed.
+
+  With `/odin restore` set up, install the host script again:
+  `sudo install -o valheim -g valheim -m 755 host/valheim-bot-request.sh /home/valheim/valheim-bot-request.sh`.
 - **Boss progress:** the bot reads which bosses are down straight from the world save (no
   mods), posts "⚔️ Moder has fallen!" when a new one falls, and shows it in
   `/muninn bosses` and a "🏆 Bosses: 3/8 · next: Moder" stat channel
@@ -1491,8 +1501,10 @@ servers with the [host helper](host/README.md)):
    "✅ World restored from `…`"; the public channel is told too.
 
 Picking the `…_backup_prerestore-…` entry undoes a restore. If anything is off (the
-backup doesn't match the world, the server won't stop, the copy fails), nothing changes
-and the error goes to the admin channel.
+backup doesn't match the world, the server won't stop, the copy fails), the world is left
+as it was and the error goes to the admin channel. The server is never started on a
+missing world: if the old world can't be put back, it stays stopped and the error says
+how to recover.
 
 **One-time setup** on the host, from the repo folder
 ([full steps and checks](host/README.md#one-time-setup-1)):
@@ -1987,6 +1999,23 @@ Added here:
   - `docker stop` is clean;
   - one-off commands no longer cut short live stats sessions;
   - Steam and LOW.MS maintenance fixes.
+- **Fixes from a second audit**, of the newer features:
+  - "come join" and "first player online" DMs: the server counts a player before their
+    character spawns, so the "before" count was already too high and they never fired;
+  - a reconnecting player's new connection is kept, so the next player to join isn't
+    paired with it (wrong Steam ID, logged out when the first player left);
+  - an earlier connection's leftovers being cleaned up, or a second connection from the
+    same Steam account ending, no longer post a player as leaving;
+  - uptime counts crashes (a boot with no shutdown line first) from the last thing the
+    server logged;
+  - `/odin restore` puts the old world back if moving the backup in fails, and its list
+    no longer times out on big backup folders;
+  - boss keys are matched exactly (the save packs strings back to back), an unreadable
+    save is skipped, and a boss undone by a restore is announced again when it falls;
+  - a new player's first Steam achievements are posted instead of being taken as the
+    baseline;
+  - join-to-create ignores mute and deafen in the lobby; `/odin announce` reports a failed
+    post; an expired bounty role the bot can't remove no longer errors every 30 seconds.
 - **Tests and CI.**
 
 ## License

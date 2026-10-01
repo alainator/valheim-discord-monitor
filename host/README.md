@@ -207,7 +207,10 @@ What the handler does, as `valheim`:
    has stopped. Valheim saves the world on the way down.
 3. Copies the backup next to the live world. Then it renames the live world to
    `<world>_backup_prerestore-<date>-<time>` and moves the copy into its place. If the
-   copy fails, the live world is left untouched.
+   copy fails, the live world is left untouched. If moving the copy in fails, the old
+   world is moved back. If even that fails, the server stays stopped (Valheim would
+   otherwise make a new, empty world with that name) and the log says which folder to
+   rename back.
 4. Starts the server again and logs `Restore done: …` in `update_check.log`. The admin
    channel gets the result, and the public channel is told the world was restored.
 
@@ -221,7 +224,8 @@ Run these on the host, from the repo folder (e.g.
 `cd /path/to/valheim-discord-monitor`). Your own user can't read `/home/valheim`, so the
 checks use `sudo`.
 
-1. **Update the monitor and install the new request handler:**
+1. **Update the monitor and install the new request handler** (again after any update
+   that changes `host/valheim-bot-request.sh`; the README's "What's new" says when):
    ```bash
    git pull
    docker compose up -d --build
