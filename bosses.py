@@ -30,9 +30,8 @@ BOSSES = [
 ]
 BOSS_KEYS = [b[0] for b in BOSSES]
 NAMES = {b[0]: b[1] for b in BOSSES}
-RE_KEY = re.compile(rb"defeated_[a-z0-9_]{2,40}")
 # Kall's exact key isn't known yet, so any defeated_* key naming Kall or Fimbul counts as him.
-RE_KALL = re.compile(r"kall|fimbul")
+RE_KALL = re.compile(rb"defeated_[a-z0-9_]{0,24}?(?:kall|fimbul)")
 GZIP = b"\x1f\x8b\x08"
 
 
@@ -44,21 +43,24 @@ def name_of(key: str) -> str:
 def _keys_in(data: bytes) -> set:
     """The main bosses' keys in the data. Other defeated_* keys aren't bosses (Valheim
     sets some for other creatures), so they're ignored."""
-    found = {k.decode() for k in RE_KEY.findall(data)}
-    if any(RE_KALL.search(k) for k in found):
+    # Searched by exact name: the save stores strings length-prefixed with nothing
+    # between them, so a pattern could swallow the next string's first byte.
+    found = {k for k in BOSS_KEYS if k.encode() in data}
+    if RE_KALL.search(data):
         found.add("defeated_kall")
-    return found & set(BOSS_KEYS)
+    return found
 
 
-def _unpack(data: bytes, limit: int = 64 << 20) -> bytes:
-    """The first gzip stream in a 1.0 save file, unpacked (the file itself if none)."""
+def _unpack(data: bytes, limit: int = 64 << 20) -> Optional[bytes]:
+    """The first gzip stream in a 1.0 save file, unpacked (the file itself if none), or
+    None if it can't be unpacked (e.g. read while Valheim was writing it)."""
     start = data.find(GZIP, 0, 4096)
     if start < 0:
         return data
     try:
         return zlib.decompressobj(31).decompress(data[start:], limit)
     except zlib.error:
-        return data
+        return None
 
 
 def _save_number(path: str) -> int:
@@ -89,13 +91,18 @@ def world_save(save_dir: str, world: Optional[str] = None) -> Optional[str]:
 
 
 def read_keys(save_dir: str, world: Optional[str] = None) -> Optional[set]:
-    """The defeated_* keys in the live world's save, or None if there's no save."""
+    """The bosses' defeated_* keys in the live world's save, or None if there's no save
+    (or it couldn't be read)."""
     path = world_save(save_dir, world)
     if not path:
         return None
     with open(path, "rb") as f:
         data = f.read()
-    return _keys_in(_unpack(data) if path.endswith(".db2") else data)
+    if path.endswith(".db2"):
+        data = _unpack(data)
+        if data is None:
+            return None
+    return _keys_in(data)
 
 
 def progress(keys: set) -> dict:

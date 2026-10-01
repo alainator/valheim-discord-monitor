@@ -379,6 +379,12 @@ class ValheimLogParser:
                 # Character re-spawn for an already-known player (portal, a reconnect we
                 # didn't see the end of); take the new owner id and forget the old one,
                 # whose leftover objects are cleaned up later without meaning they left.
+                if self.s.online.get(name) != owner and self.s.pending_ids:
+                    # A reconnect: the waiting connection is theirs, not the next player's.
+                    cid = self.s.pending_ids.pop(0)
+                    for old in [c for c, n in self.s.id_to_name.items() if n == name]:
+                        del self.s.id_to_name[old]
+                    self.s.id_to_name[cid] = name
                 self._set_owner(name, owner)
                 return
             self.s.online[name] = owner
@@ -460,8 +466,8 @@ class ValheimLogParser:
             # If players were still online and we never saw the shutdown, note the restart
             # now; then always announce the server is back up.
             if had_players and not was_down:
-                yield Event("server_restart", None, {})
-            yield Event("server_online", None, {})
+                yield Event("server_restart", None, {"unclean": True})
+            yield Event("server_online", None, {"unclean": not was_down})
             return
 
 
@@ -634,22 +640,23 @@ class Discord:
         self.send(payload, kind=ev.kind)
 
     def post_embed(self, kind: str, embed: dict, event_filter: set, file: Optional[tuple] = None,
-                   content: Optional[str] = None, allowed_mentions: Optional[dict] = None) -> None:
+                   content: Optional[str] = None, allowed_mentions: Optional[dict] = None) -> bool:
         """Post a ready-made embed (the weekly recap, an /odin announce), optionally with an
         attached file (name, bytes) that the embed can show as attachment://name."""
         if kind not in event_filter:
-            return
+            return False
         embed = {"color": self.COLORS.get(kind, 0), "timestamp": datetime.now(timezone.utc).isoformat(), **embed}
         payload = {"username": self.username, "embeds": [embed]}
         if content:
             payload["content"] = content
         if allowed_mentions:
             payload["allowed_mentions"] = allowed_mentions
-        self.send(payload, kind=kind, file=file)
+        return self.send(payload, kind=kind, file=file)
 
-    def send(self, payload: dict, kind: Optional[str] = None, file: Optional[tuple] = None) -> None:
+    def send(self, payload: dict, kind: Optional[str] = None, file: Optional[tuple] = None) -> bool:
+        """Post to the webhook, retrying rate limits and network errors. True if it went out."""
         if not self.url:
-            return                                   # no webhook yet (the admin bot can create one)
+            return False                             # no webhook yet (the admin bot can create one)
         # Character names are chosen by players: never let one ping @everyone, a role or a user.
         payload.setdefault("allowed_mentions", {"parse": []})
         # on_posted (the admin bot's reactions) needs the new message's id: ask Discord for it.
@@ -679,7 +686,7 @@ class Discord:
                             self.on_posted(kind, msg["channel_id"], msg["id"])
                     except (ValueError, TypeError) as e:
                         log.debug("Couldn't read Discord's reply: %s", e)
-                return
+                return True
             except urllib.error.HTTPError as e:
                 if e.code == 429:
                     retry = float(e.headers.get("Retry-After", "2"))
@@ -687,11 +694,12 @@ class Discord:
                     time.sleep(retry)
                     continue
                 log.error("Discord HTTP %s: %s", e.code, e.read()[:200])
-                return
+                return False
             except Exception as e:
                 log.warning("Discord post failed (%s), retrying", e)
                 time.sleep(2 * (attempt + 1))
         log.error("Giving up on Discord post: %s", payload)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1322,8 +1330,9 @@ def record_event(store, ev: "Event") -> None:
     elif ev.kind == "count" and ev.extra.get("count") is not None:
         store.concurrency(int(ev.extra["count"]), ts)
     elif ev.kind in ("server_restart", "server_online"):
-        # For /muninn uptime: when the server went down and came back.
-        store.server_event("down" if ev.kind == "server_restart" else "up", None, ts)
+        # For /muninn uptime: when the server went down and came back. A boot without a
+        # shutdown line first (a crash, a kill) was down since the last line we recorded.
+        store.uptime_event("down" if ev.kind == "server_restart" else "up", ts, bool(ev.extra.get("unclean")))
 
 
 def load_config(path: str) -> dict:
@@ -1675,8 +1684,11 @@ def main():
             except Exception as e:
                 log.warning("DB write failed for %s: %s", ev.kind, e)
         prev_version = live.version
-        was_empty = live.count == 0 and not live.online
-        before = max(live.count or 0, len(live.online))
+        # Who was in before this login: the characters we track. (The server's own "now N
+        # player(s)" line comes before the character spawns, so the count already
+        # includes the newcomer by now.)
+        was_empty = not live.online
+        before = len(live.online)
         summary = live.observe(ev)
         if admin and ev.kind == "login":
             admin.on_login(ev.player, was_empty, before, max(live.count or 0, len(live.online)), list(live.online))

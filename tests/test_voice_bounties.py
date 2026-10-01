@@ -137,6 +137,10 @@ class VoiceLobbyTest(unittest.TestCase):
             asyncio.run(b._on_voice(ingrid, none, SimpleNamespace(channel=lobby)))
             room = ingrid.moved_to
             self.assertEqual(room.name, "⛵ Ingrid's longship")
+            # Muting or deafening in the lobby (same channel before and after) makes nothing.
+            other = FakeMember(44, guild, "Bjorn")
+            asyncio.run(b._on_voice(other, SimpleNamespace(channel=lobby), SimpleNamespace(channel=lobby)))
+            self.assertIsNone(other.moved_to)
             self.assertIn(ingrid, room.overwrites)                 # its maker can manage it
             self.assertEqual(json.loads(b._meta("voice:temp")), [room.id])
             # Someone else leaving a normal channel: nothing happens.
@@ -243,6 +247,20 @@ class BountyBotTest(unittest.TestCase):
         b._meta("bounty:holders", json.dumps({k: time.time() - 1 for k in holders}))
         asyncio.run(b._bounty_tick())
         self.assertEqual(self.guild.members[42].roles, [])
+
+    def test_role_that_cant_be_removed_doesnt_loop(self):
+        b = self.b
+        b._meta("role:bounty", 700)
+        self.guild.roles[700] = SimpleNamespace(id=700, name="Skadi", managed=False)
+        member = FakeMember(42, self.guild)
+
+        async def forbidden(role, reason=None):
+            raise discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "Missing Permissions")
+        member.remove_roles = forbidden
+        self.guild.members[42] = member
+        b._meta("bounty:holders", json.dumps({"42": time.time() - 1}))
+        asyncio.run(b._bounty_tick())
+        self.assertEqual(json.loads(b._meta("bounty:holders")), {})
 
     def test_reject_tells_them(self):
         b = self.b

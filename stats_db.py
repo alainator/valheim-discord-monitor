@@ -391,6 +391,20 @@ class Store:
             self.conn.execute("INSERT INTO concurrency(at, count) VALUES (?,?)", (ts, count))
         self.heartbeat(ts)
 
+    def uptime_event(self, kind: str, ts: int, unclean: bool = False) -> None:
+        """Record the server going "down" or coming "up". A boot after an unclean stop also
+        records the missing "down", at the last log activity before it."""
+        last = self.conn.execute("SELECT kind FROM server_events WHERE kind IN ('up', 'down') "
+                                 "ORDER BY at DESC, id DESC LIMIT 1").fetchone()
+        if unclean and last is not None and last["kind"] == "up":
+            seen = self.get_meta("last_event_at")
+            at = int(seen) if seen is not None and int(seen) < ts else ts
+            self.server_event("down", None, at)
+            if kind == "down":
+                return
+        if kind == "up" or last is None or last["kind"] == "up":     # one "down" per outage
+            self.server_event(kind, None, ts)
+
     def server_event(self, kind: str, detail: str, ts: int) -> None:
         self.conn.execute("INSERT INTO server_events(at, kind, detail) VALUES (?,?,?)", (ts, kind, detail))
         self.conn.commit()

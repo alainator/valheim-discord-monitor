@@ -902,7 +902,7 @@ class AdminBot:
         import updater
         folder = self.backups.src if self.backups else os.path.join(self.lists.save_dir, "worlds_local")
         out = []
-        for mtime, size, name in extras.list_backups(folder):
+        for mtime, size, name in extras.list_backups(folder, sizes=False):
             bid = updater.backup_id(name)
             if bid and bid not in {p[3] for p in out}:
                 out.append((mtime, size, name, bid))
@@ -1650,13 +1650,15 @@ class AdminBot:
         except ValueError:
             known, first = set(), True
         new = [k for k in bosses.BOSS_KEYS if k in keys and k not in known]
-        if not new and not first:
+        if keys == known and not first:
             return []
         try:
             when = json.loads(self._meta("bosses:when") or "{}")
         except ValueError:
             when = {}
-        self._meta("bosses:known", json.dumps(sorted(keys | known)))
+        # Follow the save, so a boss un-done by /odin restore is announced again when it falls.
+        self._meta("bosses:known", json.dumps(sorted(keys)))
+        when = {k: v for k, v in when.items() if k in keys}
         if first:
             log.info("admin_bot: boss progress: %s already down", ", ".join(bosses.name_of(k) for k in sorted(keys))
                      or "nothing")
@@ -2088,7 +2090,8 @@ class AdminBot:
         if self._voice_lock is None:
             self._voice_lock = asyncio.Lock()
         async with self._voice_lock:
-            if after.channel is not None and after.channel.id == self._voice_lobby_id:
+            if after.channel is not None and after.channel.id == self._voice_lobby_id \
+                    and before.channel != after.channel:          # not a mute/deafen/stream update
                 await self._voice_create(member, after.channel)
             left = before.channel
             if left is not None and left != after.channel and left.id in self._voice_temps and not left.members:
@@ -2286,6 +2289,8 @@ class AdminBot:
                     await member.remove_roles(role, reason="Bounty role ran out")
                 except discord.NotFound:
                     pass
+                except discord.HTTPException as e:   # e.g. the role is above the bot's own
+                    log.warning("admin_bot: couldn't take the %s role back from %s: %s", role.name, uid, e)
             holders.pop(uid, None)
         self._meta("bounty:holders", json.dumps(holders))
 
@@ -2799,7 +2804,7 @@ class AdminBot:
         async def restore_choices(it: discord.Interaction, current: str):
             now = time.time()
             out = []
-            for mtime, _, name, bid in bot.restore_points():
+            for mtime, _, name, bid in await asyncio.to_thread(bot.restore_points):
                 label = f"{name} · {community._dur(now - mtime)} ago"
                 if current.lower() in label.lower():
                     out.append(app_commands.Choice(name=label[:100], value=bid))
@@ -2814,8 +2819,8 @@ class AdminBot:
                 await it.response.send_message("Restoring needs the host helper (`updater` in config.json, "
                                                 "host/README.md).", ephemeral=True)
                 return
-            point = next((p for p in bot.restore_points(200) if p[3] == backup.strip() or p[2] == backup.strip()),
-                         None)
+            points = await asyncio.to_thread(bot.restore_points, 200)
+            point = next((p for p in points if p[3] == backup.strip() or p[2] == backup.strip()), None)
             if point is None:
                 await it.response.send_message("No backup by that name. Pick one from the list.", ephemeral=True)
                 return
@@ -2959,10 +2964,14 @@ class AdminBot:
             kw = {"content": "@everyone", "allowed_mentions": {"parse": ["everyone"]}} if ping else {}
             await it.response.defer(ephemeral=True)
             try:
-                await asyncio.get_running_loop().run_in_executor(
+                ok = await asyncio.get_running_loop().run_in_executor(
                     None, lambda: bot.post_embed(embed, "announcement", **kw))
             except Exception as e:  # noqa: BLE001
-                await it.followup.send(f"Couldn't post it: {e}", ephemeral=True)
+                ok, why = False, str(e)
+            else:
+                why = "the webhook refused it or Discord didn't answer; see the monitor's log"
+            if ok is False:
+                await it.followup.send(f"Couldn't post it: {why}.", ephemeral=True)
                 return
             log.info("admin_bot: announcement by %s", it.user)
             await it.followup.send("📣 Posted.", ephemeral=True)

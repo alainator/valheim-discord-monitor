@@ -126,6 +126,21 @@ class HostScriptTest(unittest.TestCase):
         log = self.run_request("restore ../../etc/passwd")
         self.assertIn("ERROR: restore: bad backup id", log)
 
+    def test_failed_swap_puts_the_old_world_back(self):
+        """The copy worked and the live world was moved aside, but moving the copy in
+        failed: the old world goes back, so the server doesn't start on a missing world."""
+        self.world("Alheim", "now")
+        self.world("Alheim_backup_auto-20260928-170645", "then")
+        with open(os.path.join(self.bin, "mv"), "w") as f:      # mv fails for the copy only
+            f.write('#!/bin/bash\ncase "$1" in *.restoring) exit 1 ;; esac\nexec /bin/mv "$@"\n')
+        os.chmod(os.path.join(self.bin, "mv"), 0o755)
+        log = self.run_request("restore 20260928170645")
+        self.assertIn("ERROR: restore: couldn't copy", log)
+        self.assertEqual(self.read("Alheim"), "now")
+        self.assertFalse(any("prerestore" in n or n.endswith(".restoring") for n in os.listdir(self.worlds)))
+        with open(self.calls) as f:
+            self.assertIn("start valheimserver.service", f.read())
+
     def test_server_that_wont_stop_is_left_alone(self):
         self.world("Alheim", "now")
         self.world("Alheim_backup_auto-20260928-170645", "then")

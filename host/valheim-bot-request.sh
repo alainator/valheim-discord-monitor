@@ -83,34 +83,51 @@ restore() {
         return
     fi
     # Copy the backup next to the live world first: if that fails, nothing has changed.
-    # Then two renames swap it in, and the old world is kept as a backup of its own.
+    # Then two renames swap it in, and the old world is kept as a backup of its own. If a
+    # rename fails, the old world is put back, so the server never starts on a missing
+    # world (Valheim would make a new, empty one with that name).
     local ok=1
     if [ "$legacy" -eq 0 ]; then
         rm -rf "${WORLDS:?}/$world.restoring"
-        if cp -a "$WORLDS/$stem" "$WORLDS/$world.restoring"; then
-            mv "$WORLDS/$world" "$WORLDS/$safe" && mv "$WORLDS/$world.restoring" "$WORLDS/$world" || ok=0
-        else
+        if ! cp -a "$WORLDS/$stem" "$WORLDS/$world.restoring"; then
             ok=0
-            rm -rf "${WORLDS:?}/$world.restoring"
+        elif ! mv "$WORLDS/$world" "$WORLDS/$safe"; then
+            ok=0
+        elif ! mv "$WORLDS/$world.restoring" "$WORLDS/$world"; then
+            ok=0
+            mv "$WORLDS/$safe" "$WORLDS/$world" || true
         fi
+        rm -rf "${WORLDS:?}/$world.restoring"
     else
         if cp -a "$WORLDS/$stem.db" "$WORLDS/$world.db.restoring" &&
                 cp -a "$WORLDS/$stem.fwl" "$WORLDS/$world.fwl.restoring"; then
+            local moved=()
             for ext in db fwl; do
-                if [ -f "$WORLDS/$world.$ext" ]; then
-                    mv "$WORLDS/$world.$ext" "$WORLDS/$safe.$ext" || ok=0
+                if [ -f "$WORLDS/$world.$ext" ] && ! mv "$WORLDS/$world.$ext" "$WORLDS/$safe.$ext"; then
+                    ok=0; break
                 fi
-                mv "$WORLDS/$world.$ext.restoring" "$WORLDS/$world.$ext" || ok=0
+                moved+=("$ext")
+                if ! mv "$WORLDS/$world.$ext.restoring" "$WORLDS/$world.$ext"; then
+                    ok=0; break
+                fi
             done
+            if [ "$ok" -eq 0 ]; then              # undo: the old pair back in place
+                for ext in "${moved[@]}"; do
+                    [ -f "$WORLDS/$safe.$ext" ] && mv -f "$WORLDS/$safe.$ext" "$WORLDS/$world.$ext"
+                done
+            fi
         else
             ok=0
-            rm -f "$WORLDS/$world.db.restoring" "$WORLDS/$world.fwl.restoring"
         fi
+        rm -f "$WORLDS/$world.db.restoring" "$WORLDS/$world.fwl.restoring"
     fi
     if [ "$ok" -eq 1 ]; then
         log "Restore done: $stem (the world before it is saved as $safe)"
+    elif [ -e "$WORLDS/$world" ] || [ -f "$WORLDS/$world.db" ]; then
+        log "ERROR: restore: couldn't copy $stem into place; the world was left as it was"
     else
-        log "ERROR: restore: couldn't copy $stem into place; check $WORLDS (the old world is $world or $safe)"
+        log "ERROR: restore: the world $world is missing after a failed restore; the server stays stopped. Rename $safe back to $world in $WORLDS, then start the server"
+        return
     fi
     sudo /bin/systemctl start "$SERVICE" || log "ERROR: restore: couldn't start the server again"
 }
