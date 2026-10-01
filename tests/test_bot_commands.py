@@ -40,7 +40,7 @@ class BotCommandsTest(unittest.TestCase):
             "warcouncil": ["bounties", "plan"],
             "odin": sorted(["permit", "ban", "unban", "unpermit", "lists", "settings", "modifier", "preset",
                             "setkey", "backups", "update-check", "restart", "restart-cancel", "setup",
-                            "announce", "bounty", "bounty-close", "restore"]),
+                            "announce", "bounty", "bounty-close", "restore", "rules"]),
         })
         # /odin is hidden from members without Manage Server; the others are for everyone.
         self.assertEqual(int(groups["odin"][1]), 1 << 5)

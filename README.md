@@ -65,6 +65,12 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **#runestone gets used:** `/odin announce` posts there by default (or in Huginn's feed,
+  or both), `/odin rules` keeps one pinned rules post (with a starter set to edit), and
+  with `"runestone_news": true` big news (a Valheim update, a restore, a boss kill) is kept
+  there too ([the rules channel](#the-rules-channel-runestone)).
+- **Restart warnings and restore notices always post**, even without `"update"` in
+  `events`, since an admin started them.
 - **Fixes from a second code audit** ([details](#about-this-fork)):
   - "come join" and "first player online" DMs now arrive (they never fired);
   - a player who reconnects is no longer mixed up with the next one to join;
@@ -622,7 +628,8 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/odin restore <backup>` | Admin | Put the world back to one of Valheim's backups (newest first), after a confirmation. The current world is kept as a backup | [host helper](host/README.md#restoring-a-world-backup-from-discord) |
 | `/odin bounty <challenge> [reward] [days]` | Admin | Post a [bounty](#bounties) with an **I did it** button; open 7 days by default | Stats database |
 | `/odin bounty-close <bounty>` | Admin | Close an open bounty without a winner | Stats database |
-| `/odin announce <message> [title] [ping]` | Admin | Post an announcement as Huginn in the feed channel; `ping` adds @everyone. `\n` starts a new line | Huginn's webhook |
+| `/odin announce <message> [title] [ping] [where]` | Admin | Post an announcement in #runestone (default), Huginn's feed, or both; `ping` adds @everyone. `\n` starts a new line ([rules channel](#the-rules-channel-runestone)) | #runestone, or Huginn's webhook |
+| `/odin rules [text] [show]` | Admin | Post or edit the one pinned rules message in #runestone; no text = a starter set; `show` gives the current text to copy and edit | #runestone |
 | `/odin setup [preview\|apply\|undo]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-odin-setup)) | Manage Channels, Manage Roles (Manage Webhooks for Huginn's webhook, Manage Server for Discord's join messages) |
 | `/odin settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
 | `/odin modifier <name> <value>` | Admin | Change a modifier, e.g. `raids more`; `normal` resets it | world settings |
@@ -707,7 +714,8 @@ pinning, tidying, nicknames), and harmless to grant now:
   of your server.
 - **Kick Members, Ban Members, Moderate Members.** The bot bans from the *game*, not
   Discord.
-- **Mention Everyone.** The bot never pings everyone.
+- **Mention Everyone** server-wide. Only if you want `/odin announce ping:True` to ping in
+  #runestone, allow it in that one channel (its settings → Permissions → the bot).
 
 After inviting, keep the bot's role **above** the roles it hands out (In Valheim, Odin,
 the titles) in Server Settings → Roles. A private channel's own permissions override the
@@ -952,6 +960,8 @@ The [stat channels](#stat-channels) stay on top.
   Channel. If that's the admin channel (which setup makes private) or none, setup points
   it at #the-gates, and undo puts it back. That needs **Manage Server**. Without it, the
   result tells you to change it in Server Settings → Engagement → System Messages Channel.
+- **#runestone** is left for your rules and announcements: fill it with `/odin rules` and
+  `/odin announce` ([the rules channel](#the-rules-channel-runestone)).
 - **It posts a "📖 A guide to the realm" message** in #the-gates listing every channel and
   what it's for, and pins it. Running setup again updates that message instead of posting
   a new one.
@@ -968,6 +978,26 @@ The [stat channels](#stat-channels) stay on top.
 permissions). Optional: **Manage Webhooks** to create or move Huginn's webhook, and
 **Manage Server** to move Discord's join messages and set the AFK channel, and **Pin
 Messages** to pin the guide; without them you're told what to do by hand.
+
+### The rules channel: #runestone
+
+#runestone (made by `/odin setup`, read-only for members) holds what should stay put:
+
+- **`/odin rules`** posts the rules as one pinned message. Run it again with new text to
+  edit that same message; nothing piles up.
+  - With no text, it posts a starter set (be kind, no griefing, ask before building near
+    others, shared chests, boss fights as group events, no cheats, how to join) to edit.
+  - `/odin rules show:True` gives you the current text, ready to copy and change. Write
+    new lines as `\n`, e.g. `**1. Be kind.**\n**2. No griefing.**`.
+- **`/odin announce`** posts here by default, as the bot. `where: Huginn's feed` posts in
+  #huginns-watch instead, `Both` in both.
+  - `ping:True` adds @everyone. In #runestone the bot needs **Mention Everyone** in that
+    channel (channel settings → Permissions → the bot); without it the post goes up but
+    pings nobody, and the reply says so.
+- **Big news, optionally:** with `"runestone_news": true`, a Valheim update being installed,
+  a world restore and each boss kill are also posted here, so they don't scroll away in
+  #huginns-watch. Restart countdowns and joins stay in #huginns-watch.
+- Another channel instead: `"announce_channel_id": "<channel id>"`.
 
 ### Players & community
 
@@ -1874,6 +1904,8 @@ or run it in a terminal.
 | `discord.show_player_count` | true | Footer with the current online count. |
 | `discord.quiet_hours` | — | `{"from": "23:00", "to": "08:00", "timezone": …, "events": […]}`: hold those posts and summarise them when it ends ([quiet hours](#quiet-hours-and-digests)). |
 | `discord.digest_seconds` | 0 | Group joins and leaves within this many seconds into one post. |
+| `admin_bot.announce_channel_id` | #runestone | The [rules channel](#the-rules-channel-runestone) for `/odin rules`, `/odin announce` and news. |
+| `admin_bot.runestone_news` | false | Also post Valheim updates, restores and boss kills in the rules channel. |
 | `admin_bot.voice_lobby` | — | `true` or `{"name", "template", "limit"}`: [join-to-create voice](#join-to-create-voice-channels). |
 | `admin_bot.bounties.channel_id` | #war-council | Where `/odin bounty` posts. |
 | `admin_bot.bounties.role` / `role_days` | Skadi / 7 | The bounty winner's role and how long they keep it; `false` for no role. |

@@ -1635,7 +1635,17 @@ def main():
     mismatch_posted: dict = {}
 
     def post_update(text: str) -> None:
+        """Automatic update posts: only with "update" in events."""
         discord.post(Event("update", None, {"detail": text}), server_name, events)
+
+    def post_always(text: str) -> None:
+        """Things an admin started (restart warnings, a restore): always posted."""
+        discord.post(Event("update", None, {"detail": text}), server_name, {"update"})
+
+    def news(text: str) -> None:
+        """Big server news, also kept in the rules channel when runestone_news is on."""
+        if admin:
+            admin.news(text)
 
     # Host-side auto-updater (self-hosted): read its log, share the player count, and let
     # the bot ask it to check or restart. See host/README.md.
@@ -1648,7 +1658,7 @@ def main():
             log.warning("updater.bot_dir %s doesn't exist (mount it); status.json and requests are off", upd.bot_dir)
             upd.bot_dir = ""
     if admin:
-        admin.attach(live=live, backups=backups, updater=upd, announce=post_update,
+        admin.attach(live=live, backups=backups, updater=upd, announce=post_always,
                      post_embed=lambda embed, kind="titles", **kw: discord.post_embed(kind, embed, {kind}, **kw),
                      db_path=db_cfg["path"] if db_enabled else None, webhook_url=discord.url,
                      set_webhook=set_webhook)
@@ -1702,8 +1712,10 @@ def main():
             if admin:
                 admin.post_admin(alert)
         if ev.kind == "server_version" and prev_version and ev.extra.get("version") != prev_version:
-            post_update(f"✅ Valheim updated: **{prev_version}** → **{ev.extra.get('version')}**. "
-                        f"Players need the same version to join.")
+            text = (f"✅ Valheim updated: **{prev_version}** → **{ev.extra.get('version')}**. "
+                    f"Players need the same version to join.")
+            post_update(text)
+            news(text)
         if maint and maint.suppressing(ev.kind):
             return
         if ev.kind == "logout" and summary and "session_summary" in events:
@@ -1820,6 +1832,9 @@ def main():
                                 log.info("UPDATER %s: %s", target, text)
                                 if target == "public":
                                     post_update(text)
+                                elif target == "news":     # e.g. a restore: always, and kept
+                                    post_always(text)
+                                    news(text)
                                 elif admin:
                                     admin.post_admin(text)
                     except OSError as e:

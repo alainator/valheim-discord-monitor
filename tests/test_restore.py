@@ -38,7 +38,7 @@ class RestoreRequestTest(unittest.TestCase):
         w = updater.UpdateWatcher({})
         out = w.handle("2026-09-30 23:15:00 Restore done: Alheim_backup_auto-20260928-170645 "
                        "(the world before it is saved as Alheim_backup_prerestore-20260930-231500)")
-        self.assertEqual([t for t, _ in out], ["admin", "public"])
+        self.assertEqual([t for t, _ in out], ["admin", "news"])
         self.assertIn("Alheim_backup_prerestore-20260930-231500", out[0][1])
         err = w.handle("2026-09-30 23:15:00 ERROR: restore: the server didn't stop; nothing changed")
         self.assertEqual(err, [("admin", "⚠️ The update checker failed: restore: the server didn't stop; "
