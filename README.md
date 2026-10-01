@@ -57,6 +57,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Boss progress:** the bot reads which bosses are down straight from the world save (no
+  mods), posts "⚔️ Moder has fallen!" when a new one falls, and shows it in
+  `/muninn bosses` and a "🏆 Bosses: 3/7 · next: Moder" stat channel
+  ([boss progress](#boss-progress)).
 - **`/odin restore`:** put the world back to one of Valheim's backups from Discord. It
   asks first, keeps the current world as a backup (so it can be undone), and needs a
   one-time host step ([restore setup](#restoring-a-backup-odin-restore)).
@@ -545,7 +549,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore` | Admins, anywhere: replies are private |
 
@@ -577,6 +581,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen, Steam achievements. No name = your linked character | Stats database |
 | `/muninn top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, or Steam achievements | Stats database |
 | `/muninn compare <player> [other]` | Anyone | Two characters side by side: time played, visits, longest session, deaths, achievements, with the leader of each marked. No `other` = your linked character | Stats database |
+| `/muninn bosses` | Anyone | Every boss with ✅ or ⬜, when it fell, and which is next ([boss progress](#boss-progress)) | `save_dir` |
 | `/muninn uptime` | Anyone | Share of time the server was up this week, the last 7 and 30 days, with restarts and downtime | Stats database |
 | `/muninn titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
 | `/valheim notify <when> [player] [players]` | Anyone | DM me when the first player joins an empty server, when `players` are online (`crowd`), or when a given character joins; `off` / `list` | Stats database |
@@ -835,6 +840,7 @@ voice channels or categories.
 | `next_plan` | The next game night from `/warcouncil plan` |
 | `vikings` | Characters that have ever played |
 | `achievements` | Steam achievements unlocked, all players together |
+| `bosses` | Bosses defeated in this world and the next one ("🏆 Bosses: 3/7 · next: Moder"), from the [world save](#boss-progress) |
 | `title_owner` | Odin: the Discord server's owner |
 | `title_time`, `title_deaths`, `title_sessions`, `title_longest`, `title_achievements` | The [title](#title-roles) holders: Heimdall, Hel, Sleipnir, Thor, Bragi (`titles` means all of them) |
 
@@ -1060,6 +1066,28 @@ These need the stats database (`database.path`), which the bot and the monitor s
 - Needs **Manage Channels**, **Connect** and **Move Members**, plus **Manage Roles** so the
   maker can manage their channel. Without Manage Roles it still works, but only admins
   can rename the channel.
+
+### Boss progress
+
+Valheim doesn't log boss kills, but it keeps them in the world save as "global keys"
+(`defeated_eikthyr`, `defeated_gdking`, …). The bot reads those from `save_dir`, the same
+folder `/valheim map` uses, so there's nothing to set up:
+
+- **"⚔️ Moder has fallen!"** is posted by Huginn when a new boss shows up in the save, with
+  how many are down and which is next. Valheim saves the world every 30 minutes and when
+  the server stops, so the post comes up to half an hour after the kill.
+- **`/muninn bosses`** lists all seven bosses (Eikthyr, The Elder, Bonemass, Moder, Yagluth,
+  The Queen, Fader) with ✅ or ⬜ and the date each fell. Other `defeated_…` keys in the save
+  (mini-bosses and the like) are listed under "Also defeated".
+- **Stat channel** `bosses` in the Hall of Champions: "🏆 Bosses: 3/7 · next: Moder".
+- **The first check only records what's already down**, so turning it on doesn't post
+  bosses you beat weeks ago. Dates are known for kills after that.
+
+It reads the newest `_main.<N>.db2` in `worlds_local/<world>/` (Valheim 1.0) or
+`<world>.db` (older servers), never a backup. Options:
+`"bosses": {"enabled": true, "announce": true, "world": "Alheim"}`. `world` is only needed
+with several worlds in the folder (otherwise the most recently saved one is used);
+`"announce": false` keeps the command and channel without the posts.
 
 ### Bounties
 
@@ -1309,7 +1337,7 @@ switched on by adding their name to `events` in `config.json`:
 `welcome`, `milestone` and `weekly_recap` need the stats database (`database.path`).
 
 **Reactions:** with the admin bot on, it reacts to some of Huginn's posts so people can join
-in: ⚔️ raids, 👋 welcomes, 🏆 milestones, 🏅 achievements, 👑 titles, 📜 the weekly recap, ⚠️
+in: ⚔️ raids, 👋 welcomes, 🏆 milestones and boss kills, 🏅 achievements, 👑 titles, 📜 the weekly recap, ⚠️
 version mismatches. It needs Add Reactions in that channel.
 
 **The weekly recap has a chart:** a bar chart of hours played per day, drawn with Pillow
@@ -1784,10 +1812,12 @@ or run it in a terminal.
 | `admin_bot.owner_role` | — | `true` (or a role name): an "Odin" role for the Discord server's owner. |
 | `admin_bot.lfg.reminder_minutes` | 15 | Ping game-night signups this long before the start. |
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
+| `admin_bot.bosses.enabled` / `announce` | true / true | [Boss progress](#boss-progress) from the world save; `announce` posts each new kill. |
+| `admin_bot.bosses.world` | the newest | Which world in `worlds_local`, if there are several. |
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
 | `admin_bot.map.seed` | "" | Use this seed instead of reading it from the world file. |
 | `admin_bot.link_nickname` | false | `/valheim link` sets the member's server nickname to their character, if they have no nickname yet (needs Manage Nicknames; the server owner's can't be changed). |
-| `admin_bot.command_channels` | true | Send `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `plan` and `bounties` to their home channel (from `/odin setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
+| `admin_bot.command_channels` | true | Send `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `plan` and `bounties` to their home channel (from `/odin setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
 | `admin_bot.tidy_notices_hours` | 24 | Delete refused-join notices this long after someone pressed Permit, Ban or Ignore (needs Manage Messages). `0` keeps them. |
 | `admin_bot.titles.enabled` | false | Weekly title roles for the `/muninn top` leaders. |
 | `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |

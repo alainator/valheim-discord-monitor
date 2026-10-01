@@ -45,7 +45,7 @@ from typing import Optional
 # Commands with public replies, and the /odin setup channel they belong in. Others (their
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
-                  "uptime": "bots", "plan": "plans", "bounties": "plans"}
+                  "uptime": "bots", "bosses": "bots", "plan": "plans", "bounties": "plans"}
 WELCOME_DM = ("👋 Welcome to **{guild}**, {member}! We play Valheim on **{server}**.\n"
               "• `/valheim join`: the join code and how to get in\n"
               "• `/valheim request-access`: tell the admins which character you'll play, if the server "
@@ -54,7 +54,7 @@ WELCOME_DM = ("👋 Welcome to **{guild}**, {member}! We play Valheim on **{serv
               "See you in the tenth world.")
 
 # Huginn's posts the bot reacts to, so people can react along.
-REACTIONS = {"raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
+REACTIONS = {"boss": "🏆", "raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
              "weekly_recap": "📜", "version_mismatch": "⚠️"}
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -359,6 +359,14 @@ class AdminBot:
         self.discord_events = bool(lfg.get("discord_event", False))
         self.map_enabled = bool((cfg.get("map") or {}).get("enabled", True))
         self.map_seed = str((cfg.get("map") or {}).get("seed") or "").strip()
+        # Boss progress from the world save (bosses.py): announce kills, /muninn bosses.
+        bc = cfg.get("bosses") or {}
+        self.bosses_on = bool(bc.get("enabled", True))
+        self.bosses_world = str(bc.get("world") or "").strip() or None
+        self.bosses_announce = bool(bc.get("announce", True))
+        self.boss_keys: Optional[set] = None   # last read from the save
+        self._boss_task = None
+        self._boss_read = (None, 0.0)           # (path, mtime) of the last save read
         # /valheim link sets a member's server nickname to the character (only if they have none).
         self.link_nickname = bool(cfg.get("link_nickname", False))
         # Commands used in the wrong channel get a private "run it in #…" instead. true: the
@@ -500,6 +508,8 @@ class AdminBot:
             return                            # the rest need the database from attach()
         if self.db_path and self._plan_task is None:
             self._plan_task = asyncio.ensure_future(self._plan_loop())
+        if self.bosses_on and self.lists.save_dir and self._boss_task is None:
+            self._boss_task = asyncio.ensure_future(self._boss_loop())
         if self.titles_on and self._titles_task is None:
             if not (self.db_path and self.guild_id):
                 if not self._titles_warned:
@@ -1614,10 +1624,74 @@ class AdminBot:
             self._meta(f"layout:{key}", "")
         return restored, created, problems
 
+    # -- boss progress -------------------------------------------------------------
+    def read_bosses(self) -> Optional[set]:
+        """The world's defeated_* keys, re-read only when the save file changed."""
+        import bosses
+        path = bosses.world_save(self.lists.save_dir, self.bosses_world)
+        if not path:
+            return None
+        mtime = os.path.getmtime(path)
+        if (path, mtime) != self._boss_read or self.boss_keys is None:
+            self.boss_keys = bosses.read_keys(self.lists.save_dir, self.bosses_world)
+            self._boss_read = (path, mtime)
+        return self.boss_keys
+
+    async def _check_bosses(self) -> list:
+        """Read the save; post each boss that fell since the last check. The first check
+        only records what's already down. Returns the new keys."""
+        import bosses
+        keys = await asyncio.to_thread(self.read_bosses)
+        if keys is None:
+            return []
+        try:
+            known = set(json.loads(self._meta("bosses:known") or "null") or [])
+            first = self._meta("bosses:known") in (None, "")
+        except ValueError:
+            known, first = set(), True
+        new = sorted(keys - known, key=lambda k: (bosses.BOSS_KEYS.index(k) if k in bosses.BOSS_KEYS else 99, k))
+        if not new and not first:
+            return []
+        try:
+            when = json.loads(self._meta("bosses:when") or "{}")
+        except ValueError:
+            when = {}
+        self._meta("bosses:known", json.dumps(sorted(keys | known)))
+        if first:
+            log.info("admin_bot: boss progress: %s already down", ", ".join(bosses.name_of(k) for k in sorted(keys))
+                     or "nothing")
+            return []
+        for key in new:
+            when[key] = int(time.time())
+            log.info("admin_bot: %s has fallen", bosses.name_of(key))
+            if self.bosses_announce and self.post_embed:
+                embed = bosses.announcement(key, keys, self.server_name)
+                await asyncio.get_running_loop().run_in_executor(None, lambda e=embed: self.post_embed(e, "boss"))
+        self._meta("bosses:when", json.dumps(when))
+        return new
+
+    async def _boss_loop(self) -> None:
+        """Valheim saves the world every 30 minutes and at shutdown; check every 2."""
+        await asyncio.sleep(15)
+        warned = False
+        while True:
+            try:
+                await self._check_bosses()
+                if self.boss_keys is None and not warned:
+                    warned = True
+                    log.info("admin_bot: no world save found in %s/worlds_local; boss progress waits for one",
+                             self.lists.save_dir)
+            except Exception as e:  # noqa: BLE001
+                log.warning("admin_bot: boss progress check failed: %s", e)
+            await asyncio.sleep(120)
+
     # -- stat channels -----------------------------------------------------------
     def _stat_name(self, key: str) -> Optional[str]:
         import community
         import stat_channels
+        if key == "bosses":
+            import bosses
+            return bosses.channel_name(self.boss_keys)
         db = self.db if self.db_path else None
         titles = {"title_owner": (self.owner_role_name or "Odin", self._owner_name)}
         if db:
@@ -2488,6 +2562,21 @@ class AdminBot:
             await it.response.send_message(embed=discord.Embed.from_dict(community.render_compare(a, b)))
         compare.autocomplete("player")(player_choices)
         compare.autocomplete("other")(player_choices)
+
+        @muninn.command(name="bosses", description="Which bosses this world has defeated, and which is next")
+        async def bosses_cmd(it: discord.Interaction):
+            import bosses
+            keys = await asyncio.to_thread(bot.read_bosses)
+            if keys is None:
+                await it.response.send_message("I can't find the world save (`save_dir`/worlds_local).",
+                                                ephemeral=True)
+                return
+            try:
+                when = json.loads(bot._meta("bosses:when") or "{}")
+            except ValueError:
+                when = {}
+            await it.response.send_message(embed=discord.Embed.from_dict(
+                bosses.render(keys, bot.server_name, when)))
 
         @muninn.command(name="uptime", description="How much the server was up: this week, 30 days, restarts")
         async def uptime_cmd(it: discord.Interaction):
