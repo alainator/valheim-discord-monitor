@@ -586,7 +586,25 @@ The commands are in four groups, one per place they're used:
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access` | Anywhere: the replies are private |
 | **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
-| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore` | Admins, anywhere: replies are private |
+| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules` | Admins, anywhere: replies are private |
+
+**Pinned command guides.** So members know what's there, each group's home channel has a
+pinned message listing that group's commands, with their options and what they do:
+
+| Guide | Pinned in |
+|---|---|
+| `/valheim` (works anywhere, private replies) | #🚪┃the-gates |
+| `/muninn` | #🪶┃muninns-roost |
+| `/warcouncil` | #🗺️┃war-council |
+| `/odin` | the admin channel |
+
+- They're posted by `/odin setup apply`. On a server that's already set up, run
+  `/odin setup action:guides` once; it's also how to bring one back if it was deleted.
+- They're built from the commands themselves (`<option>` is required, `[option]`
+  optional), and the bot updates them at every start-up, so a new command shows up in
+  its guide after an update with nothing to do.
+- Pinning needs **Pin Messages** in those channels. Without it the guides are still
+  posted, just not pinned, and the log says `couldn't pin the … guide`.
 
 **Admins:** `/odin` only works for the users and roles in `admin_user_ids` /
 `admin_role_ids`. Discord also hides it from anyone without **Manage Server**. If one of
@@ -712,7 +730,7 @@ pinning, tidying, nicknames), and harmless to grant now:
 | Add Reactions, Use External Emojis | Reacting to Huginn's raid, welcome, milestone and title posts |
 | Create Polls | Time polls for game nights |
 | Create Public Threads, Send Messages in Threads, Manage Threads | A thread per game night, where the reminder is posted |
-| Pin Messages | Pinning the channel guide |
+| Pin Messages | Pinning the channel guide, the [command guides](#discord-commands) and the [rules](#the-rules-channel-runestone) |
 | Manage Messages | Tidying handled refused-join notices |
 | Create Events | The newer half of the events permission |
 | Manage Nicknames | Setting a member's nickname to their character on `/valheim link` (opt-in) |
@@ -1368,6 +1386,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | No thread on a game-night signup / no reactions on Huginn's posts / the guide isn't pinned | Missing Create Public Threads, Add Reactions or Pin Messages (in that channel too) | See [bot permissions](#bot-permissions); the log says `couldn't open a thread` / `couldn't pin` |
 | The weekly recap has no chart | Pillow isn't installed (an old image), or nobody played that week | `docker compose up -d --build --force-recreate` |
 | Handled refused-join notices aren't deleted | The bot lacks Manage Messages in the admin channel, or `tidy_notices_hours` is 0 | Grant it in the channel's permissions |
+| A channel's command guide is missing or out of date | It was deleted, or the channel didn't exist when setup ran | `/odin setup action:guides` posts it again; the bot refreshes the others at start-up |
 | Members get "Run `/muninn stats` in #…" | That command belongs in its home channel since `/odin setup` | Run it there, or change it with `admin_bot.command_channels` (`false` turns it off) |
 | A command's home channel is wrong or was deleted | It points at the channel setup remembered | Run `/odin setup apply` again (it recreates missing channels), or set `"command_channels": {"stats": "<channel id>"}` |
 | `/valheim stats`, `/valheim plan` or `/valheim permit` are gone | The commands were split into groups | Use `/muninn stats` (and `top`, `titles`, `online`), `/warcouncil plan`, and `/odin` for the admin commands. Press Ctrl+R if Discord still shows the old ones |
@@ -2053,7 +2072,12 @@ Added here:
 - **Command channels:** commands with public replies go to their home channel; used
   elsewhere, the member gets a private pointer instead.
 - **Polish:** reactions on Huginn's posts, a chart in the weekly recap, a pinned channel
-  guide, the AFK channel set by `/odin setup`, and handled admin notices tidied away.
+  guide and pinned command guides in each group's channel, the AFK channel set by
+  `/odin setup`, and handled admin notices tidied away.
+- **#runestone:** `/odin announce` and pinned rules (`/odin rules`), with optional server
+  news.
+- **Catching up on old logs:** a new install loads the logs already on disk, and
+  `--backfill` is safe to repeat.
 - **Steam achievements in Discord:** unlock posts, achievements in `/muninn stats`, a
   "Most achievements" leaderboard, and the Bragi title.
 - **Boss progress** read from the world save (Valheim 1.0's `_main.<N>.db2` and older
