@@ -39,6 +39,7 @@ GROUPS = [
         "achievements": "Steam achievements unlocked, all players together",
     }),
     ("hall", "👑 Hall of Champions · titles", {
+        "bosses": "bosses defeated in this world, and the next one",
         "title_owner": "Odin: the Discord server's owner",
         "title_time": "Heimdall: most time played",
         "title_deaths": "Hel: most deaths",

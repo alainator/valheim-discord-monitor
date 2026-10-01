@@ -1,0 +1,137 @@
+"""
+Boss progress, read from the world save. No mods: Valheim keeps the world's "global keys"
+(defeated_eikthyr, defeated_gdking, …) in the save, and those say which bosses are down.
+
+  * Valheim 1.0: worlds_local/<world>/_main.<N>.db2, a small header and then a gzip
+    stream; the keys are plain strings inside it. The highest <N> is the newest save.
+  * Older servers: worlds_local/<world>.db, uncompressed, keys as plain strings.
+
+Plain functions, testable without a server.
+"""
+
+from __future__ import annotations
+
+import glob
+import os
+import re
+import zlib
+from typing import Optional
+
+# The main bosses in the order you meet them: key -> (name, biome, emoji).
+BOSSES = [
+    ("defeated_eikthyr", "Eikthyr", "Meadows", "🦌"),
+    ("defeated_gdking", "The Elder", "Black Forest", "🌳"),
+    ("defeated_bonemass", "Bonemass", "Swamp", "🦠"),
+    ("defeated_dragon", "Moder", "Mountains", "🐉"),
+    ("defeated_goblinking", "Yagluth", "Plains", "💀"),
+    ("defeated_queen", "The Queen", "Mistlands", "🕷️"),
+    ("defeated_fader", "Fader", "Ashlands", "🔥"),
+]
+BOSS_KEYS = [b[0] for b in BOSSES]
+NAMES = {b[0]: b[1] for b in BOSSES}
+RE_KEY = re.compile(rb"defeated_[a-z0-9_]{2,40}")
+GZIP = b"\x1f\x8b\x08"
+
+
+def name_of(key: str) -> str:
+    """"defeated_gdking" -> "The Elder"; a key we don't know -> "Writhan"."""
+    return NAMES.get(key) or key.replace("defeated_", "").replace("_", " ").title()
+
+
+def _keys_in(data: bytes) -> set:
+    return {k.decode() for k in RE_KEY.findall(data)}
+
+
+def _unpack(data: bytes, limit: int = 64 << 20) -> bytes:
+    """The first gzip stream in a 1.0 save file, unpacked (the file itself if none)."""
+    start = data.find(GZIP, 0, 4096)
+    if start < 0:
+        return data
+    try:
+        return zlib.decompressobj(31).decompress(data[start:], limit)
+    except zlib.error:
+        return data
+
+
+def _save_number(path: str) -> int:
+    m = re.search(r"_main\.(\d+)\.db2$", path)
+    return int(m.group(1)) if m else -1
+
+
+def world_save(save_dir: str, world: Optional[str] = None) -> Optional[str]:
+    """The newest save file of the live world (not a backup): a 1.0 _main.<N>.db2, or an
+    older <world>.db. With several worlds and no `world`, the most recently saved one."""
+    base = os.path.join(save_dir, "worlds_local")
+    found = []
+    for path in glob.glob(os.path.join(base, "*", "_main.*.db2")):
+        folder = os.path.basename(os.path.dirname(path))
+        if "_backup_" in folder or (world and folder != world):
+            continue
+        found.append((os.path.getmtime(path), _save_number(path), path))
+    for path in glob.glob(os.path.join(base, "*.db")):
+        name = os.path.splitext(os.path.basename(path))[0]
+        if "_backup_" in name or (world and name != world):
+            continue
+        found.append((os.path.getmtime(path), 0, path))
+    if not found:
+        return None
+    if world:                                 # one world: its highest save number
+        return max(found, key=lambda f: (f[1], f[0]))[2]
+    return max(found)[2]
+
+
+def read_keys(save_dir: str, world: Optional[str] = None) -> Optional[set]:
+    """The defeated_* keys in the live world's save, or None if there's no save."""
+    path = world_save(save_dir, world)
+    if not path:
+        return None
+    with open(path, "rb") as f:
+        data = f.read()
+    return _keys_in(_unpack(data) if path.endswith(".db2") else data)
+
+
+def progress(keys: set) -> dict:
+    """{"down": [names, in order], "count", "total", "next": name or None, "extra": [other
+    defeated_* keys, e.g. mini-bosses, as names]}."""
+    down = [name_of(k) for k in BOSS_KEYS if k in keys]
+    nxt = next((name_of(k) for k in BOSS_KEYS if k not in keys), None)
+    extra = sorted(name_of(k) for k in keys if k not in NAMES)
+    return {"down": down, "count": len(down), "total": len(BOSSES), "next": nxt, "extra": extra}
+
+
+def channel_name(keys: Optional[set]) -> Optional[str]:
+    if keys is None:
+        return None
+    p = progress(keys)
+    tail = f" · next: {p['next']}" if p["next"] else " · all down!"
+    return f"🏆 Bosses: {p['count']}/{p['total']}{tail}"[:100]
+
+
+def render(keys: set, server_name: str = "", when: Optional[dict] = None) -> dict:
+    """/muninn bosses: every main boss with ✅ or ⬜, when it fell (if the bot saw it), and
+    any other defeated_* keys."""
+    when = when or {}
+    lines = []
+    for key, name, biome, emoji in BOSSES:
+        done = key in keys
+        at = f" · <t:{int(when[key])}:d>" if done and when.get(key) else ""
+        lines.append(f"{'✅' if done else '⬜'} {emoji} **{name}** ({biome}){at}")
+    p = progress(keys)
+    if p["extra"]:
+        lines.append("\nAlso defeated: " + ", ".join(p["extra"]))
+    return {"title": f"🏆 Boss progress{' in ' + server_name if server_name else ''}: {p['count']}/{p['total']}",
+            "description": "\n".join(lines), "color": 0xC27C0E}
+
+
+def announcement(key: str, keys: set, server_name: str = "") -> dict:
+    """The post when a boss falls."""
+    p = progress(keys)
+    boss = next((b for b in BOSSES if b[0] == key), None)
+    if boss:
+        title = f"⚔️ {boss[1]} has fallen!"
+        desc = f"The {boss[2]} boss is defeated{' in ' + server_name if server_name else ''}."
+    else:
+        title, desc = f"⚔️ {name_of(key)} has fallen!", "A new foe is defeated."
+    desc += f" **{p['count']}/{p['total']}** bosses down" + (f"; next: **{p['next']}**." if p["next"] else
+                                                               ". Every boss is down. Skål! 🍻")
+    return {"title": title, "description": desc, "color": 0xC27C0E}

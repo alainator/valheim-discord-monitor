@@ -68,6 +68,10 @@
     "map": {
       "enabled": true
     },
+    "bosses": {
+      "enabled": true,
+      "announce": true
+    },
     "titles": {
       "enabled": false,
       "period": "all",
