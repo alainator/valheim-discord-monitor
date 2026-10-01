@@ -65,6 +65,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **A permanent copy of the server log:** Valheim wipes its log on every server start,
+  taking the history with it. The monitor now keeps every line it reads in
+  `logs_archive/` (one file a day, gzipped), and `--backfill` reads it, so stats can always
+  be rebuilt ([log archive](#the-log-archive)).
 - **Pinned command guides:** each command group's channel gets a pinned list of its
   commands (`/valheim` in #the-gates, `/muninn` in #muninns-roost, `/warcouncil` in
   #war-council, `/odin` in the admin channel). Already set up? Run
@@ -1695,12 +1699,36 @@ history in the logs still counts, though:
   docker compose run --rm valheim-discord-monitor python3 valheim_discord_monitor.py --backfill
   docker compose up -d
   ```
-  With no file names it reads the configured `file` source's log and its rotated copies.
+  With no file names it reads the [log archive](#the-log-archive) and, with a `file`
+  source, the live log and its rotated copies.
   For other sources, download the logs and list them: `--backfill a.log b.log.gz`.
 - Discord links, Steam achievements, plans, bounties and settings aren't from the log, so a
   backfill never touches them. Title roles and stat channels catch up on their next update.
-- Only what's still on disk can be loaded: logrotate deletes old copies after a while
-  (`rotate N` in its config), so the sooner the monitor runs, the more history it keeps.
+- Only what's still on disk can be loaded. **Valheim starts its log from scratch every time
+  the server starts**, so a restart wipes the history before it, and logrotate deletes old
+  copies after a while. That's what the log archive below is for.
+
+### The log archive
+
+The monitor keeps a permanent copy of every log line it reads, one file a day:
+
+```
+logs_archive/valheim_console-2026-09-30.log.gz
+logs_archive/valheim_console-2026-10-01.log      ← today, gzipped after midnight
+```
+
+- **On by default**, in `logs_archive/` next to `monitor_state.json` (the repo folder in
+  Docker, so it survives rebuilds; git ignores it). A day of log is a few hundred KB, and
+  much less once gzipped.
+- **The first run copies what's already in the log**, so the lines from before the monitor
+  started are kept too.
+- **`--backfill` reads it** along with the live log, oldest first, skipping lines it has
+  already read where the two overlap. So the stats can be rebuilt from the very first day
+  the monitor ran, whatever restarts happened since.
+- **It works with every source** (`lowms`, `ftp`, `file`, …): it saves what the monitor
+  reads, so a hosted server's log ends up on your machine too.
+- Options: `"log_archive": {"enabled": true, "dir": "logs_archive", "keep_days": 0}`.
+  `keep_days` deletes days older than that; `0` keeps everything.
 
 The page is static HTML — no scripts, no inputs, no auth needed — so it is safe to
 host publicly. **Full deployment (DNS, nginx/Caddy, backfill): see
@@ -1972,6 +2000,7 @@ or run it in a terminal.
 | `admin_bot.bounties.role` / `role_days` | Skadi / 7 | The bounty winner's role and how long they keep it; `false` for no role. |
 | `admin_bot.welcome_dm` | false | `true` or your own text: DM people who join the Discord server (needs the Server Members Intent). |
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |
+| `log_archive.enabled` / `dir` / `keep_days` | true / `logs_archive` / 0 | A permanent daily copy of the log ([log archive](#the-log-archive)); `keep_days` 0 = forever. |
 | `database.backfill_on_start` | true | With an empty stats database, load the logs already on disk first ([catching up](#catching-up-on-old-logs)). |
 | `state_file` | `monitor_state.json` | Where the read offset is remembered. |
 | `parser_state_file` | `parser_state.json` (next to `state_file`) | Who's online and which player IDs are whose, so a restart doesn't lose track of them. |

@@ -398,6 +398,72 @@ class BackupCopier:
 
 
 # ---------------------------------------------------------------------------
+# Log archive
+# ---------------------------------------------------------------------------
+class LogArchive:
+    """A permanent copy of every log line the monitor reads, one file per day:
+    logs_archive/valheim_console-2026-10-01.log, gzipped once the day is over.
+
+    Valheim starts its log from scratch on every server start, so without this a
+    restart takes the history with it; --backfill reads the archive too."""
+
+    PREFIX = "valheim_console-"
+
+    def __init__(self, folder: str, keep_days: int = 0, clock=time.time):
+        self.folder, self.keep_days, self.clock = folder, int(keep_days or 0), clock
+        self.day: Optional[str] = None
+        self.pending: list = []
+        self.warned = False
+
+    def add(self, line: str) -> None:
+        self.pending.append(line.rstrip("\r\n"))
+
+    def flush(self) -> None:
+        """Append the lines added since the last flush to today's file."""
+        if not self.pending:
+            return
+        lines, self.pending = self.pending, []
+        try:
+            day = _dt.date.fromtimestamp(self.clock()).isoformat()
+            if day != self.day:
+                os.makedirs(self.folder, exist_ok=True)
+                self._rollover(day)
+            with open(os.path.join(self.folder, f"{self.PREFIX}{day}.log"), "a", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except OSError as e:
+            if not self.warned:
+                self.warned = True
+                log.warning("Log archive: couldn't write to %s: %s", self.folder, e)
+
+    def _rollover(self, today: str) -> None:
+        """Gzip finished days, and delete days older than keep_days (0 = keep all)."""
+        import gzip
+        self.day = today
+        for name in sorted(os.listdir(self.folder)):
+            if not name.startswith(self.PREFIX):
+                continue
+            day = name[len(self.PREFIX):len(self.PREFIX) + 10]
+            path = os.path.join(self.folder, name)
+            if self.keep_days and day < (_dt.date.fromisoformat(today)
+                                         - _dt.timedelta(days=self.keep_days)).isoformat():
+                os.remove(path)
+            elif name.endswith(".log") and day < today:
+                with open(path, "rb") as src, gzip.open(path + ".gz.part", "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                os.replace(path + ".gz.part", path + ".gz")
+                os.remove(path)
+
+    def files(self) -> list:
+        """The archive's files, oldest first."""
+        try:
+            names = sorted(n for n in os.listdir(self.folder)
+                           if n.startswith(self.PREFIX) and n.endswith((".log", ".log.gz")))
+        except FileNotFoundError:
+            return []
+        return [os.path.join(self.folder, n) for n in names]
+
+
+# ---------------------------------------------------------------------------
 # Status board
 # ---------------------------------------------------------------------------
 def _ago(t: Optional[float]) -> str:
