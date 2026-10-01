@@ -57,6 +57,8 @@ And without the bot:
 - **Raid alerts, version-mismatch alerts, session summaries, first-visit welcomes,
   milestones and a weekly recap** ([extras](#extras-raids-summaries-milestones-recap-board-backups)).
 - **Copy Valheim's world backups to another disk** ([backup copies](#world-backup-copies)).
+- **Keep a permanent copy of the server log**, which Valheim wipes on every restart, so
+  stats can always be rebuilt ([log archive](#the-log-archive)).
 - Keep **play stats** in SQLite and publish a leaderboard page, with players' **Steam
   achievements**.
 - Run **unattended updates and nightly backups** on LOW.MS.
@@ -198,6 +200,7 @@ And without the bot:
   [Server health](#server-health) ·
   [Auto-updates, restarts & world settings](#auto-updates-and-restarts-from-discord)
 - **Stats & LOW.MS:** [Stats page](#player-stats--public-web-page) ·
+  [Catching up on old logs](#catching-up-on-old-logs) · [Log archive](#the-log-archive) ·
   [Steam achievements](#steam-achievements) ([in Discord](#steam-achievements-in-discord)) ·
   [Updates & backups (LOW.MS)](#unattended-updates--nightly-backups-lowms)
 - **Reference:** [Running it permanently](#running-it-permanently) · [Options](#options) ·
@@ -1390,6 +1393,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | No thread on a game-night signup / no reactions on Huginn's posts / the guide isn't pinned | Missing Create Public Threads, Add Reactions or Pin Messages (in that channel too) | See [bot permissions](#bot-permissions); the log says `couldn't open a thread` / `couldn't pin` |
 | The weekly recap has no chart | Pillow isn't installed (an old image), or nobody played that week | `docker compose up -d --build --force-recreate` |
 | Handled refused-join notices aren't deleted | The bot lacks Manage Messages in the admin channel, or `tidy_notices_hours` is 0 | Grant it in the channel's permissions |
+| Stats are missing for days before the monitor ran, or for when it was down | Valheim wipes its log at every server start, so those lines are gone unless the [log archive](#the-log-archive) has them | Nothing to recover from before the archive started. From now on `--backfill` rebuilds from `logs_archive/` ([catching up](#catching-up-on-old-logs)) |
+| `logs_archive/` stays empty | `"log_archive": {"enabled": false}`, or the folder isn't writable | Check the option; the log says `Log archive: couldn't write to …` |
 | A channel's command guide is missing or out of date | It was deleted, or the channel didn't exist when setup ran | `/odin setup action:guides` posts it again; the bot refreshes the others at start-up |
 | Members get "Run `/muninn stats` in #…" | That command belongs in its home channel since `/odin setup` | Run it there, or change it with `admin_bot.command_channels` (`false` turns it off) |
 | A command's home channel is wrong or was deleted | It points at the channel setup remembered | Run `/odin setup apply` again (it recreates missing channels), or set `"command_channels": {"stats": "<channel id>"}` |
@@ -1885,8 +1890,9 @@ Setup:
 
 **Docker Compose**: see the [self-hosted quick start](#self-hosted-linux-server-quick-start).
 `docker-compose.yml` bind-mounts the repo, so `config.json`, the state files
-(`monitor_state.json`, `parser_state.json`) and the stats database live next to the code
-and survive rebuilds. If `docker compose` rejects
+(`monitor_state.json`, `parser_state.json`), the stats database and the
+[log archive](#the-log-archive) (`logs_archive/`) live next to the code and survive
+rebuilds. Back them up together if you move the bot to another machine. If `docker compose` rejects
 `env_file` / `required`, your Compose is older than 2.24; delete the `env_file:` block and
 pass secrets another way.
 
@@ -2107,6 +2113,8 @@ Added here:
   news.
 - **Catching up on old logs:** a new install loads the logs already on disk, and
   `--backfill` is safe to repeat.
+- **Log archive:** a permanent daily copy of every log line the monitor reads, gzipped,
+  so server restarts (which wipe Valheim's log) never cost any history.
 - **Steam achievements in Discord:** unlock posts, achievements in `/muninn stats`, a
   "Most achievements" leaderboard, and the Bragi title.
 - **Boss progress** read from the world save (Valheim 1.0's `_main.<N>.db2` and older
