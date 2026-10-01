@@ -16,6 +16,9 @@ venv/
 .idea/
 .DS_Store
 
+# Permanent copies of the server log (log_archive)
+/logs_archive/
+
 # Stats database and generated site
 *.db
 *.db-wal

@@ -9,6 +9,10 @@
     "server_online",
     "server_offline"
   ],
+  "log_archive": {
+    "enabled": true,
+    "keep_days": 0
+  },
   "database": {
     "path": "valheim_stats.db",
     "enabled": true

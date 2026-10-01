@@ -1286,16 +1286,37 @@ def backfill(store, paths: list, parser: Optional["ValheimLogParser"] = None) ->
     if not starts:
         return 0, parser
     store.clear_since(min(starts))
-    n = 0
+    n, done_to = 0, None
     for path in paths:
+        # Files can overlap (the archive holds what's still in the live log): skip the
+        # start of a file up to where the previous ones got to.
+        skipping = done_to is not None
         with _open_log(path) as f:
             for line in f:
+                if skipping:
+                    ts = parse_log_ts(line)
+                    if ts is None or ts <= done_to:
+                        continue
+                    skipping = False
                 for ev in parser.feed(line):
                     record_event(store, ev)
                     n += 1
+        if parser.last_ts is not None:
+            done_to = max(done_to or parser.last_ts, parser.last_ts)
         log.info("Backfill: read %s", path)
     store.conn.commit()
     return n, parser
+
+
+def build_archive(cfg: dict):
+    """The log archive (extras.LogArchive), on unless "log_archive": {"enabled": false}."""
+    import extras
+    ac = cfg.get("log_archive") or {}
+    if not ac.get("enabled", True):
+        return None
+    folder = ac.get("dir") or os.path.join(os.path.dirname(cfg.get("state_file", "monitor_state.json")) or ".",
+                                           "logs_archive")
+    return extras.LogArchive(folder, ac.get("keep_days", 0))
 
 
 def prime_live_state(live, source) -> None:
@@ -1505,10 +1526,14 @@ def main():
             sys.exit("Configure a database.path to backfill into")
         paths = args.backfill
         if not paths:
+            archive = build_archive(cfg)
+            paths = archive.files() if archive else []
             local = cfg.get("source", {}).get("path")
-            if cfg.get("source", {}).get("type") != "file" or not local:
-                sys.exit("Give the log files to load (only a `file` source is found automatically)")
-            paths = log_files(local)
+            if cfg.get("source", {}).get("type") == "file" and local:
+                paths += log_files(local)
+            if not paths:
+                sys.exit("No logs found: give the log files to load (a `file` source and the log archive "
+                         "are found automatically)")
         store = open_store()
         n, _ = backfill(store, paths)
         store.close()
@@ -1618,11 +1643,12 @@ def main():
     events = set(cfg.get("events") or ()) & log_events or default_log_events
 
     store = open_store(reconcile=True) if db_enabled else None
+    archive = build_archive(cfg)        # a permanent copy of every line read (extras.LogArchive)
     # First start with an empty stats database (a new install on an old server): load
     # the logs still on disk, so the history isn't lost. Nothing is posted.
     if store and isinstance(source, LocalFileSource) and db_cfg.get("backfill_on_start", True) and \
             not store.conn.execute("SELECT 1 FROM play_sessions LIMIT 1").fetchone():
-        files = log_files(source.path)
+        files = log_files(source.path) + (archive.files() if archive else [])
         try:
             n, seen = backfill(store, files)
         except Exception as e:  # noqa: BLE001
@@ -1635,6 +1661,15 @@ def main():
                 if isinstance(tailer, OffsetTailer):          # carry on after what was just loaded
                     tailer.offset, tailer.buffer = source.size(), b""
                     tailer._save()
+    # A new archive starts with what's already in the log (up to where tailing begins),
+    # so the lines from before the monitor started aren't lost at the next restart.
+    if archive and not archive.files() and isinstance(source, LocalFileSource) and isinstance(tailer, OffsetTailer):
+        try:
+            for line in source.read_from(0)[:tailer.offset].decode("utf-8", "replace").splitlines():
+                archive.add(line)
+            archive.flush()
+        except OSError as e:
+            log.warning("Log archive: couldn't copy the existing log: %s", e)
     render_interval = float(site_cfg.get("render_interval_seconds", 60))
     last_render = 0.0
 
@@ -1860,7 +1895,12 @@ def main():
     while True:
         try:
             changed = False
-            for line in tailer.poll():
+            lines = list(tailer.poll())
+            if archive:                        # saved first: a slow Discord can't hold it up
+                for line in lines:
+                    archive.add(line)
+                archive.flush()
+            for line in lines:
                 last_line_at = time.time()
                 log.debug("LOG: %s", line)
                 for ev in parser.feed(line):
