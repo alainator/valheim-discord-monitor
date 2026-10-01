@@ -1649,7 +1649,7 @@ class AdminBot:
             first = self._meta("bosses:known") in (None, "")
         except ValueError:
             known, first = set(), True
-        new = sorted(keys - known, key=lambda k: (bosses.BOSS_KEYS.index(k) if k in bosses.BOSS_KEYS else 99, k))
+        new = [k for k in bosses.BOSS_KEYS if k in keys and k not in known]
         if not new and not first:
             return []
         try:

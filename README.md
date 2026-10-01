@@ -44,6 +44,14 @@ On top of the Discord posts it can also, with the optional **admin bot**:
 - **Steam achievements in Discord:** unlock posts, achievements in `/muninn stats`, a
   leaderboard and the Bragi title, with a free Steam API key
   ([achievements](#steam-achievements-in-discord)).
+- **Boss progress, read from the world save:** "⚔️ Moder has fallen!" when a boss goes
+  down, `/muninn bosses`, and a "🏆 Bosses: 3/8 · next: Moder" channel. No mods and no
+  setup ([boss progress](#boss-progress)).
+- **Bounties and join-to-create voice:** admin challenges with a week-long Skadi role for
+  the winner, and a voice channel that makes each member their own
+  ([bounties](#bounties), [join-to-create](#join-to-create-voice-channels)).
+- **Restore a world backup** from Discord with `/odin restore`, undoable
+  ([restore](#restoring-a-backup-odin-restore)).
 
 And without the bot:
 - **Raid alerts, version-mismatch alerts, session summaries, first-visit welcomes,
@@ -59,7 +67,7 @@ And without the bot:
 **What's new** (already running it? `git pull && docker compose up -d --build`):
 - **Boss progress:** the bot reads which bosses are down straight from the world save (no
   mods), posts "⚔️ Moder has fallen!" when a new one falls, and shows it in
-  `/muninn bosses` and a "🏆 Bosses: 3/7 · next: Moder" stat channel
+  `/muninn bosses` and a "🏆 Bosses: 3/8 · next: Moder" stat channel
   ([boss progress](#boss-progress)).
 - **`/odin restore`:** put the world back to one of Valheim's backups from Discord. It
   asks first, keeps the current world as a backup (so it can be undone), and needs a
@@ -150,12 +158,15 @@ And without the bot:
 - **Admin bot:** [Join alerts & setup](#join-attempt-alerts--discord-admin-bot) ·
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
-  [Players & community](#players--community) · [Title roles](#title-roles) ·
+  [Players & community](#players--community) · [Boss progress](#boss-progress) ·
+  [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
+  [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
   [Troubleshooting](#troubleshooting)
 - **Extras:** [Raids, summaries, milestones, recap](#extras-raids-summaries-milestones-recap-board-backups) ·
   [Status board](#status-board) · [Backup copies](#world-backup-copies) ·
+  [Restoring a backup](#restoring-a-backup-odin-restore) ·
   [Server health](#server-health) ·
   [Auto-updates, restarts & world settings](#auto-updates-and-restarts-from-discord)
 - **Stats & LOW.MS:** [Stats page](#player-stats--public-web-page) ·
@@ -840,7 +851,7 @@ voice channels or categories.
 | `next_plan` | The next game night from `/warcouncil plan` |
 | `vikings` | Characters that have ever played |
 | `achievements` | Steam achievements unlocked, all players together |
-| `bosses` | Bosses defeated in this world and the next one ("🏆 Bosses: 3/7 · next: Moder"), from the [world save](#boss-progress) |
+| `bosses` | Bosses defeated in this world and the next one ("🏆 Bosses: 3/8 · next: Moder"), from the [world save](#boss-progress) |
 | `title_owner` | Odin: the Discord server's owner |
 | `title_time`, `title_deaths`, `title_sessions`, `title_longest`, `title_achievements` | The [title](#title-roles) holders: Heimdall, Hel, Sleipnir, Thor, Bragi (`titles` means all of them) |
 
@@ -1076,12 +1087,28 @@ folder `/valheim map` uses, so there's nothing to set up:
 - **"⚔️ Moder has fallen!"** is posted by Huginn when a new boss shows up in the save, with
   how many are down and which is next. Valheim saves the world every 30 minutes and when
   the server stops, so the post comes up to half an hour after the kill.
-- **`/muninn bosses`** lists all seven bosses (Eikthyr, The Elder, Bonemass, Moder, Yagluth,
-  The Queen, Fader) with ✅ or ⬜ and the date each fell. Other `defeated_…` keys in the save
-  (mini-bosses and the like) are listed under "Also defeated".
-- **Stat channel** `bosses` in the Hall of Champions: "🏆 Bosses: 3/7 · next: Moder".
+- **`/muninn bosses`** lists all eight bosses in progression order with ✅ or ⬜ and the
+  date each fell:
+
+  | # | Boss | Biome | Summoned with |
+  |---|---|---|---|
+  | 1 | Eikthyr | Meadows | 2 Deer Trophies |
+  | 2 | The Elder | Black Forest | 3 Ancient Seeds |
+  | 3 | Bonemass | Swamp | 10 Withered Bones |
+  | 4 | Moder | Mountains | 3 Dragon Eggs |
+  | 5 | Yagluth | Plains | 5 Fuling Totems |
+  | 6 | The Queen | Mistlands | the Sealbreaker |
+  | 7 | Fader | Ashlands | 3 Bells |
+  | 8 | Kall Fimbulbringer | Deep North | 3 Malicious Bloods |
+
+  Only these eight count. The save has other `defeated_…` keys too (e.g.
+  `defeated_writhan`), which aren't bosses and are ignored.
+- **Stat channel** `bosses` in the Hall of Champions: "🏆 Bosses: 3/8 · next: Moder".
 - **The first check only records what's already down**, so turning it on doesn't post
   bosses you beat weeks ago. Dates are known for kills after that.
+- **Kall Fimbulbringer** is new in Valheim 1.0, and his exact save key isn't known yet, so
+  any `defeated_…` key naming Kall or Fimbul counts as him. If he's beaten and still shows
+  ⬜, please open an issue with the key from your save.
 
 It reads the newest `_main.<N>.db2` in `worlds_local/<world>/` (Valheim 1.0) or
 `<world>.db` (older servers), never a backup. Options:
@@ -1294,6 +1321,9 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | A bot admin can't see `/odin` | Discord hides it from anyone without Manage Server | Server Settings → Integrations → the bot → `/odin` → add their role |
 | `/odin restore` says "couldn't stop the server" | The sudoers line for stop/start is missing | Add it ([restore setup](#restoring-a-backup-odin-restore)); `sudo -l -U valheim` must list `stop` and `start` |
 | `/odin restore` lists nothing | No Valheim backups in `worlds_local` yet, or `save_dir` / `backups.source_dir` points elsewhere | `sudo ls /home/valheim/valheim_save_data/worlds_local`; check the paths in `config.json` |
+| `/muninn bosses` says it can't find the world save | `save_dir` isn't the folder with `worlds_local` in it, or the save folder isn't mounted | Set `admin_bot.save_dir` to the mounted save folder (e.g. `/valheim_save_data`); `/valheim map` uses the same one |
+| A boss kill wasn't posted | Valheim hadn't saved yet (every 30 minutes, and at shutdown), or it was already down when the bot first checked | Wait for the next save. Bosses down before the first check are recorded quietly; `/muninn bosses` shows them |
+| `/muninn bosses` shows the wrong world | Several worlds in `worlds_local`; the most recently saved one is used | Set `"bosses": {"world": "Alheim"}` |
 | A Steam player's achievement wasn't posted | Their game details are private (Steam's default is Friends only), `"achievement"` isn't in `events`, or it's been under 30 minutes | `/muninn stats <character>` says "private" if it's privacy: they set Game details to Public. Otherwise check `events` |
 | Someone was posted as leaving while still playing | The log line that looked like their leave belonged to an earlier connection of theirs (fixed), or a pattern the monitor doesn't know | Update; if it happens again, share the monitor's log lines around their `EVENT logout` in an issue |
 | Notification DMs don't arrive | The user doesn't accept DMs from server members | In Discord: the server name → Privacy Settings → allow direct messages |
@@ -1939,6 +1969,13 @@ Added here:
   guide, the AFK channel set by `/odin setup`, and handled admin notices tidied away.
 - **Steam achievements in Discord:** unlock posts, achievements in `/muninn stats`, a
   "Most achievements" leaderboard, and the Bragi title.
+- **Boss progress** read from the world save (Valheim 1.0's `_main.<N>.db2` and older
+  `.db`): kill posts, `/muninn bosses` and a stat channel.
+- **More community:** bounties with the Skadi role, join-to-create voice channels,
+  `/muninn compare` and `uptime`, `/odin announce`, play streaks and anniversaries, quiet
+  hours and digests for the feed, "come join" DMs and welcome DMs.
+- **`/odin restore`:** puts back one of Valheim's backups through the host helper, keeping
+  the current world as a backup.
 - **Server health:** low-disk and slow-save warnings, an optional daily restart, and
   exploration in the weekly recap.
 - **Docker setup:** `Dockerfile`, `docker-compose.yml`, `.env.example` and a self-hosted
