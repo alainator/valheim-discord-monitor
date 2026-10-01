@@ -65,6 +65,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **No lost history on an old server:** the first time the monitor starts with an empty
+  stats database, it loads every log still on the server (rotated and `.gz` copies too),
+  without posting anything. `--backfill` can now be run again safely to fill gaps
+  ([catching up on old logs](#catching-up-on-old-logs)).
 - **#runestone gets used:** `/odin announce` posts there by default (or in Huginn's feed,
   or both), `/odin rules` keeps one pinned rules post (with a starter set to edit), and
   with `"runestone_news": true` big news (a Valheim update, a restore, a boss kill) is kept
@@ -1636,10 +1640,38 @@ players, peak players online at once). Enable it with `database` and
 
 Useful commands:
 ```bash
-python3 valheim_discord_monitor.py --config config.json --backfill server.log   # seed history from a log file
+python3 valheim_discord_monitor.py --config config.json --backfill              # load the logs on disk (see below)
+python3 valheim_discord_monitor.py --config config.json --backfill old.log      # or specific log files
 python3 valheim_discord_monitor.py --config config.json --render-site           # write the page once
 python3 stats_site.py --db valheim_stats.db --out site/index.html --config config.json
 ```
+
+### Catching up on old logs
+
+The monitor normally starts reading at the end of the log, so nothing old gets posted. The
+history in the logs still counts, though:
+
+- **First start with an empty stats database** (a new install on a server that's been
+  running for a while): the monitor first loads the live log and its rotated copies next
+  to it (`valheim_console.log.1`, `valheim_console.log-20260930`, `….gz`), oldest first.
+  Play time, visits, deaths, raids, platforms and Steam IDs all go in. **Nothing is posted
+  to Discord**, and whoever is online right now is tracked from there. This needs a `file`
+  source; turn it off with `"database": {"backfill_on_start": false}`.
+- **`--backfill` any time**, e.g. after the monitor was down for a while. It replaces what
+  the database has from the oldest of those logs onwards with what the logs say, and keeps
+  anything older (from logs rotated away since). So it never counts anything twice, and
+  running it again is safe. Stop the monitor first, so both don't write at once:
+  ```bash
+  docker compose stop
+  docker compose run --rm valheim-discord-monitor python3 valheim_discord_monitor.py --backfill
+  docker compose up -d
+  ```
+  With no file names it reads the configured `file` source's log and its rotated copies.
+  For other sources, download the logs and list them: `--backfill a.log b.log.gz`.
+- Discord links, Steam achievements, plans, bounties and settings aren't from the log, so a
+  backfill never touches them. Title roles and stat channels catch up on their next update.
+- Only what's still on disk can be loaded: logrotate deletes old copies after a while
+  (`rotate N` in its config), so the sooner the monitor runs, the more history it keeps.
 
 The page is static HTML — no scripts, no inputs, no auth needed — so it is safe to
 host publicly. **Full deployment (DNS, nginx/Caddy, backfill): see
@@ -1911,6 +1943,7 @@ or run it in a terminal.
 | `admin_bot.bounties.role` / `role_days` | Skadi / 7 | The bounty winner's role and how long they keep it; `false` for no role. |
 | `admin_bot.welcome_dm` | false | `true` or your own text: DM people who join the Discord server (needs the Server Members Intent). |
 | `discord.messages` | see example | Per-event templates; `{player}`, `{server}`, `{who}`, `{count}`, `{max}` placeholders. |
+| `database.backfill_on_start` | true | With an empty stats database, load the logs already on disk first ([catching up](#catching-up-on-old-logs)). |
 | `state_file` | `monitor_state.json` | Where the read offset is remembered. |
 | `parser_state_file` | `parser_state.json` (next to `state_file`) | Who's online and which player IDs are whose, so a restart doesn't lose track of them. |
 | `webhook_file` | `webhook.json` (next to `state_file`) | The webhook the bot created with `/odin setup`, used when `DISCORD_WEBHOOK_URL` isn't set. |

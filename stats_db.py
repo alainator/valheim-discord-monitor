@@ -391,6 +391,14 @@ class Store:
             self.conn.execute("INSERT INTO concurrency(at, count) VALUES (?,?)", (ts, count))
         self.heartbeat(ts)
 
+    def clear_since(self, ts: int) -> None:
+        """Forget everything read from the log from `ts` on (a backfill rewrites it).
+        Links, Steam data, plans, bounties and settings aren't from the log, so they stay."""
+        for table, col in (("deaths", "died_at"), ("play_sessions", "login_at"), ("concurrency", "at"),
+                           ("server_events", "at")):
+            self.conn.execute(f"DELETE FROM {table} WHERE {col} >= ?", (int(ts),))
+        self.conn.commit()
+
     def uptime_event(self, kind: str, ts: int, unclean: bool = False) -> None:
         """Record the server going "down" or coming "up". A boot after an unclean stop also
         records the missing "down", at the last log activity before it."""

@@ -1246,6 +1246,58 @@ def build_maintenance(cfg: dict, source, discord: "Discord", server_name: str):
     return maintenance.Maintenance(m, maintenance.PublicAPI(key, server_id, base), panel, notify)
 
 
+def log_files(path: str) -> list:
+    """The live log and its rotated copies next to it (valheim_console.log.1,
+    valheim_console.log-20260930, ….gz), oldest first."""
+    import glob
+    folder, base = os.path.split(path)
+    found = [p for p in glob.glob(os.path.join(folder or ".", glob.escape(base) + "*")) if os.path.isfile(p)]
+    return sorted(found, key=lambda p: (_first_ts(p) or float("inf"), p))
+
+
+def _open_log(path: str):
+    if path.endswith(".gz"):
+        import gzip
+        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
+    return open(path, encoding="utf-8", errors="replace")
+
+
+def _first_ts(path: str) -> Optional[int]:
+    try:
+        with _open_log(path) as f:
+            for i, line in enumerate(f):
+                ts = parse_log_ts(line)
+                if ts is not None or i > 5000:
+                    return ts
+    except OSError:
+        pass
+    return None
+
+
+def backfill(store, paths: list, parser: Optional["ValheimLogParser"] = None) -> tuple:
+    """Load whole log files into the stats database, oldest first, without posting
+    anything. Safe to run again: everything the stats database has from the first of
+    these logs onwards is replaced by what the logs say, and anything older (from logs
+    since rotated away) is kept. Returns (events, parser) so tailing can carry on with
+    the parser's idea of who's online."""
+    parser = parser or ValheimLogParser()
+    paths = sorted(paths, key=lambda p: (_first_ts(p) or float("inf"), p))
+    starts = [t for t in (_first_ts(p) for p in paths) if t is not None]
+    if not starts:
+        return 0, parser
+    store.clear_since(min(starts))
+    n = 0
+    for path in paths:
+        with _open_log(path) as f:
+            for line in f:
+                for ev in parser.feed(line):
+                    record_event(store, ev)
+                    n += 1
+        log.info("Backfill: read %s", path)
+    store.conn.commit()
+    return n, parser
+
+
 def prime_live_state(live, source) -> None:
     """The monitor starts at the end of the log, so fill the status board from what's
     already there: version, and when the server last booted, saved, backed up
@@ -1361,7 +1413,9 @@ def main():
     ap.add_argument("--test-webhook", action="store_true", help="Send a test message to the Discord webhook and exit")
     ap.add_argument("--probe", action="store_true", help="Count mode: query the source once, print the result, and exit")
     ap.add_argument("--from-start", action="store_true", help="On first run, process the whole existing log instead of only new lines")
-    ap.add_argument("--backfill", metavar="FILE", help="Load a whole log file into the stats database (no Discord posts), then exit")
+    ap.add_argument("--backfill", metavar="FILE", nargs="*",
+                    help="Load whole log files into the stats database (no Discord posts), then exit. Without "
+                         "files: the configured log and its rotated copies. Safe to run again")
     ap.add_argument("--render-site", action="store_true", help="Render the stats web page from the database once and exit")
     ap.add_argument("--refresh-steam", action="store_true", help="Fetch Steam achievements for known players once, then exit")
     ap.add_argument("--maintenance-check", action="store_true",
@@ -1446,19 +1500,19 @@ def main():
         render_site("(after steam refresh)")
         return
 
-    if args.backfill:
+    if args.backfill is not None:
         if not db_enabled:
             sys.exit("Configure a database.path to backfill into")
+        paths = args.backfill
+        if not paths:
+            local = cfg.get("source", {}).get("path")
+            if cfg.get("source", {}).get("type") != "file" or not local:
+                sys.exit("Give the log files to load (only a `file` source is found automatically)")
+            paths = log_files(local)
         store = open_store()
-        parser = ValheimLogParser()
-        n = 0
-        with open(args.backfill, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                for ev in parser.feed(line):
-                    record_event(store, ev)
-                    n += 1
+        n, _ = backfill(store, paths)
         store.close()
-        log.info("Backfilled %d events from %s", n, args.backfill)
+        log.info("Backfilled %d events from %d log file(s)", n, len(paths))
         render_site("(after backfill)")
         return
 
@@ -1564,6 +1618,23 @@ def main():
     events = set(cfg.get("events") or ()) & log_events or default_log_events
 
     store = open_store(reconcile=True) if db_enabled else None
+    # First start with an empty stats database (a new install on an old server): load
+    # the logs still on disk, so the history isn't lost. Nothing is posted.
+    if store and isinstance(source, LocalFileSource) and db_cfg.get("backfill_on_start", True) and \
+            not store.conn.execute("SELECT 1 FROM play_sessions LIMIT 1").fetchone():
+        files = log_files(source.path)
+        try:
+            n, seen = backfill(store, files)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Loading the existing logs failed: %s", e)
+        else:
+            if n:
+                log.info("Empty stats database: loaded %d events from %d existing log file(s)", n, len(files))
+                parser.load_state(seen.state_dict())          # who's online now, as the logs say
+                save_parser_state()
+                if isinstance(tailer, OffsetTailer):          # carry on after what was just loaded
+                    tailer.offset, tailer.buffer = source.size(), b""
+                    tailer._save()
     render_interval = float(site_cfg.get("render_interval_seconds", 60))
     last_render = 0.0
 
