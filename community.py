@@ -510,6 +510,140 @@ def uptime(conn, since: int, until: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Honors: roles for deeds the log can't see (/odin honor)
+# ---------------------------------------------------------------------------
+# (name, emoji, what it's for, why the name, colour). Admins add their own with
+# /odin honor create.
+HONORS = [
+    ("Hermóðr", "⚰️", "crypt raider", "rode down to Hel's realm and came back", 0x546E7A),
+    ("Andhrímnir", "🍲", "the cook", "the cook of Valhalla, who roasts the boar Sæhrímnir every night", 0xE67E22),
+    ("Svaðilfari", "🏰", "the builder", "the giant stallion that hauled the stone for Asgard's wall", 0x95A5A6),
+    ("Freyr", "🌾", "the farmer", "god of harvest and good seasons", 0x2ECC71),
+    ("Gangleri", "🧭", "the explorer", "\"the Wanderer\", Odin's name when travelling in disguise", 0x1ABC9C),
+    ("Brokkr", "⚒️", "smith and crafter", "the dwarf who forged Mjölnir", 0xA84300),
+    ("Dvalinn", "⛏️", "the miner", "the dwarf master of stone and ore", 0x7F8C8D),
+    ("Njörðr", "⛵", "sailor and captain", "god of the sea and ships", 0x3498DB),
+    ("Rán", "🎣", "the fisher", "the sea goddess who catches sailors in her net", 0x206694),
+    ("Ægir", "🍺", "the brewer", "the sea giant who brews ale for the gods", 0xC27C0E),
+    ("Ullr", "🏹", "hunter and archer", "the bow-and-ski hunter god", 0x11806A),
+    ("Angrboða", "🐺", "the tamer", "mother of Fenrir, mistress of beasts", 0x71368A),
+    ("Eir", "🩹", "healer and support", "goddess of healing", 0xFF6B9D),
+    ("Týr", "🛡️", "champion fighter", "god of courage, who gave his hand to bind Fenrir", 0x992D22),
+    ("Fáfnir", "💰", "the hoarder", "the dragon who slept on his heap of gold", 0xF1C40F),
+    ("Loki", "🃏", "agent of chaos", "the trickster everyone loves to blame", 0x9B59B6),
+]
+
+
+def honor_key(name: str) -> str:
+    """"Hermóðr" -> "hermodr": how honors are looked up, ignoring case and accents."""
+    import unicodedata
+    folded = unicodedata.normalize("NFKD", name.replace("ð", "d").replace("Ð", "d").replace("æ", "ae")
+                                   .replace("Æ", "ae").replace("ø", "o").replace("þ", "th"))
+    return re.sub(r"[^a-z0-9]", "", folded.encode("ascii", "ignore").decode().lower())[:40]
+
+
+def seed_honors(conn) -> None:
+    """Add the built-in honors that aren't there yet (never overwrites an edited one)."""
+    for name, emoji, what, why, color in HONORS:
+        conn.execute("INSERT OR IGNORE INTO honors(key, name, emoji, description, color, builtin, created_at) "
+                     "VALUES (?,?,?,?,?,1,?)", (honor_key(name), name, emoji, f"{what}: {why}", color,
+                                                int(time.time())))
+    conn.commit()
+
+
+def honors(conn, prefix: str = "") -> list:
+    """Every honor, with how many hold it: built-in ones first (in their order), then custom."""
+    seed_honors(conn)
+    order = {honor_key(h[0]): i for i, h in enumerate(HONORS)}
+    rows = _rows(conn, "SELECT h.*, (SELECT COUNT(*) FROM honor_holders x WHERE x.honor_key = h.key) AS holders "
+                       "FROM honors h")
+    p = honor_key(prefix)
+    rows = [r for r in rows if p in r["key"] or prefix.lower() in (r["description"] or "").lower()]
+    return sorted(rows, key=lambda r: (order.get(r["key"], 999), r["name"].lower()))
+
+
+def get_honor(conn, name_or_key: str) -> Optional[dict]:
+    seed_honors(conn)
+    return _one(conn, "SELECT * FROM honors WHERE key = ?", (honor_key(name_or_key),))
+
+
+def create_honor(conn, name: str, emoji: str, description: str, color: int, created_by,
+                 role_id=None) -> Optional[str]:
+    """A new custom honor. Returns an error, or None."""
+    key = honor_key(name)
+    if not key:
+        return "That name needs at least one letter or number."
+    if get_honor(conn, key):
+        return f"There's already an honor called **{get_honor(conn, key)['name']}**."
+    conn.execute("INSERT INTO honors(key, name, emoji, description, color, role_id, builtin, created_by, created_at) "
+                 "VALUES (?,?,?,?,?,?,0,?,?)", (key, name.strip()[:60], (emoji or "🏅").strip()[:8],
+                                                (description or "").strip()[:200], color,
+                                                str(role_id) if role_id else None, str(created_by), int(time.time())))
+    conn.commit()
+    return None
+
+
+def delete_honor(conn, key: str) -> None:
+    conn.execute("DELETE FROM honor_holders WHERE honor_key = ?", (key,))
+    conn.execute("DELETE FROM honors WHERE key = ?", (key,))
+    conn.commit()
+
+
+def set_honor_role(conn, key: str, role_id) -> None:
+    conn.execute("UPDATE honors SET role_id = ? WHERE key = ?", (str(role_id), key))
+    conn.commit()
+
+
+def give_honor(conn, key: str, user_id, given_by, note: str = "") -> bool:
+    """False if they already hold it."""
+    cur = conn.execute("INSERT OR IGNORE INTO honor_holders(honor_key, user_id, given_at, given_by, note) "
+                       "VALUES (?,?,?,?,?)", (key, str(user_id), int(time.time()), str(given_by), note[:200] or None))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def take_honor(conn, key: str, user_id) -> bool:
+    cur = conn.execute("DELETE FROM honor_holders WHERE honor_key = ? AND user_id = ?", (key, str(user_id)))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def honor_holders(conn, key: str) -> list:
+    return _rows(conn, "SELECT * FROM honor_holders WHERE honor_key = ? ORDER BY given_at", (key,))
+
+
+def user_honors(conn, user_id) -> list:
+    """[{"name", "emoji", "note", "given_at"}] a Discord user holds."""
+    return _rows(conn, "SELECT h.name, h.emoji, x.note, x.given_at FROM honor_holders x JOIN honors h "
+                       "ON h.key = x.honor_key WHERE x.user_id = ? ORDER BY x.given_at", (str(user_id),))
+
+
+def render_honor_given(h: dict, user_id, note: str = "") -> dict:
+    what = (h.get("description") or "").split(":")[0]
+    desc = f"<@{user_id}> is honored as **{h['name']}**" + (f", {what}" if what else "") + "."
+    if note:
+        desc += f"\n*{note}*"
+    return {"title": f"{h.get('emoji') or '🏅'} A new {h['name']}!", "description": desc,
+            "color": h.get("color") or 0xC27C0E}
+
+
+def render_honors(conn, user_id=None) -> dict:
+    """/muninn honors: every honor and its holders, or one member's honors."""
+    if user_id is not None:
+        mine = user_honors(conn, user_id)
+        lines = [f"{h['emoji'] or '🏅'} **{h['name']}**" + (f": *{h['note']}*" if h["note"] else "") for h in mine]
+        return {"title": "🏅 Honors", "color": 0xC27C0E,
+                "description": f"<@{user_id}>\n" + ("\n".join(lines) or "No honors yet.")}
+    lines = []
+    for h in honors(conn):
+        who = ", ".join(f"<@{x['user_id']}>" for x in honor_holders(conn, h["key"])[:10]) or "—"
+        what = (h["description"] or "").split(":")[0]
+        lines.append(f"{h['emoji'] or '🏅'} **{h['name']}** ({what or 'custom'}): {who}")
+    return {"title": "🏅 Honors of the realm", "color": 0xC27C0E, "description": "\n".join(lines)[:4000],
+            "footer": {"text": "Given by the admins: /odin honor give, vote, or a bounty"}}
+
+
+# ---------------------------------------------------------------------------
 # Bounties
 # ---------------------------------------------------------------------------
 def create_bounty(conn, title: str, reward: str, days: float, creator_id, now: Optional[float] = None) -> int:
@@ -556,11 +690,13 @@ def bounty_hunters(conn, since: int = 0) -> list:
                        "AND done_at >= ? GROUP BY winner_id ORDER BY n DESC, MIN(done_at)", (since,))
 
 
-def render_bounty(b: dict) -> dict:
-    """The bounty post: the challenge, reward, deadline and how it ended."""
+def render_bounty(b: dict, honor: Optional[dict] = None) -> dict:
+    """The bounty post: the challenge, reward (and honor), deadline and how it ended."""
     lines = []
     if b.get("reward"):
         lines.append(f"**Reward:** {b['reward']}")
+    if honor:
+        lines.append(f"**Honor:** {honor.get('emoji') or '🏅'} {honor['name']}, for good")
     if b["status"] == "open":
         lines.append(f"**Ends** <t:{b['expires_at']}:R>")
         lines.append("Done it? Press **🎯 I did it** and an admin will confirm.")
