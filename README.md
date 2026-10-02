@@ -67,6 +67,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Honors:** roles for what the logs can't see, like the crypt raider, the cook, the
+  builder or the explorer. 16 come built in (Hermóðr, Andhrímnir, Freyr, Gangleri…), admins
+  hand them out directly, by a vote or as a bounty prize, and can make their own, silly ones
+  welcome ([honors](#honors)).
 - **Two more roles** with the titles: **Hœnir** for the least time played (among players
   seen this month with 10+ minutes played), and **Óðr** for everyone who hasn't been on for 14
   days, taken back the moment they log in ([title roles](#title-roles)).
@@ -594,9 +598,9 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
-| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules` | Admins, anywhere: replies are private |
+| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
 **Pinned command guides.** So members know what's there, each group's home channel has a
 pinned message listing that group's commands, with their options and what they do:
@@ -645,6 +649,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, or Steam achievements | Stats database |
 | `/muninn compare <player> [other]` | Anyone | Two characters side by side: time played, visits, longest session, deaths, achievements, with the leader of each marked. No `other` = your linked character | Stats database |
 | `/muninn bosses` | Anyone | Every boss with ✅ or ⬜, when it fell, and which is next ([boss progress](#boss-progress)) | `save_dir` |
+| `/muninn honors [member]` | Anyone | Every [honor](#honors) and who holds it, or one member's honors | Stats database |
 | `/muninn uptime` | Anyone | Share of time the server was up this week, the last 7 and 30 days, with restarts and downtime | Stats database |
 | `/muninn titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
 | `/valheim notify <when> [player] [players]` | Anyone | DM me when the first player joins an empty server, when `players` are online (`crowd`), or when a given character joins; `off` / `list` | Stats database |
@@ -665,6 +670,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/odin bounty <challenge> [reward] [days]` | Admin | Post a [bounty](#bounties) with an **I did it** button; open 7 days by default | Stats database |
 | `/odin bounty-close <bounty>` | Admin | Close an open bounty without a winner | Stats database |
 | `/odin announce <message> [title] [ping] [where]` | Admin | Post an announcement in #runestone (default), Huginn's feed, or both; `ping` adds @everyone. `\n` starts a new line ([rules channel](#the-rules-channel-runestone)) | #runestone, or Huginn's webhook |
+| `/odin honor give / take / create / delete / vote` | Admin | Hand out [honors](#honors) for deeds the log can't see, make your own, or let everyone vote | Stats database, Manage Roles |
 | `/odin rules [text] [show]` | Admin | Post or edit the one pinned rules message in #runestone; no text = a starter set; `show` gives the current text to copy and edit | #runestone |
 | `/odin setup [preview\|apply\|undo\|guides]` | Admin | Organise the Discord into themed categories and channels ([server setup](#server-setup-odin-setup)); `guides` only pins the command guides | Manage Channels, Manage Roles (Manage Webhooks for Huginn's webhook, Manage Server for Discord's join messages) |
 | `/odin settings` | Admin | Current preset, modifiers and setkeys, and every allowed value | [world settings](host/README.md#world-settings-from-discord-preset-modifiers-setkeys) |
@@ -1217,6 +1223,61 @@ Admins post a challenge; whoever does it gets the glory and a role for a week.
 - Config (all optional): `"bounties": {"channel_id": "…", "role": "Skadi", "role_days": 7}`.
   `"role": false` gives no role.
 
+### Honors
+
+Titles come from the numbers in the log. **Honors** are for everything else: the friend who
+lives in the crypts for iron, the one who cooks and farms, the one who's filled half the
+map. Only admins give them out, and they're kept until taken back. One person can hold
+several, and several people can hold the same one.
+
+**Built in** (the bot makes each role the first time it's given):
+
+| Honor | For | Why the name |
+|---|---|---|
+| ⚰️ **Hermóðr** | crypt raider | Rode down to Hel's realm and came back |
+| 🍲 **Andhrímnir** | the cook | The cook of Valhalla, who roasts the boar Sæhrímnir every night |
+| 🏰 **Svaðilfari** | the builder | The giant stallion that hauled the stone for Asgard's wall |
+| 🌾 **Freyr** | the farmer | God of harvest and good seasons |
+| 🧭 **Gangleri** | the explorer | "the Wanderer", Odin's name when travelling in disguise |
+| ⚒️ **Brokkr** | smith and crafter | The dwarf who forged Mjölnir |
+| ⛏️ **Dvalinn** | the miner | The dwarf master of stone and ore |
+| ⛵ **Njörðr** | sailor and captain | God of the sea and ships |
+| 🎣 **Rán** | the fisher | The sea goddess who catches sailors in her net |
+| 🍺 **Ægir** | the brewer | The sea giant who brews ale for the gods |
+| 🏹 **Ullr** | hunter and archer | The bow-and-ski hunter god |
+| 🐺 **Angrboða** | the tamer | Mother of Fenrir, mistress of beasts |
+| 🩹 **Eir** | healer and support | Goddess of healing |
+| 🛡️ **Týr** | champion fighter | God of courage, who gave his hand to bind Fenrir |
+| 💰 **Fáfnir** | the hoarder | The dragon who slept on his heap of gold |
+| 🃏 **Loki** | agent of chaos | The trickster everyone loves to blame |
+
+**Giving them out** (all under `/odin honor`, admins only):
+- **`/odin honor give member:@friend honor:Hermóðr note:pulled 200 iron out of the swamp`**
+  gives the role and posts "⚰️ A new Hermóðr! @friend is honored as Hermóðr, crypt
+  raider" in Huginn's feed, with your note.
+- **`/odin honor vote honor:Gangleri candidates:@a @b @c hours:24`** starts a Discord poll
+  with 2 to 10 candidates. When it closes the winner gets the honor. A tie is left for an
+  admin to settle.
+- **As a bounty prize:** `/odin bounty challenge:"Clear 5 sunken crypts" honor:Hermóðr`.
+  Whoever an admin confirms gets the honor for good, on top of the week of Skadi.
+- **`/odin honor take`** takes one back.
+
+**Your own honors**, silly ones welcome. It's your server:
+- **`/odin honor create name:Tree Whisperer emoji:🌲 description:dies to falling trees`**.
+  Add `color:#2ECC71` if you like.
+- **Already made a role in Discord?** `/odin honor create role:@YourRole` adopts it. The bot
+  manages that role from then on, under the role's name and colour.
+- **`/odin honor delete`** removes one you made. Its Discord role is left for you to delete.
+  The built-in ones can't be deleted; just don't give them out.
+
+**Seeing them:** `/muninn honors` lists every honor and who holds it. `/muninn honors
+member:@friend` shows one person's honors, and `/muninn stats` shows them for a linked
+character.
+
+Honor roles have no permissions and aren't listed separately in the member list. Turn on
+"Display role members separately" for any you want to show off. Keep them below the bot's
+own role so it can hand them out.
+
 ### Title roles
 
 The leader of each `/muninn top` board gets a role named after a figure from Norse
@@ -1314,6 +1375,7 @@ The channels have themed names too: see [server setup](#server-setup-odin-setup)
 | **Bragi** | Title role: most Steam achievements | Sings the great deeds of heroes in Valhalla | 〃 (plus the Steam key) |
 | **Hœnir** | Title role: least time played (players seen in the last 30 days with 10+ minutes) | The silent god who hardly lifts a finger | 〃 |
 | **Óðr** | Every linked player away for 14+ days, until they're back | Freyja's wandering husband, always gone | 〃 |
+| **Hermóðr, Andhrímnir, Freyr, Gangleri…** | [Honors](#honors) for deeds the log can't see, given by admins | Each named for what they're known for | `/odin honor give` |
 | **Skadi** | Role for a week after claiming a [bounty](#bounties) | Goddess of the hunt, on skis with her bow | `/odin bounty` (on by default) |
 
 Title roles go to whoever leads that `/muninn top` board at the weekly check

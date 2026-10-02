@@ -130,6 +130,26 @@ def init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (plan_id, user_id)
         );
 
+        -- /odin honor: roles admins give for deeds the log can't see
+        CREATE TABLE IF NOT EXISTS honors (
+            key         TEXT PRIMARY KEY,            -- lowercase name, e.g. "hermodr"
+            name        TEXT NOT NULL,
+            emoji       TEXT,
+            description TEXT,
+            color       INTEGER,
+            role_id     TEXT,                        -- set once the Discord role exists
+            builtin     INTEGER NOT NULL DEFAULT 0,
+            created_by  TEXT,
+            created_at  INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS honor_holders (
+            honor_key TEXT NOT NULL,
+            user_id   TEXT NOT NULL,
+            given_at  INTEGER,
+            given_by  TEXT,
+            note      TEXT,
+            PRIMARY KEY (honor_key, user_id)
+        );
         -- /odin bounty: challenges members claim, confirmed by an admin
         CREATE TABLE IF NOT EXISTS bounties (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,

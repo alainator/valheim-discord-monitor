@@ -42,10 +42,17 @@ import threading
 import time
 from typing import Optional
 
+try:
+    # Slash-command options typed discord.Member / discord.Role are resolved against this
+    # module's globals. (The monitor itself runs without discord.py; the bot needs it.)
+    import discord  # noqa: F401
+except ImportError:
+    discord = None
+
 # Commands with public replies, and the /odin setup channel they belong in. Others (their
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
-                  "uptime": "bots", "bosses": "bots", "plan": "plans", "bounties": "plans"}
+                  "uptime": "bots", "bosses": "bots", "honors": "bots", "plan": "plans", "bounties": "plans"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
 GUIDES = [
     ("valheim", "welcome", "🚪 Getting into the game: /valheim",
@@ -60,9 +67,15 @@ def command_guide(group, title: str, intro: str) -> dict:
     """An embed listing a command group's commands, built from the commands themselves:
     "`/muninn stats [player]`: Play time, deaths and more…"."""
     lines = [intro, ""]
-    for cmd in sorted(group.commands, key=lambda c: c.name):
-        params = " ".join(f"<{p.name}>" if p.required else f"[{p.name}]" for p in cmd.parameters)
-        lines.append(f"`/{group.name} {cmd.name}{' ' + params if params else ''}`: {cmd.description}")
+
+    def walk(g, prefix):
+        for cmd in sorted(g.commands, key=lambda c: c.name):
+            if hasattr(cmd, "commands"):                  # a subgroup, e.g. /odin honor …
+                walk(cmd, f"{prefix} {cmd.name}")
+                continue
+            params = " ".join(f"<{p.name}>" if p.required else f"[{p.name}]" for p in cmd.parameters)
+            lines.append(f"`/{prefix} {cmd.name}{' ' + params if params else ''}`: {cmd.description}")
+    walk(group, group.name)
     lines += ["", "`<…>` is required, `[…]` optional. Type `/` to see them as you type."]
     return {"title": title, "description": "\n".join(lines)[:4000], "color": 0xC27C0E}
 
@@ -90,7 +103,7 @@ WELCOME_DM = ("👋 Welcome to **{guild}**, {member}! We play Valheim on **{serv
               "See you in the tenth world.")
 
 # Huginn's posts the bot reacts to, so people can react along.
-REACTIONS = {"boss": "🏆", "raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
+REACTIONS = {"honor": "🎉", "boss": "🏆", "raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
              "weekly_recap": "📜", "version_mismatch": "⚠️"}
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -1194,6 +1207,9 @@ class AdminBot:
             except discord.HTTPException:
                 keep.append(rec)                  # try again next time
                 continue
+            if rec.get("kind") == "honor":
+                await self._resolve_honor_vote(channel, msg, rec)
+                continue
             answers = list(msg.poll.answers) if msg.poll else []
             winner = community.poll_winner([(a.vote_count, t) for a, t in zip(answers, rec["times"])])
             if winner is None:
@@ -2259,6 +2275,99 @@ class AdminBot:
                 log.info("admin_bot: couldn't pin the rules (needs Pin Messages): %s", e)
         return msg, created
 
+    # -- honors (/odin honor) ------------------------------------------------------
+    async def _honor_role(self, guild, h: dict):
+        """The honor's Discord role: the one it was made with or adopted, else found by name,
+        else created (no permissions, not shown separately)."""
+        import discord
+        import community
+        role = guild.get_role(int(h["role_id"])) if h.get("role_id") and str(h["role_id"]).isdigit() else None
+        if role is None:
+            role = _assignable_role(guild, h["name"])
+        if role is None:
+            role = await guild.create_role(name=h["name"][:100], colour=discord.Colour(h.get("color") or 0xC27C0E),
+                                           reason=f"Honor: {h.get('description') or h['name']}")
+            log.info("admin_bot: created the %s honor role", h["name"])
+        if str(role.id) != str(h.get("role_id")):
+            community.set_honor_role(self.db, h["key"], role.id)
+        return role
+
+    async def _announce_honor(self, h: dict, uid, note: str = "", fallback=None) -> None:
+        """Post the honor in Huginn's feed (or the given channel if there's no webhook)."""
+        import discord
+        import community
+        embed = community.render_honor_given(h, uid, note)
+        ok = False
+        if self.post_embed and self.webhook_url:
+            try:
+                ok = await asyncio.get_running_loop().run_in_executor(None, lambda: self.post_embed(embed, "honor"))
+            except Exception as e:  # noqa: BLE001
+                log.info("admin_bot: couldn't post the honor: %s", e)
+        if ok is not True and fallback is not None:
+            await fallback.send(embed=discord.Embed.from_dict(embed), allowed_mentions=discord.AllowedMentions.none())
+
+    async def _give_honor(self, guild, h: dict, uid, by, note: str = "", fallback=None) -> str:
+        """Give an honor's role and record it. Returns what happened, for the admin."""
+        import discord
+        import community
+        try:
+            role = await self._honor_role(guild, h)
+            member = await guild.fetch_member(int(uid))
+            await member.add_roles(role, reason=f"Honor {h['name']} given by {by}")
+        except discord.NotFound:
+            return "That member isn't in this Discord server."
+        except discord.HTTPException as e:
+            return (f"Couldn't give the {h['name']} role: {e}. The bot needs Manage Roles, and its role must be "
+                    "above the honor roles.")
+        if not community.give_honor(self.db, h["key"], uid, by, note):
+            return f"<@{uid}> already holds **{h['name']}** (their role is in place)."
+        await self._announce_honor(h, uid, note, fallback)
+        log.info("admin_bot: honor %s given to %s by %s", h["name"], uid, by)
+        return f"{h.get('emoji') or '🏅'} <@{uid}> is now **{h['name']}**."
+
+    async def _post_honor_vote(self, channel, h: dict, candidates: list, hours: int, creator) -> None:
+        """A Discord poll for who gets an honor; the winner gets it when it closes."""
+        import datetime as _dt
+        import discord
+        names = []
+        guild = channel.guild
+        for uid in candidates:
+            try:
+                names.append((await guild.fetch_member(uid)).display_name)
+            except discord.HTTPException:
+                names.append(str(uid))
+        poll = discord.Poll(question=f"Who should be {h['name']}?"[:300], duration=_dt.timedelta(hours=hours))
+        for n in names:
+            poll.add_answer(text=n[:55])
+        what = (h.get("description") or "").split(":")[0]
+        msg = await channel.send(content=f"🗳️ {h.get('emoji') or '🏅'} Vote for **{h['name']}**"
+                                         f"{' (' + what + ')' if what else ''}! The winner gets the role.", poll=poll)
+        pending = self._pending_polls()
+        pending.append({"kind": "honor", "message_id": msg.id, "channel_id": channel.id, "honor": h["key"],
+                        "candidates": [str(c) for c in candidates], "creator": str(creator),
+                        "ends_at": int(time.time()) + hours * 3600})
+        self._meta("polls:pending", json.dumps(pending))
+
+    async def _resolve_honor_vote(self, channel, msg, rec) -> None:
+        import community
+        answers = list(msg.poll.answers) if msg.poll else []
+        counts = [(a.vote_count, i) for i, a in enumerate(answers)]
+        best = max((v for v, _ in counts), default=0)
+        h = community.get_honor(self.db, rec["honor"])
+        if not h:
+            return
+        if not best:
+            await channel.send(f"🗳️ Nobody voted for **{h['name']}**, so it stays with nobody new.")
+            return
+        top = [rec["candidates"][i] for v, i in counts if v == best and i < len(rec["candidates"])]
+        if len(top) > 1:
+            await channel.send(f"🗳️ The vote for **{h['name']}** is a tie between " +
+                               ", ".join(f"<@{u}>" for u in top) + ". An admin can settle it with `/odin honor give`.")
+            return
+        result = await self._give_honor(channel.guild, h, top[0], f"vote ({best} votes)", "Chosen by vote",
+                                        fallback=channel)
+        await channel.send(f"🗳️ The vote is in: {result}")
+
     # -- join-to-create voice ----------------------------------------------------
     def _voice_save(self) -> None:
         self._meta("voice:lobby", self._voice_lobby_id or "")
@@ -2378,11 +2487,16 @@ class AdminBot:
                 pass
         return fallback
 
-    async def _post_bounty(self, channel, title: str, reward: str, days: float, creator_id):
+    async def _post_bounty(self, channel, title: str, reward: str, days: float, creator_id,
+                           honor_key: Optional[str] = None):
         import discord
         import community
         bid = community.create_bounty(self.db, title, reward, days, creator_id)
-        msg = await channel.send(embed=discord.Embed.from_dict(community.render_bounty(community.get_bounty(self.db, bid))),
+        if honor_key:
+            self._meta(f"bounty:honor:{bid}", honor_key)
+        prize = community.get_honor(self.db, honor_key) if honor_key else None
+        msg = await channel.send(embed=discord.Embed.from_dict(
+                                     community.render_bounty(community.get_bounty(self.db, bid), prize)),
                                  view=self._bounty_view(bid), allowed_mentions=discord.AllowedMentions.none())
         community.set_bounty_message(self.db, bid, channel.id, msg.id)
         return msg
@@ -2394,7 +2508,8 @@ class AdminBot:
             return
         try:
             await self.client.get_partial_messageable(int(b["channel_id"])).get_partial_message(
-                int(b["message_id"])).edit(embed=discord.Embed.from_dict(community.render_bounty(b)),
+                int(b["message_id"])).edit(embed=discord.Embed.from_dict(community.render_bounty(
+                    b, community.get_honor(self.db, self._meta(f"bounty:honor:{b['id']}") or ""))),
                                            view=self._bounty_view(b["id"], disabled=b["status"] != "open"))
         except discord.HTTPException as e:
             log.info("admin_bot: couldn't update bounty #%s's post: %s", b["id"], e)
@@ -2450,6 +2565,17 @@ class AdminBot:
         b = community.get_bounty(self.db, b["id"])
         await self._refresh_bounty_post(b)
         role_note = await self._give_bounty_role(uid)
+        prize = self._meta(f"bounty:honor:{b['id']}")
+        h = community.get_honor(self.db, prize) if prize else None
+        if h and self.guild_id:
+            guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
+            if community.give_honor(self.db, h["key"], uid, f"bounty #{b['id']}", f"Bounty: {b['title']}"):
+                try:
+                    member = await guild.fetch_member(int(uid))
+                    await member.add_roles(await self._honor_role(guild, h), reason=f"Bounty #{b['id']}")
+                    role_note += f" And they're honored as **{h['name']}** for good."
+                except discord.HTTPException as e:
+                    log.warning("admin_bot: couldn't give the %s honor role: %s", h["name"], e)
         target = await self._bounty_target()
         if target is None and b.get("channel_id"):
             target = self.client.get_partial_messageable(int(b["channel_id"]))
@@ -2731,8 +2857,12 @@ class AdminBot:
                 await it.response.send_message(f"No play time recorded for **{discord.utils.escape_markdown(name)}**.",
                                                 ephemeral=True)
                 return
-            embed = community.render_stats(s, community.log_clock_offset(bot.db),
-                                           community.linked_user(bot.db, s["player"]))
+            linked = community.linked_user(bot.db, s["player"])
+            embed = community.render_stats(s, community.log_clock_offset(bot.db), linked)
+            mine = community.user_honors(bot.db, linked) if linked else []
+            if mine:
+                embed.setdefault("fields", []).append({"name": "Honors", "inline": False, "value": " · ".join(
+                    f"{h['emoji'] or '🏅'} {h['name']}" for h in mine)[:1024]})
             await it.response.send_message(embed=discord.Embed.from_dict(embed))
         stats.autocomplete("player")(player_choices)
 
@@ -3133,8 +3263,9 @@ class AdminBot:
         @odin.command(name="bounty", description="Post a bounty: a challenge members claim for a role and glory")
         @app_commands.describe(challenge="What to do, e.g. 'Kill Moder without dying'",
                                reward="What they get, e.g. '10 black metal' (optional)",
-                               days="How long it's open (default 7)")
-        async def bounty(it: discord.Interaction, challenge: str, reward: str = "", days: int = 7):
+                               days="How long it's open (default 7)",
+                               honor="Also give the winner this honor, for good (optional)")
+        async def bounty(it: discord.Interaction, challenge: str, reward: str = "", days: int = 7, honor: str = ""):
             if not await guard(it) or not await need_db(it):
                 return
             channel = await bot._bounty_target(it.channel)
@@ -3143,12 +3274,16 @@ class AdminBot:
                 return
             await it.response.defer(ephemeral=True)
             try:
+                h = community.get_honor(bot.db, honor) if honor.strip() else None
                 msg = await bot._post_bounty(channel, challenge.strip()[:200], reward.strip()[:200],
-                                             max(1, min(days, 90)), it.user.id)
+                                             max(1, min(days, 90)), it.user.id, h["key"] if h else None)
             except discord.HTTPException as e:
                 await it.followup.send(f"Couldn't post it: {e}", ephemeral=True)
                 return
-            await it.followup.send(f"🎯 Bounty posted: {msg.jump_url}", ephemeral=True)
+            await it.followup.send(f"🎯 Bounty posted: {msg.jump_url}" +
+                                   (f" The winner also becomes **{h['name']}**." if h else
+                                    " (No honor by that name, so none is attached.)" if honor.strip() else ""),
+                                   ephemeral=True)
 
         async def bounty_choices(it: discord.Interaction, current: str):
             if not bot.db_path:
@@ -3329,6 +3464,145 @@ class AdminBot:
             view.add_item(go)
             view.add_item(stop)
             await it.followup.send(embed=embed, view=view, ephemeral=True)
+
+        # -- /odin honor: roles for deeds the log can't see --------------------------
+        honor = app_commands.Group(name="honor", description="Honors: roles for deeds, given by the admins",
+                                   parent=odin)
+
+        async def honor_choices(it: discord.Interaction, current: str):
+            if not bot.db_path:
+                return []
+            return [app_commands.Choice(
+                name=f"{h['emoji'] or '🏅'} {h['name']}: {(h['description'] or 'custom').split(':')[0]}"[:100],
+                value=h["key"]) for h in community.honors(bot.db, current)[:25]]
+
+        async def find_honor(it, name: str):
+            h = community.get_honor(bot.db, name)
+            if not h:
+                await it.response.send_message(f"No honor called **{discord.utils.escape_markdown(name)}**. "
+                                                "Pick one from the list, or make it with `/odin honor create`.",
+                                                ephemeral=True)
+            return h
+
+        @honor.command(name="give", description="Give someone an honor (posted in Huginn's feed)")
+        @app_commands.describe(member="Who earned it", honor="Which honor", note="Why, e.g. 'pulled 200 iron "
+                                                                                 "out of the swamp'")
+        async def honor_give(it: discord.Interaction, member: discord.Member, honor: str, note: str = ""):
+            if not await guard(it) or not await need_db(it):
+                return
+            h = await find_honor(it, honor)
+            if not h:
+                return
+            await it.response.defer(ephemeral=True)
+            await it.followup.send(await bot._give_honor(it.guild, h, member.id, str(it.user), note.strip(),
+                                                         fallback=it.channel), ephemeral=True)
+        honor_give.autocomplete("honor")(honor_choices)
+
+        @honor.command(name="take", description="Take an honor back")
+        @app_commands.describe(member="From whom", honor="Which honor")
+        async def honor_take(it: discord.Interaction, member: discord.Member, honor: str):
+            if not await guard(it) or not await need_db(it):
+                return
+            h = await find_honor(it, honor)
+            if not h:
+                return
+            community.take_honor(bot.db, h["key"], member.id)
+            if h.get("role_id") and str(h["role_id"]).isdigit():
+                role = it.guild.get_role(int(h["role_id"]))
+                if role is not None and role in getattr(member, "roles", []):
+                    try:
+                        await member.remove_roles(role, reason=f"Honor taken back by {it.user}")
+                    except discord.HTTPException as e:
+                        await it.response.send_message(f"Removed from the list, but couldn't take the role: {e}",
+                                                        ephemeral=True)
+                        return
+            await it.response.send_message(f"Took **{h['name']}** back from {member.mention}.", ephemeral=True,
+                                            allowed_mentions=discord.AllowedMentions.none())
+        honor_take.autocomplete("honor")(honor_choices)
+
+        @honor.command(name="create", description="Make a new honor, silly ones welcome (or adopt a role you made)")
+        @app_commands.describe(name="Its name, e.g. 'Völundr' or 'Tree Whisperer'", emoji="An emoji for posts",
+                               description="What it's for, e.g. 'the bow maker'",
+                               role="Use this existing Discord role instead of making a new one",
+                               color="A colour as hex, e.g. #E67E22")
+        async def honor_create(it: discord.Interaction, name: str = "", emoji: str = "🏅", description: str = "",
+                               role: Optional[discord.Role] = None, color: str = ""):
+            if not await guard(it) or not await need_db(it):
+                return
+            name = (name or (role.name if role else "")).strip()
+            if not name:
+                await it.response.send_message("Give it a `name`, or pick a `role` to adopt.", ephemeral=True)
+                return
+            hexes = color.strip().lstrip("#")
+            col = int(hexes, 16) if re.fullmatch(r"[0-9a-fA-F]{6}", hexes) else \
+                (role.colour.value if role and role.colour.value else 0xC27C0E)
+            if role is not None and (role.managed or role.is_default()):
+                await it.response.send_message("That role belongs to Discord or another bot; pick one you made.",
+                                                ephemeral=True)
+                return
+            err = community.create_honor(bot.db, name, emoji, description, col, it.user.id,
+                                         role.id if role else None)
+            if err:
+                await it.response.send_message(err, ephemeral=True)
+                return
+            log.info("admin_bot: honor %s created by %s", name, it.user)
+            how = (f"It uses {role.mention}, which the bot now manages." if role else
+                   "The bot makes its role the first time you give it.")
+            await it.response.send_message(f"{emoji} Made the honor **{discord.utils.escape_markdown(name)}**. "
+                                            f"{how} Give it with `/odin honor give`.", ephemeral=True,
+                                            allowed_mentions=discord.AllowedMentions.none())
+
+        @honor.command(name="delete", description="Delete an honor you made (its role stays, unmanaged)")
+        @app_commands.describe(honor="Which honor")
+        async def honor_delete(it: discord.Interaction, honor: str):
+            if not await guard(it) or not await need_db(it):
+                return
+            h = await find_honor(it, honor)
+            if not h:
+                return
+            if h["builtin"]:
+                await it.response.send_message(f"**{h['name']}** is one of the built-in honors, so it stays. "
+                                                "Just don't give it out if you don't want it.", ephemeral=True)
+                return
+            community.delete_honor(bot.db, h["key"])
+            await it.response.send_message(f"Deleted **{h['name']}**. Its Discord role (if any) is still there; "
+                                            "delete it in Server Settings → Roles if you want.", ephemeral=True)
+        honor_delete.autocomplete("honor")(honor_choices)
+
+        @honor.command(name="vote", description="Let everyone vote on who gets an honor (a Discord poll)")
+        @app_commands.describe(honor="Which honor", candidates="Who can win: @mention 2 to 10 members",
+                               hours="How long the vote runs (default 24)")
+        async def honor_vote(it: discord.Interaction, honor: str, candidates: str, hours: int = 24):
+            if not await guard(it) or not await need_db(it):
+                return
+            h = await find_honor(it, honor)
+            if not h:
+                return
+            ids = list(dict.fromkeys(int(x) for x in re.findall(r"<@!?(\d+)>", candidates)))
+            if not 2 <= len(ids) <= 10:
+                await it.response.send_message("Mention between 2 and 10 members in `candidates`.", ephemeral=True)
+                return
+            await it.response.defer(ephemeral=True)
+            try:
+                await bot._post_honor_vote(it.channel, h, ids, max(1, min(hours, 168)), it.user.id)
+            except discord.HTTPException as e:
+                await it.followup.send(f"Couldn't start the vote (the bot needs Create Polls here): {e}",
+                                       ephemeral=True)
+                return
+            await it.followup.send(f"🗳️ Vote for **{h['name']}** started; the winner gets it in {hours} h.",
+                                   ephemeral=True)
+        honor_vote.autocomplete("honor")(honor_choices)
+
+        bounty.autocomplete("honor")(honor_choices)
+
+        @muninn.command(name="honors", description="Honors for deeds: who holds what, or one member's honors")
+        @app_commands.describe(member="Show this member's honors (leave empty for all)")
+        async def honors_cmd(it: discord.Interaction, member: Optional[discord.Member] = None):
+            if not await need_db(it):
+                return
+            await it.response.send_message(embed=discord.Embed.from_dict(
+                community.render_honors(bot.db, member.id if member else None)),
+                allowed_mentions=discord.AllowedMentions.none())
 
         for g in (valheim, muninn, warcouncil, odin):
             tree.add_command(g)
