@@ -47,6 +47,9 @@ On top of the Discord posts it can also, with the optional **admin bot**:
 - **Boss progress, read from the world save:** "⚔️ Moder has fallen!" when a boss goes
   down, `/muninn bosses`, and a "🏆 Bosses: 3/8 · next: Moder" channel. No mods and no
   setup ([boss progress](#boss-progress)).
+- **Honors for what the logs can't see:** 16 built-in roles like Hermóðr (crypt raider),
+  Andhrímnir (cook) and Gangleri (explorer), plus your own. Admins give them directly, by
+  vote or as a bounty prize ([honors](#honors)).
 - **Bounties and join-to-create voice:** admin challenges with a week-long Skadi role for
   the winner, and a voice channel that makes each member their own
   ([bounties](#bounties), [join-to-create](#join-to-create-voice-channels)).
@@ -196,7 +199,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
-  [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
+  [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
@@ -731,7 +734,7 @@ permissions; it doesn't add a second bot.
 | Embed Links | Every notice and stat post is an embed |
 | Read Message History | Finding and editing its own earlier messages (guide, signups, status board) |
 | Manage Channels | [Stat channels](#stat-channels), the [status channel](#status-voice-channel), [`/odin setup`](#server-setup-odin-setup) |
-| Manage Roles | ["In Valheim", Odin, the title roles and the bounty role](#roles--names); channel permissions in `/odin setup` and join-to-create channels |
+| Manage Roles | ["In Valheim", Odin, the title roles, the bounty role and the honor roles](#roles--names); channel permissions in `/odin setup` and join-to-create channels |
 | Manage Webhooks | Creating Huginn's webhook, or moving it to #huginns-watch |
 | Manage Server | Moving Discord's "Yay you made it" join messages (optional) |
 | Manage Events | Discord Events for game nights, with `lfg.discord_event` (optional) |
@@ -744,7 +747,7 @@ pinning, tidying, nicknames), and harmless to grant now:
 |---|---|
 | Attach Files | The weekly recap's chart (posted by the webhook, which needs no permission; kept for future images) |
 | Add Reactions, Use External Emojis | Reacting to Huginn's raid, welcome, milestone and title posts |
-| Create Polls | Time polls for game nights |
+| Create Polls | Time polls for game nights, and [honor votes](#honors) |
 | Create Public Threads, Send Messages in Threads, Manage Threads | A thread per game night, where the reminder is posted |
 | Pin Messages | Pinning the channel guide, the [command guides](#discord-commands) and the [rules](#the-rules-channel-runestone) |
 | Manage Messages | Tidying handled refused-join notices |
@@ -1220,6 +1223,8 @@ Admins post a challenge; whoever does it gets the glory and a role for a week.
 - Bounties nobody claims close by themselves at the deadline.
 - `/warcouncil bounties` lists the open ones and the top bounty hunters;
   `/odin bounty-close` ends one early.
+- **An honor as the prize:** `/odin bounty challenge:"Clear 5 sunken crypts" honor:Hermóðr`.
+  The post shows the honor, and the confirmed winner keeps it for good ([honors](#honors)).
 - Config (all optional): `"bounties": {"channel_id": "…", "role": "Skadi", "role_days": 7}`.
   `"role": false` gives no role.
 
@@ -1478,6 +1483,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | Handled refused-join notices aren't deleted | The bot lacks Manage Messages in the admin channel, or `tidy_notices_hours` is 0 | Grant it in the channel's permissions |
 | Stats are missing for days before the monitor ran, or for when it was down | Valheim wipes its log at every server start, so those lines are gone unless the [log archive](#the-log-archive) has them | Nothing to recover from before the archive started. From now on `--backfill` rebuilds from `logs_archive/` ([catching up](#catching-up-on-old-logs)) |
 | `logs_archive/` stays empty | `"log_archive": {"enabled": false}`, or the folder isn't writable | Check the option; the log says `Log archive: couldn't write to …` |
+| `/odin honor give` says it couldn't give the role | The bot lacks Manage Roles, or the honor role is above the bot's own role | Server Settings → Roles: give the bot Manage Roles and drag its role above the honor roles |
+| `/odin honor vote` doesn't start | The bot can't make polls in that channel | Allow **Create Polls** for the bot there, or run the vote in another channel |
 | A channel's command guide is missing or out of date | It was deleted, or the channel didn't exist when setup ran | `/odin setup action:guides` posts it again; the bot refreshes the others at start-up |
 | Members get "Run `/muninn stats` in #…" | That command belongs in its home channel since `/odin setup` | Run it there, or change it with `admin_bot.command_channels` (`false` turns it off) |
 | A command's home channel is wrong or was deleted | It points at the channel setup remembered | Run `/odin setup apply` again (it recreates missing channels), or set `"command_channels": {"stats": "<channel id>"}` |
@@ -2203,6 +2210,8 @@ Added here:
   "Most achievements" leaderboard, and the Bragi title.
 - **Boss progress** read from the world save (Valheim 1.0's `_main.<N>.db2` and older
   `.db`): kill posts, `/muninn bosses` and a stat channel.
+- **Honors:** 16 built-in roles for deeds the log can't see, custom ones, and an
+  admin-adopted role managed by the bot; given directly, by poll, or as a bounty prize.
 - **More community:** bounties with the Skadi role, join-to-create voice channels,
   `/muninn compare` and `uptime`, `/odin announce`, play streaks and anniversaries, quiet
   hours and digests for the feed, "come join" DMs and welcome DMs.
