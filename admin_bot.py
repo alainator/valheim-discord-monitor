@@ -63,6 +63,31 @@ GUIDES = [
 ]
 
 
+def progress_embed(name: str, sections: list, worlds: list, full_summary: bool = True) -> dict:
+    """/valheim progress: one field per achievement list, with the count and (privately) the first few
+    things still missing."""
+    fields = []
+    for sec in sections:
+        have, total = len(sec["done"]), sec["total"]
+        mark = "✅" if have >= total else ""
+        if not full_summary:
+            value = "\u200b"
+        elif not sec["missing"]:
+            value = "All done!"
+        else:
+            shown = sec["missing"][:6]
+            more = len(sec["missing"]) - len(shown)
+            value = "Missing: " + ", ".join(shown) + (f" +{more} more" if more else "")
+        fields.append({"name": f"{sec['emoji']} {sec['title']}: {have}/{total} {mark}".strip(),
+                       "value": value[:1024], "inline": not full_summary})
+    done = sum(len(sec["done"]) for sec in sections)
+    total = sum(sec["total"] for sec in sections)
+    return {"title": f"📜 Achievement progress: {name}"[:256],
+            "description": f"**{done}/{total}** across these lists" +
+                           (f" · worlds: {', '.join(worlds[:5])}" if worlds else ""),
+            "color": 0xC27C0E, "fields": fields[:25]}
+
+
 def command_guide(group, title: str, intro: str) -> dict:
     """An embed listing a command group's commands, built from the commands themselves:
     "`/muninn stats [player]`: Play time, deaths and more…"."""
@@ -2826,6 +2851,7 @@ class AdminBot:
             await bot._change_setting(it, "setkey", key, state)
 
         import community
+        import fch_progress
 
         async def need_db(it: discord.Interaction) -> bool:
             if not bot.db_path:
@@ -3113,6 +3139,57 @@ class AdminBot:
             await it.response.send_message(f"🗳️ Poll posted for **{title}**. When it closes, the winning time "
                                             "becomes a signup automatically.", ephemeral=True)
             await bot._post_time_poll(it.channel, title, times[:10], it.user.id)
+
+        @valheim.command(name="progress", description="Upload your character (.fch) to see which achievements "
+                                                       "you're still missing")
+        @app_commands.describe(save="Your character file, e.g. Ingrid.fch (see /valheim progress help in the README)",
+                               only="Just one list (default: all)",
+                               share="Also post a summary in this channel for everyone to see")
+        @app_commands.choices(only=[app_commands.Choice(name=f"{e} {t}", value=k)
+                                    for k, (t, e) in fch_progress.SECTIONS.items()])
+        async def progress(it: discord.Interaction, save: discord.Attachment, only: str = "", share: bool = False):
+            import io
+            if not save.filename.lower().endswith(".fch"):
+                await it.response.send_message(
+                    "That's not a character file. Upload the **.fch** file named after your character, from "
+                    "`%USERPROFILE%\\AppData\\LocalLow\\IronGate\\Valheim\\characters` "
+                    "(or `characters_local`) on Windows.", ephemeral=True)
+                return
+            if save.size > 40 * 1024 * 1024:
+                await it.response.send_message("That file is too big to be a character save.", ephemeral=True)
+                return
+            await it.response.defer(ephemeral=True, thinking=True)
+            try:
+                data = await save.read()
+                parsed = await asyncio.to_thread(fch_progress.parse_bytes, data)
+            except Exception as e:  # noqa: BLE001  (not a character file, or a newer format)
+                log.info("admin_bot: /valheim progress couldn't read %s: %s", save.filename, e)
+                await it.followup.send(
+                    "I couldn't read that file as a Valheim character. Make sure it's the `.fch` (not the "
+                    "`.fch.old` backup), and that your game is up to date.", ephemeral=True)
+                return
+            name = save.filename.rsplit(".", 1)[0][:60]
+            sections = fch_progress.report(parsed, [only] if only else None)
+            worlds = fch_progress.worlds(parsed)
+            note = ""
+            if parsed["version"] != fch_progress.SUPPORTED_VERSION:
+                note = (f"\n⚠️ This save is profile v{parsed['version']}; the lists were made for "
+                        f"v{fch_progress.SUPPORTED_VERSION}, so some counts may be off.")
+            text = fch_progress.render_text(parsed, sections, full=True, name=name)
+            await it.followup.send(
+                content="Here's what your character has done, and what's still missing. The full list is in the "
+                        "file." + note,
+                embed=discord.Embed.from_dict(progress_embed(name, sections, worlds)),
+                file=discord.File(io.BytesIO(text.encode()), filename=f"{name}-progress.txt"), ephemeral=True)
+            log.info("admin_bot: /valheim progress for %s by %s", name, it.user)
+            if share and it.channel is not None:
+                summary = progress_embed(name, sections, worlds, full_summary=False)
+                summary["footer"] = {"text": f"Shared by {it.user.display_name} · /valheim progress"}
+                try:
+                    await it.channel.send(embed=discord.Embed.from_dict(summary),
+                                          allowed_mentions=discord.AllowedMentions.none())
+                except discord.HTTPException as e:
+                    await it.followup.send(f"Couldn't post the summary here: {e}", ephemeral=True)
 
         @valheim.command(name="map", description="The world seed and a link to a map of it (spoilers!)")
         async def map_(it: discord.Interaction):
