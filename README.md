@@ -70,6 +70,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/valheim progress`:** upload your character file (`.fch`) and see which achievements
+  you're still missing (crafting, building, cooking, kills, bosses, fish, trophies, ways
+  to die), with a full list to download and an optional summary to share
+  ([achievement progress](#achievement-progress-valheim-progress)).
 - **Honors:** roles for what the logs can't see, like the crypt raider, the cook, the
   builder or the explorer. 16 come built in (Hermóðr, Andhrímnir, Freyr, Gangleri…), admins
   hand them out directly, by a vote or as a bounty prize, and can make their own, silly ones
@@ -600,7 +604,7 @@ The commands are in four groups, one per place they're used:
 
 | Group | Commands | Where |
 |---|---|---|
-| **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access` | Anywhere: the replies are private |
+| **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress` | Anywhere: the replies are private |
 | **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
@@ -660,6 +664,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/valheim request-access <character>` | Anyone | New player: "I'll join as …". The admins' refused-join notice then says who it is | Stats database |
 | `/warcouncil plan <title> <when>` | Anyone | Game night with Going / Maybe / Can't buttons, a planning thread and a reminder ping. Several times (`sat 20:00, sun 18:00`) start a poll for the time | Stats database |
 | `/warcouncil bounties` | Anyone | Open bounties with their rewards and deadlines, and the top bounty hunters | Stats database |
+| `/valheim progress <save> [only] [share]` | Anyone | Upload your character's `.fch` to see the [achievements](#achievement-progress-valheim-progress) you're still missing; `share` posts a summary | — |
 | `/valheim map` | Anyone | World seed and a map link (spoilers; only the asker sees it) | `save_dir` |
 | `/odin permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
 | `/odin ban <id>` | Admin | Ban, and remove from the permitted list | `save_dir` |
@@ -1227,6 +1232,51 @@ Admins post a challenge; whoever does it gets the glory and a role for a week.
   The post shows the honor, and the confirmed winner keeps it for good ([honors](#honors)).
 - Config (all optional): `"bounties": {"channel_id": "…", "role": "Skadi", "role_days": 7}`.
   `"role": false` gives no role.
+
+### Achievement progress: `/valheim progress`
+
+Valheim's achievements ("craft every item", "kill every creature", "catch every fish", "die
+in every way"…) are tracked in each player's **character file**, which lives on their own
+PC, not on the server. So players upload it:
+
+1. Find your character file. On Windows it's
+   `%USERPROFILE%\AppData\LocalLow\IronGate\Valheim\characters_local\<name>.fch`
+   (Steam Cloud characters are under `…\Valheim\characters`). Paste that path into File
+   Explorer's address bar to open the folder.
+2. In Discord: `/valheim progress save:` and pick the file.
+
+Only you see the answer:
+- **A summary** with one line per list, its count (e.g. *Items crafted: 312/414*) and the first
+  things still missing.
+- **A text file** with everything still missing in every list, plus what you've done and
+  how often.
+
+| List | Counts | From |
+|---|---|---|
+| ⚒️ Items crafted | every station recipe | any difficulty |
+| ⚔️ Weapons crafted | every weapon, tool and bomb | any difficulty |
+| 🍲 Food cooked | every dish and cooked food | any difficulty |
+| 🏗️ Pieces built | every hammer piece, ship and cart | any difficulty |
+| 💀 Ways to die | enemy, fall, drowning, burning, freezing, poison, smoke, the world's edge | |
+| 🌲 Killed by each tree | fir, oak, pine, ashlands, beech, birch, snowy fir and pine | |
+| 🗡️ Enemies killed / 🔥 on Hard | every creature | any difficulty / Hard |
+| 👑 Bosses / ☠️ on Hard | all 8 bosses | Normal or harder / Hard |
+| 🦹 Mini-bosses | Hildir's chests and Lord Reto | any difficulty |
+| 🎣 Fish caught | all 12 fish, reeled in | |
+| 🏆 Trophies collected | every trophy picked up | |
+
+- **`only:`** shows one list. **`share:True`** also posts the counts (not the missing items)
+  in the channel, for bragging.
+- **Nothing is kept.** The bot reads the file, answers, and forgets it.
+- **Upload the latest save.** The game writes the file when you quit or save, so play first,
+  then upload. Don't upload `.fch.old`, which is the previous save.
+- **Console players** can't reach their character files, so this is for PC players.
+- The lists were built from Valheim 1.0.16 (Deep North included) and character files version
+  46. After a big game update, some new items may show up as "in save but not in the
+  built-in lists" until the lists are updated.
+- It also runs on its own, without Discord:
+  `python3 fch_progress.py MyViking.fch` (add `-f` to list what's done, `-o bosses,fishing`
+  for some lists).
 
 ### Honors
 
