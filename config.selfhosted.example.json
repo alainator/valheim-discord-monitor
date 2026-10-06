@@ -103,7 +103,8 @@
   },
   "weekly_recap": {
     "day": "sunday",
-    "hour": 18
+    "hour": 18,
+    "world": true
   },
   "updater": {
     "log": "/valheim_home/update_check.log",

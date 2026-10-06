@@ -87,6 +87,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **"This week in the world" in the weekly recap:** pieces built and who built most, new and
+  removed portals, ships built, lost or moved, tombstones recovered or left behind, and tames
+  gained, compared with last week's world save. It starts with the second recap after
+  updating ([the world digest](#this-week-in-the-world)).
 - **Builders board and the Völundr title:** `/muninn builders` ranks everyone by the pieces
   they've placed that are still standing, read from the world save. The top builder gets
   **Völundr**, the master smith of legend, with the other titles each week
@@ -1935,6 +1939,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | The server's birthday came on the wrong day, or not at all | It counts from the first visit in the stats database, which can be later than the server's real start; and it needs `milestone` in `events` | Load older logs with `--backfill` ([catching up](#catching-up-on-old-logs)) so the first visit is right |
 | ☀️ Day says "not known yet" | No world save found under `save_dir` (and nobody has slept since the start) | Check `save_dir` points at the folder holding `worlds_local`; with several worlds, set `bosses.world` |
 | ☀️ Day is behind the game by a day | The save is up to 30 minutes old | It catches up at the next save or the next sleep |
+| No "This week in the world" in the recap | The first recap after updating only takes the snapshot; or `admin_bot.save_dir` isn't set | Wait for the next recap; set `save_dir` |
 | `/muninn when`'s hours are shifted | The container's time zone isn't yours | Set `TZ` in `.env` (e.g. `TZ=America/Los_Angeles`) and recreate the container |
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
@@ -2037,7 +2042,7 @@ switched on by adding their name to `events` in `config.json`:
 | `session_summary` | Replaces the plain leave message: "**Ingrid** left Alheim after 2h 14m and died 3 times." | the player's join and leave |
 | `welcome` | Replaces the join message on someone's **first ever** visit: "🎉 **Ingrid** arrived for the first time. Welcome, viking!" | stats database |
 | `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths. At login: "**Ingrid** is on a **7-day streak** 🔥" (3, 5, 7, 10, 14, 21, 30… days in a row) or "first set sail here **1 year ago** today 🎂" (100 days, then yearly), at most once a day. The **server's birthday** (100 days after the first visit in the stats database, then yearly), from noon: "🎂 Alheim is 1 year old today!" with vikings, hours, deaths, who set sail first, who played most and the longest streak; also in #runestone with `runestone_news` ([details](#streaks-anniversaries-and-the-servers-birthday)) | stats database |
-| `weekly_recap` | 📜 A weekly embed with a **chart of hours played per day**: top players by time, most deaths, raids, new vikings, total hours, peak online, and exploration ("12 new areas discovered: 3 sunken crypts, 1 fuling village") | stats database, `Placed location` lines |
+| `weekly_recap` | 📜 A weekly embed with a **chart of hours played per day**: top players by time, most deaths, raids, new vikings, total hours, peak online, and exploration ("12 new areas discovered: 3 sunken crypts, 1 fuling village"), plus [what changed in the world](#this-week-in-the-world) | stats database, `Placed location` lines, `admin_bot.save_dir` for the world part |
 | `update` | ✅ "Valheim updated: l-1.0.16 → l-1.0.17" when the server comes back on a new version, plus the [auto-updater](#auto-updates-and-restarts-from-discord)'s "update available" and "installing" posts | `Valheim version:` at boot |
 
 `welcome`, `milestone` and `weekly_recap` need the stats database (`database.path`).
@@ -2054,11 +2059,37 @@ was already online when the monitor started gets a plain leave message.
 
 **Weekly recap timing:**
 ```json
-"weekly_recap": { "day": "sunday", "hour": 18 }
+"weekly_recap": { "day": "sunday", "hour": 18, "world": true }
 ```
 - It posts once per week, at or after that hour in the container's time zone (`TZ` in `.env`).
 - A restart doesn't post it twice. A missed day is skipped rather than posted late.
 - Quiet weeks with nobody playing post nothing.
+
+### This week in the world
+
+With `admin_bot.save_dir` set, the weekly recap ends with what changed in the world since
+the last recap, read from the world save like [builders](#builders-muninn-builders) and
+[portals](#portals-and-tombstones):
+
+```
+🌍 This week in the world
+🔨 +1,240 pieces (now 11,049) · most building: Ingrid +612, Bjorn +410, Sigrid +190
+🌀 New portals: Plains
+⛵ 1 karve built · 1 ship sailed somewhere new
+🪦 Tombstones: 2 recovered, 1 new (Bjorn)
+🐾 Tames: +3 boars · newly named: Fenrir
+```
+
+- **Compared with last week:** each recap remembers the world as it was, and the next one
+  compares against it. So the first recap after updating only takes the snapshot; the world
+  part starts the week after.
+- **Only what changed** is listed. A week where nothing happened says "A quiet week".
+- **Ships** are matched to the nearest one of the same kind from last week: more than
+  200 m away means it sailed somewhere; one with no match is new, and one left over is gone.
+- **Pieces** are the ones standing: a week of demolishing shows as "−300 pieces · torn
+  down, or wrecked by raids".
+- **Turn it off** with `"weekly_recap": {"world": false}`. Weeks without a recap (nobody
+  played) are skipped, and the next recap compares with the last one posted.
 
 ### Streaks, anniversaries and the server's birthday
 
@@ -2593,6 +2624,7 @@ or run it in a terminal.
 | `backups.keep` | 30 | Backup copies to keep. |
 | `backups.alert_after_hours` | 48 | Warn the admin channel if Valheim makes no backup for this long. |
 | `weekly_recap.day` / `hour` | sunday / 18 | When to post the weekly recap (container time zone). |
+| `weekly_recap.world` | true | End the recap with [what changed in the world](#this-week-in-the-world), from `admin_bot.save_dir`. |
 | `updater.log` | — | The host updater's log (`update_check.log`), for update posts. |
 | `updater.bot_dir` | — | Folder shared with the host: `status.json` out, `request` for restart/check/settings. |
 | `admin_bot.online_role` | — | `true` (or a role name): the bot creates the "In Valheim" role, given to linked players while they're in-game. |
@@ -2693,7 +2725,7 @@ save; never written to):
 | `_main.<N>.fwl2` | World name and seed | `/valheim map` |
 | `_main.<N>.db2`, first 12 bytes | World version and the game clock | The ☀️ Day channel, tombstone days |
 | `_main.<N>.db2`, packed part | Global keys (`defeated_eikthyr`, …) | [Boss progress](#boss-progress) |
-| `*.chunk` | Every object in the world | [Portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames) |
+| `*.chunk` | Every object in the world | [Portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the weekly world digest](#this-week-in-the-world) |
 
 Valheim writes all of them at each save (every 30 minutes and at shutdown), so everything
 read from the save is up to half an hour behind the game. Before 1.0 a world was one
@@ -2811,6 +2843,8 @@ Added here:
   animals with their names.
 - **Builders board:** pieces standing in the world per builder, named through beds and
   tombstones, with the Völundr title.
+- **Weekly world digest:** the recap compares this week's world save with last week's:
+  pieces and builders, portals, ships, tombstones and tames.
 - **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and
   lists what's missing for each achievement, with a per-platform guide to finding the file;
   `fch_progress.py` also runs on its own. An opt-in `/muninn progress` board, the Mímir
