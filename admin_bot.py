@@ -88,6 +88,41 @@ def progress_embed(name: str, sections: list, worlds: list, full_summary: bool =
             "color": 0xC27C0E, "fields": fields[:25]}
 
 
+def find_save_embed(platform: str = "") -> dict:
+    """Where to find your .fch, for one platform (or the overview with every platform's button)."""
+    import fch_progress
+    guides = fch_progress.FIND_GUIDES
+    if platform in guides:
+        label, emoji, text = guides[platform]
+        return {"title": f"{emoji} Finding your character on {label}", "color": 0xC27C0E,
+                "description": text + "\n\n" + fch_progress.FIND_TIPS}
+    return {"title": "📜 /valheim progress: which achievements are you missing?", "color": 0xC27C0E,
+            "description": "Upload your **character file** (`YourName.fch`) and I'll list what you've done and "
+                           "what's still missing: crafting, building, cooking, kills, bosses, fish, trophies and "
+                           "ways to die.\n\nThe file is on your own computer, not the server. **Pick your "
+                           "platform below** to see where it is, then run `/valheim progress` again and attach "
+                           "it as **save**.\n\nOnly you see the results, and the file isn't kept."}
+
+
+def find_save_view(selected: str = ""):
+    """Buttons that switch the guide between platforms. The guide is a private reply, so only whoever
+    ran the command sees them."""
+    import discord
+    import fch_progress
+    view = discord.ui.View(timeout=900)
+    for key, (label, emoji, _) in fch_progress.FIND_GUIDES.items():
+        button = discord.ui.Button(label=label, emoji=emoji,
+                                   style=discord.ButtonStyle.primary if key == selected
+                                   else discord.ButtonStyle.secondary)
+
+        async def pick(bi, key=key):
+            await bi.response.edit_message(embed=discord.Embed.from_dict(find_save_embed(key)),
+                                           view=find_save_view(key))
+        button.callback = pick
+        view.add_item(button)
+    return view
+
+
 def command_guide(group, title: str, intro: str) -> dict:
     """An embed listing a command group's commands, built from the commands themselves:
     "`/muninn stats [player]`: Play time, deaths and more…"."""
@@ -3142,18 +3177,26 @@ class AdminBot:
 
         @valheim.command(name="progress", description="Upload your character (.fch) to see which achievements "
                                                        "you're still missing")
-        @app_commands.describe(save="Your character file, e.g. Ingrid.fch (see /valheim progress help in the README)",
+        @app_commands.describe(save="Your character file, e.g. Ingrid.fch. Leave it out to see where to find it",
                                only="Just one list (default: all)",
                                share="Also post a summary in this channel for everyone to see")
         @app_commands.choices(only=[app_commands.Choice(name=f"{e} {t}", value=k)
                                     for k, (t, e) in fch_progress.SECTIONS.items()])
-        async def progress(it: discord.Interaction, save: discord.Attachment, only: str = "", share: bool = False):
+        async def progress(it: discord.Interaction, save: Optional[discord.Attachment] = None, only: str = "",
+                           share: bool = False):
             import io
+            if save is None:                          # no file: where to find it, per platform
+                await it.response.send_message(embed=discord.Embed.from_dict(find_save_embed()),
+                                                view=find_save_view(), ephemeral=True)
+                return
             if not save.filename.lower().endswith(".fch"):
+                hint = (" That's the previous save; upload the one without `.old`."
+                        if save.filename.lower().endswith(".fch.old") else "")
                 await it.response.send_message(
-                    "That's not a character file. Upload the **.fch** file named after your character, from "
-                    "`%USERPROFILE%\\AppData\\LocalLow\\IronGate\\Valheim\\characters` "
-                    "(or `characters_local`) on Windows.", ephemeral=True)
+                    content=f"`{discord.utils.escape_markdown(save.filename)}` isn't a character file.{hint} "
+                            "Here's where to find yours:",
+                    embed=discord.Embed.from_dict(find_save_embed()), view=find_save_view(),
+                    ephemeral=True)
                 return
             if save.size > 40 * 1024 * 1024:
                 await it.response.send_message("That file is too big to be a character save.", ephemeral=True)
@@ -3165,8 +3208,10 @@ class AdminBot:
             except Exception as e:  # noqa: BLE001  (not a character file, or a newer format)
                 log.info("admin_bot: /valheim progress couldn't read %s: %s", save.filename, e)
                 await it.followup.send(
-                    "I couldn't read that file as a Valheim character. Make sure it's the `.fch` (not the "
-                    "`.fch.old` backup), and that your game is up to date.", ephemeral=True)
+                    "I couldn't read that file as a Valheim character. Make sure it's your character's `.fch` "
+                    "(not the `.fch.old` backup, and not a world file), and that your game is up to date. "
+                    "Where to find it:", embed=discord.Embed.from_dict(find_save_embed()),
+                    view=find_save_view(), ephemeral=True)
                 return
             name = save.filename.rsplit(".", 1)[0][:60]
             sections = fch_progress.report(parsed, [only] if only else None)

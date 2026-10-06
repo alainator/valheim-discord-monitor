@@ -136,5 +136,39 @@ class FchTest(unittest.TestCase):
         self.assertNotIn("Missing", str(public["fields"]))               # the shared summary is counts only
 
 
+    def test_where_to_find_it_guide(self):
+        try:
+            import asyncio
+            import admin_bot
+            from types import SimpleNamespace
+        except ImportError:
+            self.skipTest("discord.py not installed")
+        overview = admin_bot.find_save_embed()
+        self.assertIn("Pick your platform below", overview["description"])
+        self.assertIn("characters_local", admin_bot.find_save_embed("windows")["description"])
+        self.assertIn("~/.config/unity3d/IronGate/Valheim/characters_local/",
+                      admin_bot.find_save_embed("linux")["description"])
+        self.assertIn("/home/deck/.config", admin_bot.find_save_embed("deck")["description"])
+        self.assertIn("Cmd+Shift+G", admin_bot.find_save_embed("mac")["description"])
+        self.assertIn("only works on PC", admin_bot.find_save_embed("console")["description"])
+        for key in fch.FIND_GUIDES:
+            self.assertIn(".fch.old", admin_bot.find_save_embed(key)["description"])   # the tips come along
+            self.assertLessEqual(len(admin_bot.find_save_embed(key)["description"]), 4096)
+
+        async def press():
+            view = admin_bot.find_save_view()
+            self.assertEqual([b.label for b in view.children],
+                             ["Windows", "Linux", "Steam Deck", "macOS", "Xbox / Game Pass"])
+            edits = []
+
+            async def edit_message(embed=None, view=None):
+                edits.append((embed, view))
+            await view.children[1].callback(SimpleNamespace(response=SimpleNamespace(edit_message=edit_message)))
+            return edits
+        (embed, view), = asyncio.run(press())
+        self.assertEqual(embed.title, "🐧 Finding your character on Linux")
+        self.assertEqual(view.children[1].style.name, "primary")                # the chosen one stands out
+
+
 if __name__ == "__main__":
     unittest.main()
