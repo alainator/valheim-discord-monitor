@@ -919,12 +919,17 @@ voice channels or categories.
   🧭 23 Vikings have visited
   🏅 312 achievements unlocked
 👑 HALL OF CHAMPIONS · TITLES
+  🏆 Bosses: 3/8 · next: Moder
   👁️ Odin (server owner): Alain
   🛡️ Heimdall (most hours): Ingrid
   💀 Hel (most deaths): Bjorn
   🐎 Sleipnir (most visits): Sigrid
   ⚡ Thor (longest session): Ingrid
   📜 Bragi (most achievements): Bjorn
+  🤫 Hœnir (least hours): Sigrid
+  🧠 Mímir (most progress): Ingrid
+  🛶 Óðr (away 14+ days): 2
+  🎯 Skadi (bounty hunter): Bjorn
 ```
 
 | Key | Shows |
@@ -1137,13 +1142,15 @@ These need the stats database (`database.path`), which the bot and the monitor s
 
 - **Stats in Discord.** `/muninn stats Ingrid` shows play time, rank, visits, longest
   session, deaths (and deaths per hour), first and last seen, and Steam achievements
-  ([below](#steam-achievements-in-discord)). `/muninn top` has five leaderboards.
-  Character names autocomplete.
+  ([below](#steam-achievements-in-discord)). `/muninn top` has five leaderboards, and
+  `/muninn progress` ranks achievement progress from uploaded character files
+  ([the progress board](#the-progress-board-muninn-progress)). Character names autocomplete.
 - **Linking.** `/valheim link Ingrid` ties a character to your Discord account, which lets
   you:
   - run `/muninn stats` with no name;
   - get an @mention in your welcome and milestone posts;
-  - get the "In Valheim" role (below).
+  - get the "In Valheim" role (below);
+  - hold a [title role](#title-roles), Mímir included.
 
   With `"link_nickname": true`, linking also sets your server nickname to the character,
   if you don't have one yet.
@@ -1392,6 +1399,29 @@ Players who want to compare can put their counts on a shared board:
 - **One uploader per character:** the character is matched to the name in the server log,
   and only the person who put it on the board can update it or take it off.
 - The counts are only as fresh as the last upload. Each line shows when that was.
+
+What `/muninn progress` looks like:
+
+```
+📜 Achievement progress
+🥇 Bjorn: 307/1352 (23%) · 2 days ago
+🥈 Ingrid: 265/1352 (20%) · today
+🥉 Sigrid: 98/1352 (7%) · last week
+```
+
+With `only: 🎣 Fish caught`, a finished list gets a ✅: `🥇 Ingrid: 12/12 (100%) ✅`.
+
+**What's stored:** one row per character in the stats database's `fch_progress` table: the
+character, who uploaded it, the done/total count per list and when. Nothing about which
+items are done or missing, and not the file. `board:False` deletes the row.
+
+**Telling your players:** joining is opt-in, so post something like this in #runestone
+(`/odin announce`):
+
+> 📜 **New: the progress board.** Run `/valheim progress` with your character file and
+> `board:True` to see where you stand against everyone on `/muninn progress`. The leader
+> becomes **Mímir**, and finishing a list (every fish, every boss…) gets announced. Not sure
+> where your file is? Run `/valheim progress` without one.
 
 ### Honors
 
