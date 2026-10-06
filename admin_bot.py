@@ -470,6 +470,7 @@ class AdminBot:
         self.discord_events = bool(lfg.get("discord_event", False))
         self.map_enabled = bool((cfg.get("map") or {}).get("enabled", True))
         self.map_seed = str((cfg.get("map") or {}).get("seed") or "").strip()
+        self.wiki_enabled = cfg.get("wiki", True) is not False      # /valheim wiki (needs internet)
         # Boss progress from the world save (bosses.py): announce kills, /muninn bosses.
         bc = cfg.get("bosses") or {}
         self.bosses_on = bool(bc.get("enabled", True))
@@ -2963,7 +2964,7 @@ class AdminBot:
         #   /valheim     anywhere (private replies)   /muninn     stats, in #muninns-roost
         #   /warcouncil  game nights, #war-council    /odin       admins; hidden from members
         valheim = app_commands.Group(name="valheim",
-                                     description="Join the Valheim server: join code, map, link, notify, patch notes")
+                                     description="Join the server, link, notify, progress, patch notes, wiki")
         muninn = app_commands.Group(name="muninn", description="Ask Muninn: stats, leaderboards, titles, who's online")
         warcouncil = app_commands.Group(name="warcouncil", description="Plan raids and game nights")
         odin = app_commands.Group(name="odin", description="Server admin: access lists, restarts, settings, setup",
@@ -3464,6 +3465,41 @@ class AdminBot:
             await it.response.send_message(
                 f"🗺️ **{world}**: seed `{seed}`\n[Open the world map]({community.map_url(seed)}): "
                 "**spoilers**, it shows the whole world, including places nobody has found yet.", ephemeral=True)
+
+        @valheim.command(name="wiki", description="Look something up on the Valheim Wiki: items, creatures, bosses, "
+                                                   "biomes")
+        @app_commands.describe(page="What to look up, e.g. Draugr, Iron, Queen's jam, Swamp",
+                               share="Also post the card in this channel for everyone to see")
+        async def wiki_(it: discord.Interaction, page: str, share: bool = False):
+            import wiki
+            if not bot.wiki_enabled:
+                await it.response.send_message("The wiki lookup is turned off on this server.", ephemeral=True)
+                return
+            await it.response.defer(ephemeral=not share)
+            try:
+                found = await asyncio.to_thread(wiki.lookup, page)
+            except Exception as e:  # noqa: BLE001  (no internet, wiki down)
+                log.info("admin_bot: /valheim wiki %r: %s", page, e)
+                await it.followup.send("Couldn't reach the Valheim Wiki just now. Try again in a bit.", ephemeral=True)
+                return
+            if not found:
+                await it.followup.send(f"Nothing on the Valheim Wiki for **{discord.utils.escape_markdown(page)}**. "
+                                       "Try another spelling, or pick one of the suggestions as you type.",
+                                       ephemeral=True)
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(wiki.card(found)),
+                                   allowed_mentions=discord.AllowedMentions.none())
+
+        @wiki_.autocomplete("page")
+        async def wiki_choices(it: discord.Interaction, current: str):
+            import wiki
+            if not bot.wiki_enabled or len(current.strip()) < 2:
+                return []
+            try:
+                titles = await asyncio.to_thread(wiki.search, current)
+            except Exception:  # noqa: BLE001  (too slow or offline: no suggestions)
+                return []
+            return [app_commands.Choice(name=t[:100], value=t[:100]) for t in titles[:25]]
 
         @valheim.command(name="patch-notes", description="What changed in the latest Valheim patch")
         async def patch_notes_(it: discord.Interaction):
