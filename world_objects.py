@@ -329,6 +329,92 @@ def render_builders(found: dict, server_name: str = "") -> dict:
             "footer": {"text": "Pieces standing in the world now, by who placed them · from the last save"}}
 
 
+# -- the weekly world digest ---------------------------------------------------------------
+def snapshot(found: dict) -> dict:
+    """What to remember of the world for next week's comparison (JSON-friendly)."""
+    named, (_, unnamed_pieces) = builder_counts(found)
+    return {"pieces": sum(found["builders"].values()), "builders": dict(named), "unnamed": unnamed_pieces,
+            "portals": sorted(p["tag"] for p in found["portals"]),
+            "ships": [[s["kind"], round(s["x"]), round(s["z"])] for s in found["ships"]],
+            "tombstones": [[t["owner"], round(t["died"] or 0)] for t in found["tombstones"]],
+            "tames": [[a["kind"], a["name"]] for a in found["tames"]]}
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 or word.endswith(('lox', 'asksvin')) else 's'}"
+
+
+def _match_ships(old: list, new: list, moved_m: float = 200) -> tuple:
+    """(new ships, gone ships, moved count): each ship is matched to the nearest one of the
+    same kind from last week; further than moved_m means it sailed somewhere."""
+    left = [list(s) for s in old]
+    added, moved = [], 0
+    for kind, x, z in new:
+        same = [s for s in left if s[0] == kind]
+        if not same:
+            added.append(kind)
+            continue
+        near = min(same, key=lambda s: math.hypot(s[1] - x, s[2] - z))
+        left.remove(near)
+        if math.hypot(near[1] - x, near[2] - z) > moved_m:
+            moved += 1
+    return added, [s[0] for s in left], moved
+
+
+def digest(old: dict, new: dict) -> list:
+    """Lines saying what changed in the world between two snapshots (nothing if nothing did)."""
+    lines = []
+    delta = new["pieces"] - old.get("pieces", 0)
+    if delta:
+        grew = sorted(((n - old.get("builders", {}).get(name, 0), name) for name, n in new["builders"].items()),
+                      reverse=True)
+        top = [f"{name} +{d:,}" for d, name in grew if d > 0][:3]
+        line = f"🔨 **{'+' if delta > 0 else '−'}{abs(delta):,} pieces** (now {new['pieces']:,})"
+        line += f" · most building: {', '.join(top)}" if top else " · torn down, or wrecked by raids" if delta < 0 else ""
+        lines.append(line)
+    old_tags, new_tags = list(old.get("portals", [])), list(new["portals"])
+    added = []
+    for tag in new_tags:
+        if tag in old_tags:
+            old_tags.remove(tag)
+        else:
+            added.append(tag)
+    if added:
+        lines.append("🌀 New portals: " + ", ".join(sorted({t or "(no name)" for t in added})))
+    if old_tags:
+        lines.append("🌀 Portals taken down: " + ", ".join(sorted({t or "(no name)" for t in old_tags})))
+    ship_new, ship_gone, moved = _match_ships(old.get("ships", []), new["ships"])
+    bits = [f"{_plural(ship_new.count(k), k)} built" for k in sorted(set(ship_new))]
+    bits += [f"{_plural(ship_gone.count(k), k)} gone" for k in sorted(set(ship_gone))]
+    if moved:
+        bits.append(f"{moved} {'ship' if moved == 1 else 'ships'} sailed somewhere new")
+    if bits:
+        lines.append("⛵ " + " · ".join(bits))
+    old_graves = {tuple(g) for g in old.get("tombstones", [])}
+    new_graves = {tuple(g) for g in new["tombstones"]}
+    recovered, fresh = len(old_graves - new_graves), sorted(new_graves - old_graves)
+    if recovered or fresh:
+        parts = [f"{recovered} recovered"] if recovered else []
+        if fresh:
+            parts.append(f"{len(fresh)} new ({', '.join(sorted({o for o, _ in fresh}))})")
+        still = len(new_graves & old_graves)
+        lines.append("🪦 Tombstones: " + ", ".join(parts) + (f", {still} still out there" if still else ""))
+    old_kinds: dict = {}
+    for kind, _ in old.get("tames", []):
+        old_kinds[kind] = old_kinds.get(kind, 0) + 1
+    new_kinds: dict = {}
+    for kind, _ in new["tames"]:
+        new_kinds[kind] = new_kinds.get(kind, 0) + 1
+    changes = [f"{'+' if new_kinds.get(k, 0) > old_kinds.get(k, 0) else '−'}"
+               f"{_plural(abs(new_kinds.get(k, 0) - old_kinds.get(k, 0)), k)}"
+               for k in sorted(set(old_kinds) | set(new_kinds)) if new_kinds.get(k, 0) != old_kinds.get(k, 0)]
+    names = sorted({n for _, n in new["tames"] if n} - {n for _, n in old.get("tames", []) if n})
+    if changes or names:
+        lines.append("🐾 Tames: " + ", ".join(changes) + (f"{' · ' if changes else ''}newly named: {', '.join(names)}"
+                                                         if names else ""))
+    return lines
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv:

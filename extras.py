@@ -170,6 +170,7 @@ class WeeklyRecap:
         day = str(cfg.get("day", "sunday")).lower()
         self.weekday = DAYS.index(day) if day in DAYS else 6
         self.hour = int(cfg.get("hour", 18))
+        self.world = cfg.get("world", True) is not False       # "This week in the world" from the save
 
     def due(self, store, now: Optional[_dt.datetime] = None) -> Optional[str]:
         """The ISO week key to post for, or None. Remembered in the database, so a
@@ -299,6 +300,27 @@ def heatmap(grid: list, title: str) -> Optional[bytes]:
 # ---------------------------------------------------------------------------
 BACKUP_RE = re.compile(r"_backup_")
 LEGACY_EXTS = (".db", ".fwl")
+
+
+def world_digest(store, save_dir: str, world: Optional[str] = None) -> Optional[str]:
+    """What changed in the world since the last recap (world_objects.digest), from the save.
+    Remembers this week's world for next time; None without a save or on the first run."""
+    import json
+    import world_objects
+    found = world_objects.scan(save_dir, world)
+    if found is None:
+        return None
+    new = world_objects.snapshot(found)
+    raw = store.get_meta("world_snapshot")
+    store.set_meta("world_snapshot", json.dumps(new))
+    try:
+        old = json.loads(raw) if raw else None
+    except ValueError:
+        old = None
+    if not old:
+        return None
+    lines = world_objects.digest(old, new)
+    return "\n".join(lines)[:1024] if lines else "A quiet week: nothing built, sailed, tamed or lost."
 
 
 def server_birthday(conn, now: _dt.datetime, offset: int, server_name: str) -> Optional[dict]:

@@ -1980,6 +1980,16 @@ def main():
                     if week:
                         off = int(store.get_meta("log_clock_offset") or 0)
                         embed = extras.WeeklyRecap.build(store.conn, int(now) - off, server_name)
+                        acfg = cfg.get("admin_bot") or {}
+                        if embed and recap.world and acfg.get("save_dir"):
+                            try:
+                                world = extras.world_digest(store, acfg["save_dir"],
+                                                            ((acfg.get("bosses") or {}).get("world") or None))
+                                if world:
+                                    embed.setdefault("fields", []).append(
+                                        {"name": "🌍 This week in the world", "value": world, "inline": False})
+                            except Exception as e:  # noqa: BLE001  (the recap goes out without it)
+                                log.warning("World digest failed: %s", e)
                         if embed:
                             png = extras.WeeklyRecap.chart(
                                 extras.WeeklyRecap.hours_by_day(store.conn, int(now) - off, off))

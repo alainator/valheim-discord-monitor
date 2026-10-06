@@ -235,3 +235,55 @@ class BuildersTest(unittest.TestCase):
             b.attach(db_path=os.path.join(d, "s.db"))
             b.world_objects()
             self.assertEqual(community.title_leaders(b.db)["builder"]["player"], "Ingrid")
+
+
+class DigestTest(unittest.TestCase):
+    def snap(self, pieces=100, builders=None, portals=(), ships=(), graves=(), tames=()):
+        return {"pieces": pieces, "builders": builders or {}, "unnamed": 0, "portals": sorted(portals),
+                "ships": [list(s) for s in ships], "tombstones": [list(g) for g in graves], "tames": [list(t) for t in tames]}
+
+    def test_a_week_of_changes(self):
+        old = self.snap(1000, {"Ingrid": 600, "Bjorn": 400}, ["Home", "Home", "Swamp"],
+                        [("karve", 0, 0), ("longship", 500, 500), ("raft", 10, 10)],
+                        [("Ingrid", 700000), ("Bjorn", 700100)], [("boar", ""), ("wolf", "Fenrir")])
+        new = self.snap(1650, {"Ingrid": 1000, "Bjorn": 450, "Sigrid": 200}, ["Home", "Home", "Plains", "Plains"],
+                        [("karve", 20, 30), ("longship", 3000, 400), ("karve", 900, 900)],
+                        [("Bjorn", 700100), ("Sigrid", 720000)],
+                        [("boar", ""), ("boar", ""), ("boar", ""), ("wolf", "Fenrir"), ("lox", "Bertha")])
+        lines = wo.digest(old, new)
+        self.assertEqual(lines[0], "🔨 **+650 pieces** (now 1,650) · most building: Ingrid +400, Sigrid +200, Bjorn +50")
+        self.assertIn("🌀 New portals: Plains", lines)
+        self.assertIn("🌀 Portals taken down: Swamp", lines)
+        self.assertIn("⛵ 1 karve built · 1 raft gone · 1 ship sailed somewhere new", lines)
+        self.assertIn("🪦 Tombstones: 1 recovered, 1 new (Sigrid), 1 still out there", lines)
+        self.assertIn("🐾 Tames: +2 boars, +1 lox · newly named: Bertha", lines)
+
+    def test_quiet_and_shrinking(self):
+        same = self.snap(500, {"Ingrid": 500})
+        self.assertEqual(wo.digest(same, same), [])
+        lines = wo.digest(same, self.snap(420, {"Ingrid": 420}))
+        self.assertEqual(lines, ["🔨 **−80 pieces** (now 420) · torn down, or wrecked by raids"])
+
+    def test_recap_step(self):
+        import extras
+        import stats_db
+        with tempfile.TemporaryDirectory() as d:
+            world = os.path.join(d, "worlds_local", "Alheim")
+            os.makedirs(world)
+            with open(os.path.join(world, "_main.1.db2"), "wb") as f:
+                f.write(struct.pack("<id", 41, 700000.0))
+            chunk = os.path.join(world, "a.chunk")
+            with open(chunk, "wb") as f:
+                f.write(b"\x29\x00" + piece(111) * 3 + bed(111, "Ingrid"))
+            st = stats_db.Store(os.path.join(d, "s.db"))
+            self.assertIsNone(extras.world_digest(st, d))                         # first week: just remembers
+            self.assertEqual(extras.world_digest(st, d), "A quiet week: nothing built, sailed, tamed or lost.")
+            with open(chunk, "wb") as f:
+                f.write(b"\x29\x00" + piece(111) * 5 + bed(111, "Ingrid") + portal(1, 1, "Home"))
+            text = extras.world_digest(st, d)
+            self.assertIn("🔨 **+3 pieces** (now 6) · most building: Ingrid +2", text)      # the portal is a piece too
+            self.assertIn("🌀 New portals: Home", text)
+            self.assertIsNone(extras.world_digest(st, tempfile.mkdtemp()))       # no save: nothing
+            st.close()
+        self.assertTrue(extras.WeeklyRecap({}).world)
+        self.assertFalse(extras.WeeklyRecap({"world": False}).world)
