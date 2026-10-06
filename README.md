@@ -1230,15 +1230,35 @@ Best time for a game night: Sat 20:00–22:00 (3.1 online on average).
 Busiest hours: Sat 21:00 (3.4) · Sat 20:00 (2.9) · Fri 21:00 (2.6)
 ```
 
-With Pillow (included in the Docker image) a coloured picture of all 24 hours comes with it.
+With Pillow (included in the Docker image) a coloured picture of all 24 hours comes with it,
+brighter where more people are on (example with made-up data):
 
-- **What the numbers mean:** how many players were online on average in that hour of the
-  week. 3.1 means about three people, most weeks.
-- **`player:Ingrid`** shows when one character is usually on, as the share of each hour they
-  were playing ("Most likely on: Fri 20:00–22:00").
-- **`weeks:`** looks further back, 1 to 12 weeks.
-- **Server time:** hours are in the container's time zone (`TZ` in `.env`).
-- It goes well with [`/warcouncil plan`](#players--community): pick the time it suggests.
+![/muninn when heatmap: busy evenings, busier weekends](assets/when-heatmap.png)
+
+**Reading it:**
+- **The numbers** are how many players were online on average in that hour of the week:
+  3.1 means about three people, most weeks.
+- **The text blocks** cover 2 hours each and are scaled to the busiest one, so ██ is the
+  peak and `··` means nobody. The picture shows every hour.
+- **The best time** is the 2-hour stretch with the most people on average.
+
+**How it's counted:**
+- Every session is spread over the hours it covered, to the minute: someone playing 20:30
+  to 22:00 adds half an hour to 20:00 and a full hour to 21:00. Sessions across midnight
+  count on both days.
+- Averaged over the weeks you ask for, so one big night doesn't drown out the usual pattern.
+- Hours are in the container's time zone (`TZ` in `.env`).
+
+**Options and examples:**
+- `/muninn when`: everyone, the last 4 weeks.
+- `/muninn when player:Ingrid`: when one character is usually on, as the share of each hour
+  they were playing ("Most likely on: Fri 20:00–22:00 (75% of the time)"). Handy before
+  inviting someone to a boss run.
+- `/muninn when weeks:12`: the longer pattern. A new server has little history, so a short
+  window (`weeks:1` or `2`) shows more until a few weeks have gone by.
+
+It goes well with [`/warcouncil plan`](#players--community): pick the time it suggests and
+start a signup or a time poll.
 
 ### Players & community
 
