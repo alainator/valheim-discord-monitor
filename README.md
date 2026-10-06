@@ -87,6 +87,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Fixed: `/muninn builders` (and portals, tombstones, ships, tames) not answering** the first
+  time they ran after a world save. Any command that fails now answers with a short message
+  instead of staying on "thinking…".
 - **"This week in the world" in the weekly recap:** pieces built and who built most, new and
   removed portals, ships built, lost or moved, tombstones recovered or left behind, and tames
   gained, compared with last week's world save. It starts with the second recap after
@@ -1943,6 +1946,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn when`'s hours are shifted | The container's time zone isn't yours | Set `TZ` in `.env` (e.g. `TZ=America/Los_Angeles`) and recreate the container |
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
+| A `/muninn` world command (builders, portals, tombstones, ships, tames) never answered | A bug in versions before this one: the first run after each save failed | Update; a failing command now always answers, and the error is in the bot's log |
 | A builder shows as "can't name yet" | They've never slept in a bed or left a tombstone in this world | Have them sleep in a bed once; the name shows after the next save |
 | Mímir has a holder but nobody got the role | The leading character isn't linked | `/valheim link <character>`; the role follows within a minute |
 | `/valheim wiki` says it couldn't reach the wiki, or shows no suggestions | No internet from the container, or the wiki is slow (suggestions give up after 2.5 s) | Check the container's network; type the full name and press Enter |
@@ -2090,6 +2094,27 @@ the last recap, read from the world save like [builders](#builders-muninn-builde
   down, or wrecked by raids".
 - **Turn it off** with `"weekly_recap": {"world": false}`. Weeks without a recap (nobody
   played) are skipped, and the next recap compares with the last one posted.
+
+**Each line, in detail:**
+
+| Line | Compares | Notes |
+|---|---|---|
+| 🔨 Pieces | Pieces standing, per builder | The top 3 builders by growth; builders the save can't name yet count in the total only |
+| 🌀 Portals | Portal names | "New portals" and "Portals taken down"; renaming a portal shows as one of each |
+| ⛵ Ships | Rafts, karves, longships, drakkars and carts, with positions | Built, gone, or sailed 200 m+ from where it was |
+| 🪦 Tombstones | Whose tombstone, and when they died | Recovered (gone since last week), new, and still out there |
+| 🐾 Tames | Tamed animals per kind, and their names | Gained or lost per kind, and names given this week |
+
+**Good to know:**
+- **When:** at the recap's time (Sunday 18:00 by default), from the latest world save, which
+  is at most 30 minutes old.
+- **After `/odin restore`** the next recap compares the restored world with last week's, so
+  it can show pieces and ships "gone" that were simply rolled back.
+- **Starting over:** the snapshot is kept in the stats database (`meta`, key
+  `world_snapshot`). Deleting that row makes the next recap take a fresh snapshot, e.g.
+  after switching worlds.
+- **Needs** `admin_bot.save_dir`, the same folder the bot reads for bosses and portals. The
+  monitor reads it, so the bot doesn't have to be running at recap time.
 
 ### Streaks, anniversaries and the server's birthday
 
