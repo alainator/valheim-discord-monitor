@@ -53,7 +53,8 @@ except ImportError:
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
                   "uptime": "bots", "bosses": "bots", "honors": "bots", "progress": "bots", "portals": "bots",
-                  "tombstones": "bots", "ships": "bots", "tames": "bots", "plan": "plans", "bounties": "plans"}
+                  "tombstones": "bots", "ships": "bots", "tames": "bots", "when": "bots", "plan": "plans",
+                  "bounties": "plans"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
 GUIDES = [
     ("valheim", "welcome", "🚪 Getting into the game: /valheim",
@@ -3244,6 +3245,33 @@ class AdminBot:
             await it.followup.send(embed=discord.Embed.from_dict(
                 world_objects.render_tombstones(found["tombstones"], bosses.day_of, bot.server_name)),
                 allowed_mentions=discord.AllowedMentions.none())
+
+        @muninn.command(name="when", description="When people usually play: a heatmap by weekday and hour")
+        @app_commands.describe(player="Just one character (default: everyone)",
+                               weeks="How many weeks back to look, 1-12 (default 4)")
+        async def when_cmd(it: discord.Interaction, player: str = "", weeks: int = 4):
+            import extras
+            import io
+            if not await need_db(it):
+                return
+            weeks = max(1, min(12, weeks))
+            name = community.known_player(bot.db, player) if player.strip() else ""
+            if player.strip() and not name:
+                await it.response.send_message(f"No play time recorded for **{discord.utils.escape_markdown(player)}**.",
+                                                ephemeral=True)
+                return
+            await it.response.defer()
+            grid = community.online_grid(bot.db, community.log_clock_offset(bot.db), weeks, name)
+            embed = community.render_when(grid, weeks, name, bot.server_name)
+            title = f"When {name} plays" if name else "Average players online"
+            png = await asyncio.to_thread(extras.heatmap, grid, f"{title} · last {weeks} weeks")
+            if png:
+                embed["image"] = {"url": "attachment://when.png"}
+                await it.followup.send(embed=discord.Embed.from_dict(embed),
+                                       file=discord.File(io.BytesIO(png), filename="when.png"))
+            else:
+                await it.followup.send(embed=discord.Embed.from_dict(embed))
+        when_cmd.autocomplete("player")(player_choices)
 
         @muninn.command(name="ships", description="Every ship and cart in the world, and where it is")
         async def ships_cmd(it: discord.Interaction):
