@@ -53,7 +53,7 @@ except ImportError:
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
                   "uptime": "bots", "bosses": "bots", "honors": "bots", "progress": "bots", "portals": "bots",
-                  "tombstones": "bots", "plan": "plans", "bounties": "plans"}
+                  "tombstones": "bots", "ships": "bots", "tames": "bots", "plan": "plans", "bounties": "plans"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
 GUIDES = [
     ("valheim", "welcome", "🚪 Getting into the game: /valheim",
@@ -3243,6 +3243,30 @@ class AdminBot:
                 return
             await it.followup.send(embed=discord.Embed.from_dict(
                 world_objects.render_tombstones(found["tombstones"], bosses.day_of, bot.server_name)),
+                allowed_mentions=discord.AllowedMentions.none())
+
+        @muninn.command(name="ships", description="Every ship and cart in the world, and where it is")
+        async def ships_cmd(it: discord.Interaction):
+            import world_objects
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)
+            if found is None:
+                await it.followup.send("I can't find the world save (`save_dir`/worlds_local).")
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(
+                world_objects.render_ships(found["ships"], bot.server_name)),
+                allowed_mentions=discord.AllowedMentions.none())
+
+        @muninn.command(name="tames", description="Tamed wolves, boars, lox and more: how many, their names, where")
+        async def tames_cmd(it: discord.Interaction):
+            import world_objects
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)
+            if found is None:
+                await it.followup.send("I can't find the world save (`save_dir`/worlds_local).")
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(
+                world_objects.render_tames(found["tames"], bot.server_name)),
                 allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="uptime", description="How much the server was up: this week, 30 days, restarts")

@@ -35,6 +35,18 @@ def portal(x, z, tag=None, prefab="portal_wood"):
     return out + b"\x00" * 24
 
 
+def thing(x, z, prefab, ints=(), name=None):
+    """A ship or animal in the same layout: ints (key, value), then strings."""
+    out = b"\x3f\x88\x10\x92\xc7\x07\x00\x00\xf4\x11" + struct.pack("<3f", x, 30.0, z)
+    out += struct.pack("<I", wo.stable_hash(prefab)) + b"\x19\x82"
+    if ints:
+        out += bytes([len(ints)]) + b"".join(struct.pack("<Ii", wo.stable_hash(k), v) for k, v in ints)
+    if name is not None:
+        raw = name.encode()
+        out += b"\x01" + struct.pack("<I", wo.stable_hash("TamedName")) + bytes([len(raw)]) + raw
+    return out + b"\x00" * 24
+
+
 class ParseTest(unittest.TestCase):
     def test_hash(self):
         self.assertEqual(struct.unpack("<i", struct.pack("<I", wo.stable_hash("portal_wood")))[0], -661882940)
@@ -70,7 +82,31 @@ class ParseTest(unittest.TestCase):
         """A prefab hash turning up by chance, with no sensible position before it."""
         junk = struct.pack("<3f", float("nan"), 1, 1) + struct.pack("<I", wo.stable_hash("portal_wood"))
         junk += struct.pack("<3f", 1e9, 1, 1) + struct.pack("<I", wo.stable_hash("Player_tombstone"))
-        self.assertEqual(wo.scan_bytes(junk), {"portals": [], "tombstones": []})
+        self.assertEqual(wo.scan_bytes(junk), {"portals": [], "tombstones": [], "ships": [], "tames": []})
+
+    def test_ships_and_tames(self):
+        data = (thing(10, 10, "Karve") + thing(-4000, 2000, "VikingShip") + thing(5, 5, "Cart")
+                + thing(1, 1, "Wolf", [("tamed", 1), ("level", 3)], "Fenrir")
+                + thing(2, 2, "Wolf", [("level", 2)])                        # wild: not listed
+                + thing(3, 3, "Boar", [("tamed", 1)])
+                + thing(4, 4, "Boar", [("tamed", 1)])
+                + thing(6, 6, "Lox", [("tamed", 1), ("level", 1)], "Big Bertha"))
+        found = wo.scan_bytes(data)
+        self.assertEqual([s["kind"] for s in found["ships"]], ["karve", "longship", "cart"])
+        self.assertEqual([(a["kind"], a["name"], a["stars"]) for a in found["tames"]],
+                         [("wolf", "Fenrir", 2), ("boar", "", 0), ("boar", "", 0), ("lox", "Big Bertha", 0)])
+        e = wo.render_ships(found["ships"], "Alheim")
+        self.assertEqual(e["title"], "⛵ Ships in Alheim: 2")
+        self.assertTrue(e["description"].startswith("1 karve · 1 longship"))
+        self.assertLess(e["description"].index("Longship"), e["description"].index("Karve"))   # furthest first
+        self.assertIn("🛒 **Carts** (1)", e["description"])
+        e = wo.render_tames(found["tames"])
+        self.assertTrue(e["description"].startswith("🐗 2 boars · 🐺 1 wolf · 🦣 1 lox"))
+        self.assertIn("🦣 **Big Bertha** (lox) · x 6, z 6 · near the start", e["description"])
+        self.assertIn("🐺 **Fenrir** (wolf ★★)", e["description"])
+        self.assertIn("…plus 2 without a name", e["description"])
+        self.assertIn("No tamed animals yet", wo.render_tames([])["description"])
+        self.assertIn("No ships yet", wo.render_ships([])["description"])
 
     def test_where(self):
         self.assertEqual(wo.where(20, -40), "x 20, z -40 · near the start")
