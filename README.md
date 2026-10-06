@@ -52,7 +52,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
 - **Portals and tombstones, from the world save too:** `/muninn portals` finds portals that
   go nowhere, `/muninn tombstones` the gear nobody has picked up yet, with where to find it
   ([portals and tombstones](#portals-and-tombstones)). `/muninn ships` finds every boat, and
-  `/muninn tames` every tamed animal and its name ([ships and tames](#ships-and-tames)).
+  `/muninn tames` every tamed animal and its name ([ships and tames](#ships-and-tames)), and
+  `/muninn builders` who built the most, with a **Völundr** title ([builders](#builders-muninn-builders)).
 - **Achievement progress from a character file:** players upload their `.fch` with
   `/valheim progress` and see which achievements they're still missing. Those who opt in
   join a `/muninn progress` board, with the **Mímir** title for the leader and a post when
@@ -86,6 +87,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Builders board and the Völundr title:** `/muninn builders` ranks everyone by the pieces
+  they've placed that are still standing, read from the world save. The top builder gets
+  **Völundr**, the master smith of legend, with the other titles each week
+  ([builders](#builders-muninn-builders)).
 - **`/muninn when`:** a heatmap of when people usually play, by weekday and hour, with the
   busiest hours and the best time for a game night. `player:` shows when one character is
   usually on ([when people play](#when-people-play-muninn-when)).
@@ -259,7 +264,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
-  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) ·
+  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) · [Builders](#builders-muninn-builders) ·
   [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [When people play](#when-people-play-muninn-when) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
@@ -663,7 +668,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -716,6 +721,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn bosses` | Anyone | Every boss with ✅ or ⬜, when it fell, and which is next ([boss progress](#boss-progress)) | `save_dir` |
 | `/muninn portals` | Anyone | Portals that go nowhere, names used 3+ times, portals without a name, and the connected pairs ([portals](#portals-and-tombstones)) | `save_dir` |
 | `/muninn when [player] [weeks]` | Anyone | Heatmap of when people usually play, by weekday and hour, with the best time for a game night; `player` for one character ([details](#when-people-play-muninn-when)) | Stats database |
+| `/muninn builders` | Anyone | Who built the most: pieces still standing in the world, per builder ([builders](#builders-muninn-builders)) | `save_dir` |
 | `/muninn ships` | Anyone | Every raft, karve, longship and drakkar, furthest from the start first, and the carts ([ships](#ships-and-tames)) | `save_dir` |
 | `/muninn tames` | Anyone | Tamed animals: how many of each, and the named ones with stars and where they are ([tames](#ships-and-tames)) | `save_dir` |
 | `/muninn tombstones` | Anyone | Every tombstone nobody has emptied yet: whose, the day they died, and where ([tombstones](#portals-and-tombstones)) | `save_dir` |
@@ -968,6 +974,7 @@ voice channels or categories.
   📜 Bragi (most achievements): Bjorn
   🤫 Hœnir (least hours): Sigrid
   🧠 Mímir (most progress): Ingrid
+  🔨 Völundr (most built): Bjorn
   🛶 Óðr (away 14+ days): 2
   🎯 Skadi (bounty hunter): Bjorn
 ```
@@ -992,7 +999,7 @@ voice channels or categories.
 | `achievements` | Steam achievements unlocked, all players together |
 | `bosses` | Bosses defeated in this world and the next one ("🏆 Bosses: 3/8 · next: Moder"), from the [world save](#boss-progress) |
 | `title_owner` | Odin: the Discord server's owner |
-| `title_time`, `title_deaths`, `title_sessions`, `title_longest`, `title_achievements`, `title_least`, `title_progress` | The [title](#title-roles) holders: Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir, Mímir (`titles` means all of them) |
+| `title_time`, `title_deaths`, `title_sessions`, `title_longest`, `title_achievements`, `title_least`, `title_progress`, `title_builder` | The [title](#title-roles) holders: Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir, Mímir, Völundr (`titles` means all of them) |
 | `away` | Óðr: how many linked players [haven't been on](#title-roles) for a while ("🛶 Óðr (away 14+ days): 2") |
 | `bounty_hunter` | Skadi: who holds the [bounty](#bounties) hunter role this week |
 
@@ -1487,6 +1494,33 @@ save is gear still lying out there:
 - **Lost the map marker?** The death marker on the map can be removed by accident;
   the coordinates here are the way back.
 
+### Builders: `/muninn builders`
+
+Every piece a player places (walls, floors, chests, workbenches, fences, boats…) is saved
+with that player's ID, so the bot can count who built what:
+
+```
+🔨 Builders of Alheim: 48,210 pieces
+🥇 Ingrid: 21,402 pieces
+🥈 Bjorn: 15,880 pieces
+🥉 Sigrid: 9,115 pieces
+
+…plus 1 builder I can't name yet (1,813 pieces). A name is learned once they sleep in a
+bed or leave a tombstone.
+```
+
+- **Pieces standing now:** what's been torn down, or destroyed by trolls and raids, no
+  longer counts. Rebuilding a wall counts again.
+- **Names:** the save stores only a player ID per piece. A bed or a tombstone stores the ID
+  together with the character's name, so a builder gets their name once they have slept in
+  a bed or died (and the tombstone is still around). Until then they're counted without a
+  name.
+- **Völundr**, the master smith of legend, is a [title role](#title-roles) for the top
+  builder, reassigned with the other titles each week. As with every title, the role goes
+  to the Discord account [linked](#players--community) to the character.
+- From the same world save as [portals and tombstones](#portals-and-tombstones): up to 30
+  minutes behind, no setup, follows `bosses.world`.
+
 ### Ships and tames
 
 Two more things read from the same world save, with no setup:
@@ -1708,8 +1742,8 @@ own role so it can hand them out.
 
 ### Title roles
 
-The leader of each `/muninn top` board (except streaks), and of the `/muninn progress`
-board, gets a role named after a figure from Norse mythology:
+The leader of each `/muninn top` board (except streaks), of the `/muninn progress` board
+and of `/muninn builders` gets a role named after a figure from Norse mythology:
 
 | Role | Leaderboard | Why |
 |---|---|---|
@@ -1720,9 +1754,11 @@ board, gets a role named after a figure from Norse mythology:
 | **Bragi** | Most Steam achievements | God of poetry, who sings the great deeds of heroes in Valhalla |
 | **Hœnir** | **Least** time played (10+ minutes, seen in the last 30 days) | The silent god, sent to the Vanir as a hostage, who never decided anything on his own |
 | **Mímir** | Most achievement progress on the [progress board](#the-progress-board-muninn-progress) | The wisest of the gods, whose well holds all knowledge; even Odin gave an eye to drink from it |
+| **Völundr** | Most pieces built, still standing ([builders](#builders-muninn-builders)) | The master smith of the old poems, who could forge anything |
 
 **Mímir** only counts players who joined the [progress board](#the-progress-board-muninn-progress),
-by their last upload, so it's the same whether `period` is all time or weekly.
+by their last upload, so it's the same whether `period` is all time or weekly. **Völundr**
+is the same: it counts what's standing in the world at the weekly check.
 
 **Hœnir** only counts players seen in the last 30 days with at least 10 minutes played,
 so it doesn't stick to someone who quit, or who logged on for a few seconds to take a peek. It's meant as a friendly
@@ -1779,7 +1815,7 @@ at the top of the member list. Options:
   "day": "sunday",
   "hour": 18,
   "channel_id": "",
-  "roles": { "time": "", "deaths": "", "sessions": "", "longest": "", "achievements": "", "least": "", "progress": "" }
+  "roles": { "time": "", "deaths": "", "sessions": "", "longest": "", "achievements": "", "least": "", "progress": "", "builder": "" }
 }
 ```
 - **`period`:** `all` (default) or `week`.
@@ -1806,12 +1842,13 @@ The channels have themed names too: see [server setup](#server-setup-odin-setup)
 | **Thor** | Title role: longest single session | Drank from a horn linked to the sea and lowered the ocean | 〃 |
 | **Bragi** | Title role: most Steam achievements | Sings the great deeds of heroes in Valhalla | 〃 (plus the Steam key) |
 | **Hœnir** | Title role: least time played (players seen in the last 30 days with 10+ minutes) | The silent god who hardly lifts a finger | 〃 |
+| **Völundr** | Title role: most pieces built, still standing ([builders](#builders-muninn-builders)) | The master smith of legend | 〃 (plus `save_dir`) |
 | **Mímir** | Title role: most achievement progress on the [progress board](#the-progress-board-muninn-progress) | The wisest of the gods, who knows all things | 〃 (plus `/valheim progress board:True`) |
 | **Óðr** | Every linked player away for 14+ days, until they're back | Freyja's wandering husband, always gone | 〃 |
 | **Hermóðr, Andhrímnir, Freyr, Gangleri…** | [Honors](#honors) for deeds the log can't see, given by admins | Each named for what they're known for | `/odin honor give` |
 | **Skadi** | Role for a week after claiming a [bounty](#bounties) | Goddess of the hunt, on skis with her bow | `/odin bounty` (on by default) |
 
-Title roles go to whoever leads that `/muninn top` board (Mímir: `/muninn progress`) at the weekly check
+Title roles go to whoever leads that `/muninn top` board (Mímir: `/muninn progress`, Völundr: `/muninn builders`) at the weekly check
 ([details](#title-roles)).
 
 **All of it at once**, in the `admin_bot` block of `config.json` (plus `"username":
@@ -1833,7 +1870,7 @@ time it hands each one out. None of them grant any permissions.
 1. **Muninn**, the bot's own role (it has the bot icon). It must stay **above** every role
    it hands out.
 2. **Odin**. The bot moves it here when it creates it.
-3. **Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir, Mímir, Óðr, Skadi, In Valheim**, in any order.
+3. **Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir, Mímir, Völundr, Óðr, Skadi, In Valheim**, in any order.
 
 Roles the bot creates start at the bottom of the list, so they're below its own role and it
 can hand them out. If you drag one above Muninn, the log says `can't give the … role`.
@@ -1879,6 +1916,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn when`'s hours are shifted | The container's time zone isn't yours | Set `TZ` in `.env` (e.g. `TZ=America/Los_Angeles`) and recreate the container |
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
+| A builder shows as "can't name yet" | They've never slept in a bed or left a tombstone in this world | Have them sleep in a bed once; the name shows after the next save |
 | Mímir has a holder but nobody got the role | The leading character isn't linked | `/valheim link <character>`; the role follows within a minute |
 | `/valheim wiki` says it couldn't reach the wiki, or shows no suggestions | No internet from the container, or the wiki is slow (suggestions give up after 2.5 s) | Check the container's network; type the full name and press Enter |
 | No patch notes after a Valheim patch | The first check only remembers what's out; or the bot can't reach Steam (log: `patch notes check failed`); or it can't post in #runestone | Wait for the next patch; allow outbound HTTPS to `api.steampowered.com`; give the bot Send Messages and Embed Links in #runestone, or set `patch_notes.channel_id` |
@@ -2749,6 +2787,8 @@ Added here:
 - **Portals and tombstones** from the world's object files (`.chunk`): portals that go nowhere
   and tombstones nobody has emptied, with where they are. Also ships and carts, and tamed
   animals with their names.
+- **Builders board:** pieces standing in the world per builder, named through beds and
+  tombstones, with the Völundr title.
 - **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and
   lists what's missing for each achievement, with a per-platform guide to finding the file;
   `fch_progress.py` also runs on its own. An opt-in `/muninn progress` board, the Mímir

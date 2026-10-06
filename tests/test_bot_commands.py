@@ -39,7 +39,7 @@ class BotCommandsTest(unittest.TestCase):
                               "patch-notes", "wiki"]),
             "muninn": sorted(["stats", "top", "titles", "online", "compare", "uptime", "bosses", "honors",
                               "progress", "portals", "tombstones", "ships", "tames",
-                              "when"]),
+                              "when", "builders"]),
             "warcouncil": ["bounties", "plan"],
             "odin": sorted(["permit", "ban", "unban", "unpermit", "lists", "settings", "modifier", "preset",
                             "setkey", "backups", "update-check", "restart", "restart-cancel", "setup",
