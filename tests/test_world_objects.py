@@ -287,3 +287,62 @@ class DigestTest(unittest.TestCase):
             st.close()
         self.assertTrue(extras.WeeklyRecap({}).world)
         self.assertFalse(extras.WeeklyRecap({"world": False}).world)
+
+
+@unittest.skipIf(discord is None, "discord.py not installed")
+class ThreadTest(unittest.TestCase):
+    def test_scan_in_a_worker_thread_like_the_commands(self):
+        """The commands run world_objects() in a worker thread while the bot's own database
+        connection belongs to the bot's thread. Storing the builders must still work."""
+        import asyncio
+        import admin_bot
+        import community
+        with tempfile.TemporaryDirectory() as d:
+            world = os.path.join(d, "worlds_local", "Alheim")
+            os.makedirs(world)
+            with open(os.path.join(world, "_main.1.db2"), "wb") as f:
+                f.write(struct.pack("<id", 41, 700000.0))
+            with open(os.path.join(world, "a.chunk"), "wb") as f:
+                f.write(b"\x29\x00" + piece(111) * 4 + bed(111, "Ingrid"))
+            b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "S")
+            b.attach(db_path=os.path.join(d, "s.db"))
+            b._meta("touch", 1)                                   # the bot thread opens its connection
+
+            async def command():
+                return await asyncio.to_thread(b.world_objects)
+            found = asyncio.run(command())
+            self.assertEqual(found["builders"], {111: 4})
+            self.assertEqual(community.title_leaders(b.db)["builder"]["player"], "Ingrid")
+
+
+@unittest.skipIf(discord is None, "discord.py not installed")
+class CommandErrorTest(unittest.TestCase):
+    def test_a_failing_command_still_answers(self):
+        import asyncio
+        import admin_bot
+        from types import SimpleNamespace
+        from discord import app_commands
+        with tempfile.TemporaryDirectory() as d:
+            b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "S")
+            sent = []
+
+            async def followup(text, ephemeral=False):
+                sent.append(("followup", text, ephemeral))
+
+            async def send_message(text, ephemeral=False):
+                sent.append(("response", text, ephemeral))
+
+            async def run(done):
+                tree = b._build_client().tree
+                it = SimpleNamespace(command=SimpleNamespace(qualified_name="muninn builders"),
+                                     response=SimpleNamespace(is_done=lambda: done, send_message=send_message),
+                                     followup=SimpleNamespace(send=followup))
+                err = app_commands.CommandInvokeError(SimpleNamespace(name="builders", qualified_name="x"),
+                                                     RuntimeError("boom"))
+                with self.assertLogs("valheim-monitor.bot", "WARNING"):
+                    await tree.on_error(it, err)
+            asyncio.run(run(True))                                 # deferred ("thinking…"): a follow-up
+            asyncio.run(run(False))
+        self.assertEqual([s[0] for s in sent], ["followup", "response"])
+        self.assertTrue(all(s[2] for s in sent))                   # only the user sees it
+        self.assertIn("Something went wrong", sent[0][1])
