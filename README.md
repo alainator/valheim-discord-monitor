@@ -78,7 +78,9 @@ And without the bot:
   (now listing every `/muninn` and `/warcouncil` command), the channel guide and the pinned
   command guides. The Hall of Champions gains **Óðr** (who's away) and **Skadi** (this week's
   bounty hunters), and `/muninn titles` lists the bounty hunters too
-  ([server setup](#server-setup-odin-setup)).
+  ([server setup](#server-setup-odin-setup)). A test and a checklist now keep the README,
+  topics, guides and stat channels in step with every new feature
+  ([keeping everything consistent](#keeping-everything-consistent)).
 - **`/valheim progress`:** upload your character file (`.fch`) and see which achievements
   you're still missing (crafting, building, cooking, kills, bosses, fish, trophies, ways
   to die), with a full list to download and an optional summary to share
@@ -227,7 +229,7 @@ And without the bot:
   [Steam achievements](#steam-achievements) ([in Discord](#steam-achievements-in-discord)) ·
   [Updates & backups (LOW.MS)](#unattended-updates--nightly-backups-lowms)
 - **Reference:** [Running it permanently](#running-it-permanently) · [Options](#options) ·
-  [Server admin tips](#server-admin-tips) · [Development](#development) ·
+  [Server admin tips](#server-admin-tips) · [Development](#development) ([keeping it consistent](#keeping-everything-consistent)) ·
   [About this fork](#about-this-fork)
 
 ## Self-hosted Linux server (quick start)
@@ -2251,13 +2253,51 @@ python valheim_discord_monitor.py --config config.example.json --replay sample_c
   Valheim needed.
 - **Consistency:** `tests/test_consistency.py` fails when a command, role, honor or stat
   channel isn't reflected everywhere that describes it (README, channel topics, home
-  channels, welcome DM, guides). Adding a feature? Follow the checklist in
-  [CONTRIBUTING.md](CONTRIBUTING.md).
+  channels, welcome DM, guides). Adding a feature? Follow the checklist below
+  ([keeping everything consistent](#keeping-everything-consistent)).
 - **CI:** `.github/workflows/tests.yml` runs the tests on Python 3.9 and 3.12, does the
   replay, and builds the Docker image, on every push to `main` and every pull request.
 - **Sample log:** `sample_console.log` is a short example log with crossplay joins, a
   death, a timeout, a disconnect and a refused join. Add lines there when teaching the
   parser something new.
+
+### Keeping everything consistent
+
+The bot describes itself in many places: channel topics, the pinned command guides, the
+channel guide, stat channels, the welcome DM, the starter rules, the `/valheim progress`
+guide and this README. Whenever a command, role, honor, stat channel or option is added,
+renamed or removed, all of them change in the same pull request.
+
+**What CI checks** (`tests/test_consistency.py`):
+
+| Check | Fails when |
+|---|---|
+| Real commands only | A topic, guide intro, the welcome DM, the starter rules, the progress guide, `host/README.md` or this README names a command that doesn't exist. |
+| Every command documented | A command (subgroup commands too) is missing from this README. |
+| A guide per group | A command group has no pinned command guide. |
+| Home channels | A `/muninn` or `/warcouncil` command has no home channel in `COMMAND_PLACES`, or that channel's topic doesn't mention it. |
+| Titles have stat channels | A title has no `title_<category>` stat channel or label. |
+| Everything documented | A stat channel, honor, role (in [Roles & names](#roles--names)) or achievement list is missing from this README. |
+| Topics | A current topic is also listed in `OLD_TOPICS`, or a topic is over Discord's 1024 characters. |
+
+**What to do by hand** (the full list is in [CONTRIBUTING.md](CONTRIBUTING.md)):
+
+| Adding… | Also update |
+|---|---|
+| A slash command | `COMMAND_PLACES` if its reply is public; its channel's topic in `server_layout.TEMPLATE`, with the old wording moved to `OLD_TOPICS`; the command tables here; the welcome DM, starter rules or progress guide if they should point to it. The pinned guides build themselves. |
+| A role | [Roles & names](#roles--names) and the role order; a Hall of Champions stat channel if it has holders; `/muninn titles` if it's title-like; a note that the bot's role must sit above it. |
+| A stat channel | `stat_channels.GROUPS` and `name_for`; leave it out of the default list when its feature is off; a row in the [stat channel table](#stat-channels). |
+| A Huginn post | An emoji in `REACTIONS` if the bot should react; the feed description and the #huginns-watch topic. |
+| A config key | `config.example.json`, `config.selfhosted.example.json` and the [Options](#options) table. |
+| A Discord permission | The bot permissions table and the permissions number in the invite link. |
+| A change to a `host/` script | A What's new note saying to install it again, with the command. |
+| Anything | A What's new entry; the feature list and Contents if it's new; its own section; likely problems in Troubleshooting; a line in [About this fork](#about-this-fork); tests. |
+
+**What updates itself:** at every start the bot rebuilds the pinned command guides from the
+commands, replaces any channel topic still showing an old default (listed in `OLD_TOPICS`)
+and rebuilds the channel guide from the topics. Topics written by hand are left alone, and
+nothing is created at start-up: missing channels or guides come back with
+`/odin setup apply` (or `/odin setup action:guides`).
 
 ## About this fork
 
