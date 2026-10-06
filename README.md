@@ -1398,7 +1398,35 @@ save is gear still lying out there:
 - **Several worlds** in `worlds_local`? It follows `"bosses": {"world": "Alheim"}`, like
   boss progress and the ☀️ Day channel.
 - **Check it on your server:** `docker compose exec valheim-discord-monitor python3
-  world_objects.py /valheim_save_data` prints every portal and tombstone it finds.
+  world_objects.py /valheim_save_data` prints every portal and tombstone it finds:
+  ```
+  32 portals: 15 pairs, 2 alone, 0 names used 3+ times, 0 without a name
+    Altar                    x 28, z 0 · near the start
+    B1                       x -144, z -8 · near the start
+    …
+  3 tombstones:
+    Ingrid                   day 396  x -2015, z 1171 · 2.3 km NW of the start
+  ```
+- **Everyone in #🪶┃muninns-roost sees the answers,** including where each lonely portal and
+  tombstone is. Fine for a group of friends; worth knowing if your bases are secret.
+
+**Portal tips:**
+- **Name both ends exactly the same.** A typo ("Swmap") shows up here as two portals going
+  nowhere.
+- **Numbered names chain well.** B1 to B6 for a road of portals, one name per hop, keeps
+  every pair at two. Reusing a name for a third portal is what makes them connect at random.
+- **A portal alone isn't always a mistake:** a spare at home waiting for its partner, or one
+  left at the edge of an unexplored biome. The list is there to check, not to fix blindly.
+- **What it can't tell you:** which end of a pair is which, who built it, or which biome
+  it's in. The save only stores the position.
+
+**Tombstone tips:**
+- **Emptying it is what removes it.** Taking only some of the items leaves it there, and on
+  the list.
+- **Old ones stand out:** the newest deaths are at the top, each with its in-game day, so one
+  forgotten weeks ago is easy to spot.
+- **Lost the map marker?** The death marker on the map can be removed by accident;
+  the coordinates here are the way back.
 
 ### Bounties
 
@@ -2499,6 +2527,21 @@ wildcards so root expands them:
 3. Commands need your ID in `adminlist.txt`. Refer to players by their **platform ID**
    (`kick V_7656…`), not their character name. Your players' IDs are in
    `permittedlist.txt`. The admin bot's notices show the IDs of refused players.
+
+**What the bot reads from the world save** (`<save_dir>/worlds_local/<world>/`, newest
+save; never written to):
+
+| File | What's in it | Used for |
+|---|---|---|
+| `_main.<N>.fwl2` | World name and seed | `/valheim map` |
+| `_main.<N>.db2`, first 12 bytes | World version and the game clock | The ☀️ Day channel, tombstone days |
+| `_main.<N>.db2`, packed part | Global keys (`defeated_eikthyr`, …) | [Boss progress](#boss-progress) |
+| `*.chunk` | Every object in the world | [Portals and tombstones](#portals-and-tombstones) |
+
+Valheim writes all of them at each save (every 30 minutes and at shutdown), so everything
+read from the save is up to half an hour behind the game. Before 1.0 a world was one
+`<world>.fwl` and one `<world>.db`; those are read too. Backups (`*_backup_*`) are left
+alone.
 
 **Idle players:** vanilla Valheim logs nothing per player between joining and leaving, so
 idleness can't be detected from the log, and there's no remote kick. Auto-kicking AFK
