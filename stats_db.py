@@ -174,6 +174,13 @@ def init_schema(conn: sqlite3.Connection) -> None:
             updated_at INTEGER NOT NULL              -- real epoch
         );
 
+        -- /muninn builders: pieces standing in the world per character, from the last save read
+        CREATE TABLE IF NOT EXISTS builders (
+            player     TEXT PRIMARY KEY,
+            pieces     INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL              -- real epoch
+        );
+
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT

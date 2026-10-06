@@ -249,6 +249,7 @@ TITLES = {
     "least": ("Hœnir", "the silent god who hardly lifts a finger: least time played", 0x7F8C8D),
     "progress": ("Mímir", "the wisest, who knows all things: most achievement progress (/muninn progress)",
                  0x1ABC9C),
+    "builder": ("Völundr", "the master smith of legend: most pieces built (/muninn builders)", 0xA1887F),
 }
 # Hœnir only counts players seen in the last LEAST_ACTIVE_DAYS with at least
 # LEAST_MIN_SECONDS played in all, so it doesn't stick to someone who quit, or who
@@ -269,6 +270,8 @@ _TITLE_SQL = {
                     "WHERE player IS NOT NULL GROUP BY player",
     # A snapshot from the last upload, so it's the same whatever the period.
     "progress": "SELECT player, MAX(done) AS v FROM fch_progress WHERE ? IS NOT NULL GROUP BY player",
+    # Pieces standing now (from the world save), so also the same whatever the period.
+    "builder": "SELECT player, MAX(pieces) AS v FROM builders WHERE ? IS NOT NULL GROUP BY player",
 }
 
 
@@ -362,7 +365,7 @@ def render_titles(holders: dict, changed: set = frozenset(), period: str = "all"
         if not h:
             lines.append(f"**{role}**: nobody yet\n*{why}*")
             continue
-        value = str(h["v"]) if cat in ("deaths", "sessions", "achievements", "progress") else _dur(h["v"])
+        value = str(h["v"]) if cat in ("deaths", "sessions", "achievements", "progress", "builder") else _dur(h["v"])
         who = f"<@{h['user_id']}> ({h['player']})" if h.get("user_id") else \
             f"**{h['player']}** (not linked: `/valheim link {h['player']}` to get the role)"
         new = " 🆕" if cat in changed else ""
@@ -633,6 +636,20 @@ def uptime(conn, since: int, until: int) -> dict:
 # ---------------------------------------------------------------------------
 # The progress board: achievement counts players share from /valheim progress
 # ---------------------------------------------------------------------------
+def save_builders(conn, counts: list, now: Optional[float] = None) -> None:
+    """Replace the builders table with [(character, pieces)] from the latest world save; a
+    character is stored under the log's spelling when it has played here."""
+    when = int(now if now is not None else time.time())
+    rows = {}
+    for name, n in counts:
+        player = known_player(conn, name) or name
+        rows[player] = rows.get(player, 0) + int(n)
+    conn.execute("DELETE FROM builders")
+    conn.executemany("INSERT INTO builders(player, pieces, updated_at) VALUES (?,?,?)",
+                     [(p, n, when) for p, n in rows.items()])
+    conn.commit()
+
+
 def progress_counts(sections: list) -> dict:
     """{list key: [done, total]} from fch_progress.report(); the counts only, no item names."""
     return {s["key"]: [len(s["done"]), s["total"]] for s in sections}

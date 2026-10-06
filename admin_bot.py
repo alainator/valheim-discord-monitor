@@ -53,7 +53,8 @@ except ImportError:
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
                   "uptime": "bots", "bosses": "bots", "honors": "bots", "progress": "bots", "portals": "bots",
-                  "tombstones": "bots", "ships": "bots", "tames": "bots", "when": "bots", "plan": "plans",
+                  "tombstones": "bots", "ships": "bots", "tames": "bots", "when": "bots", "builders": "bots",
+                  "plan": "plans",
                   "bounties": "plans"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
 GUIDES = [
@@ -1976,7 +1977,11 @@ class AdminBot:
         except OSError:
             return None
         if self._objects_read[:2] != (path, mtime):
-            self._objects_read = (path, mtime, world_objects.scan(self.lists.save_dir, self.bosses_world))
+            found = world_objects.scan(self.lists.save_dir, self.bosses_world)
+            self._objects_read = (path, mtime, found)
+            if found is not None and self.db_path:          # for the Völundr title
+                import community
+                community.save_builders(self.db, world_objects.builder_counts(found)[0])
         return self._objects_read[2]
 
     def _meta(self, key: str, value=None):
@@ -2137,6 +2142,11 @@ class AdminBot:
         async with self._titles_lock:
             guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
             since = self._titles_since()
+            if recompute:
+                try:                                  # Völundr: refresh the builders from the save
+                    await asyncio.to_thread(self.world_objects)
+                except Exception as e:  # noqa: BLE001
+                    log.info("admin_bot: couldn't read the builders from the save: %s", e)
             leaders = community.title_leaders(self.db, since) if recompute else {}
             holders, changed = {}, set()
             for cat, (name, _, _) in community.TITLES.items():
@@ -3157,7 +3167,7 @@ class AdminBot:
                                            allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="titles", description="Who holds each title role: Heimdall, Hel, Sleipnir, Thor, Bragi, "
-                                                    "Hœnir, Mímir")
+                                                    "Hœnir, Mímir, Völundr")
         @app_commands.describe(refresh="Admins: reassign the titles now instead of waiting for the weekly run")
         async def titles(it: discord.Interaction, refresh: bool = False):
             if not await need_db(it):
@@ -3272,6 +3282,18 @@ class AdminBot:
             else:
                 await it.followup.send(embed=discord.Embed.from_dict(embed))
         when_cmd.autocomplete("player")(player_choices)
+
+        @muninn.command(name="builders", description="Who built the most: pieces standing in the world, by builder")
+        async def builders_cmd(it: discord.Interaction):
+            import world_objects
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)
+            if found is None:
+                await it.followup.send("I can't find the world save (`save_dir`/worlds_local).")
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(
+                world_objects.render_builders(found, bot.server_name)),
+                allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="ships", description="Every ship and cart in the world, and where it is")
         async def ships_cmd(it: discord.Interaction):

@@ -82,7 +82,8 @@ class ParseTest(unittest.TestCase):
         """A prefab hash turning up by chance, with no sensible position before it."""
         junk = struct.pack("<3f", float("nan"), 1, 1) + struct.pack("<I", wo.stable_hash("portal_wood"))
         junk += struct.pack("<3f", 1e9, 1, 1) + struct.pack("<I", wo.stable_hash("Player_tombstone"))
-        self.assertEqual(wo.scan_bytes(junk), {"portals": [], "tombstones": [], "ships": [], "tames": []})
+        self.assertEqual(wo.scan_bytes(junk), {"portals": [], "tombstones": [], "ships": [], "tames": [],
+                                              "builders": {}, "names": {}})
 
     def test_ships_and_tames(self):
         data = (thing(10, 10, "Karve") + thing(-4000, 2000, "VikingShip") + thing(5, 5, "Cart")
@@ -173,3 +174,64 @@ class SaveTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def piece(pid, prefab="wood_wall"):
+    """A placed piece: position, prefab, then the longs with "creator"."""
+    out = b"\xf4\x11" + struct.pack("<3f", 1.0, 30.0, 1.0) + struct.pack("<I", wo.stable_hash(prefab)) + b"\x19\x82"
+    return out + b"\x01" + struct.pack("<I", wo.stable_hash("creator")) + struct.pack("<q", pid) + b"\x00" * 8
+
+
+def bed(pid, name):
+    """A bed: "owner" in the longs, "ownerName" in the strings, like the tombstone."""
+    raw = name.encode()
+    out = b"\xf4\x11" + struct.pack("<3f", 2.0, 30.0, 2.0) + struct.pack("<I", wo.stable_hash("bed")) + b"\x19\x82"
+    out += b"\x01" + struct.pack("<I", wo.stable_hash("owner")) + struct.pack("<q", pid)
+    return out + b"\x01" + struct.pack("<I", wo.stable_hash("ownerName")) + bytes([len(raw)]) + raw + b"\x00" * 8
+
+
+class BuildersTest(unittest.TestCase):
+    def test_counts_and_names(self):
+        data = (piece(111) * 5 + piece(222) * 3 + piece(333) * 2 + piece(444)
+                + bed(111, "Ingrid") + bed(222, "Bjorn") + bed(444, "Ingrid"))   # Ingrid remade: two IDs
+        found = wo.scan_bytes(data + TOMBSTONE)
+        self.assertEqual(found["builders"], {111: 5, 222: 3, 333: 2, 444: 1})
+        self.assertEqual(found["names"][2247469767], "Geedorah")                # from the real tombstone
+        named, unnamed = wo.builder_counts(found)
+        self.assertEqual(named, [("Ingrid", 6), ("Bjorn", 3)])
+        self.assertEqual(unnamed, (1, 2))
+        e = wo.render_builders(found, "Alheim")
+        self.assertEqual(e["title"], "🔨 Builders of Alheim: 11 pieces")
+        self.assertIn("🥇 **Ingrid**: 6 pieces", e["description"])
+        self.assertIn("…plus **1** builder I can't name yet (2 pieces)", e["description"])
+
+    def test_title_and_table(self):
+        import community
+        import stats_db
+        with tempfile.TemporaryDirectory() as d:
+            st = stats_db.Store(os.path.join(d, "s.db"))
+            st.login("Ingrid", 100)
+            community.save_builders(st.conn, [("ingrid", 600), ("Bjorn", 300)])
+            rows = dict(st.conn.execute("SELECT player, pieces FROM builders").fetchall())
+            self.assertEqual(rows, {"Ingrid": 600, "Bjorn": 300})              # the log's spelling
+            lead = community.title_leaders(st.conn, since=10 ** 9)
+            self.assertEqual((lead["builder"]["player"], lead["builder"]["v"]), ("Ingrid", 600))
+            community.save_builders(st.conn, [("Bjorn", 900)])                 # replaced, not added
+            self.assertEqual(dict(st.conn.execute("SELECT player, pieces FROM builders").fetchall()), {"Bjorn": 900})
+            st.close()
+
+    @unittest.skipIf(discord is None, "discord.py not installed")
+    def test_bot_stores_the_builders_after_a_scan(self):
+        import admin_bot
+        import community
+        with tempfile.TemporaryDirectory() as d:
+            world = os.path.join(d, "worlds_local", "Alheim")
+            os.makedirs(world)
+            with open(os.path.join(world, "_main.1.db2"), "wb") as f:
+                f.write(struct.pack("<id", 41, 700000.0))
+            with open(os.path.join(world, "a.chunk"), "wb") as f:
+                f.write(b"\x29\x00" + piece(111) * 4 + bed(111, "Ingrid"))
+            b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "S")
+            b.attach(db_path=os.path.join(d, "s.db"))
+            b.world_objects()
+            self.assertEqual(community.title_leaders(b.db)["builder"]["player"], "Ingrid")

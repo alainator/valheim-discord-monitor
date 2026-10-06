@@ -125,7 +125,7 @@ class TitlesTest(DB):
         lead = community.title_leaders(self.c)
         self.assertEqual({k: v and v["player"] for k, v in lead.items()},
                          {"time": "Ingrid", "deaths": "Bjorn", "sessions": "Bjorn", "longest": "Ingrid",
-                          "achievements": None, "progress": None,
+                          "achievements": None, "progress": None, "builder": None,
                           "least": "Bjorn"})               # 1.5 h against Ingrid's 2 h
         self.assertEqual(lead["time"]["v"], 7200)
         # A tie keeps the current holder instead of flipping to the first name.

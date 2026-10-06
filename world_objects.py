@@ -13,7 +13,10 @@ its position (3 floats), its prefab's hash, then its data, where strings are a k
     save is one still lying out there;
   * a ship or cart is just its prefab and position;
   * an animal is saved wild or tame alike: a tame one has the int "tamed" = 1, and maybe
-    the name players gave it ("TamedName") and its "level" (1 + stars).
+    the name players gave it ("TamedName") and its "level" (1 + stars);
+  * every piece a player placed has the long "creator": the player's ID. The save has no
+    names for those IDs, but beds and tombstones keep both "owner" (the ID) and
+    "ownerName" (the character), which is how IDs get names.
 
 Run it on its own to check a save: python3 world_objects.py /path/to/valheim_save_data
 """
@@ -55,6 +58,7 @@ TAMEABLE = {_key(p): kind for p, kind in (
     ("Lox", ("lox", "🦣")), ("Lox_Calf", ("lox calf", "🦣")), ("Hen", ("hen", "🐔")), ("Chicken", ("chick", "🐣")),
     ("Asksvin", ("asksvin", "🦎")), ("Asksvin_hatchling", ("asksvin hatchling", "🦎")))}
 TAMED, TAMED_NAME, LEVEL = _key("tamed"), _key("TamedName"), _key("level")
+CREATOR, OWNER = _key("creator"), _key("owner")
 WINDOW = 512                     # bytes after the prefab hash to look for an object's data
 
 
@@ -73,7 +77,12 @@ def _string(data: bytes, start: int, end: int, key: bytes) -> Optional[str]:
     i = data.find(key, start, end)
     if i < 0:
         return None
-    p, n, shift = i + 4, 0, 0
+    return _string_at(data, i + 4)
+
+
+def _string_at(data: bytes, p: int) -> Optional[str]:
+    """A 7-bit length and UTF-8 starting at p, or None."""
+    n, shift = 0, 0
     while p < len(data) and shift < 35:              # 7-bit encoded length
         byte = data[p]
         n |= (byte & 0x7F) << shift
@@ -114,7 +123,7 @@ def scan_bytes(data: bytes) -> dict:
     """{"portals", "tombstones", "ships", "tames": [...]} found in one file's bytes."""
     kinds = [(PORTALS, "portal"), ({TOMBSTONE: None}, "tombstone"), (SHIPS, "ship"), (TAMEABLE, "animal")]
     hits = sorted((i, what, kind) for table, what in kinds for key, kind in table.items() for i in _hits(data, key))
-    out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": []}
+    out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "builders": {}, "names": {}}
     for n, (i, what, kind) in enumerate(hits):
         pos = _position(data, i)
         if not pos:
@@ -138,6 +147,18 @@ def scan_bytes(data: bytes) -> dict:
             out["tames"].append({"kind": kind[0], "emoji": kind[1], "name": (_string(data, i + 4, end, TAMED_NAME)
                                                                             or "").strip(),
                                  "stars": max(0, min(level - 1, 5)) if level else 0, **place})
+    for i in _hits(data, CREATOR):                     # one per placed piece
+        if i + 12 <= len(data):
+            pid = struct.unpack_from("<q", data, i + 4)[0]
+            if 0 < pid < 1 << 53:
+                out["builders"][pid] = out["builders"].get(pid, 0) + 1
+    for i in _hits(data, OWNER_NAME):                  # beds and tombstones: ID -> character
+        o = data.rfind(OWNER, max(0, i - 96), i)
+        name = _string_at(data, i + 4)
+        if o >= 0 and name and name.strip():
+            pid = struct.unpack_from("<q", data, o + 4)[0]
+            if 0 < pid < 1 << 53:
+                out["names"][pid] = name.strip()
     return out
 
 
@@ -154,20 +175,38 @@ def object_files(save_dir: str, world: Optional[str] = None) -> list:
 
 
 def scan(save_dir: str, world: Optional[str] = None) -> Optional[dict]:
-    """Every portal and tombstone in the live world, or None without a save."""
+    """Everything scan_bytes finds in the live world, or None without a save."""
     files = object_files(save_dir, world)
     if not files:
         return None
-    out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": []}
+    out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "builders": {}, "names": {}}
     for path in files:
         try:
             with open(path, "rb") as f:
                 found = scan_bytes(f.read())
         except OSError:
             continue
-        for k in out:
+        for k in ("portals", "tombstones", "ships", "tames"):
             out[k] += found[k]
+        for pid, n in found["builders"].items():
+            out["builders"][pid] = out["builders"].get(pid, 0) + n
+        out["names"].update(found["names"])
     return out
+
+
+def builder_counts(found: dict) -> tuple:
+    """([(character, pieces)] best first, (unnamed builders, their pieces)): characters
+    with several IDs (a character remade under the same name) are added together."""
+    named: dict = {}
+    unnamed = [0, 0]
+    for pid, n in found["builders"].items():
+        name = found["names"].get(pid)
+        if name:
+            named[name] = named.get(name, 0) + n
+        else:
+            unnamed[0] += 1
+            unnamed[1] += n
+    return sorted(named.items(), key=lambda kv: (-kv[1], kv[0].lower())), tuple(unnamed)
 
 
 # -- what to show -----------------------------------------------------------------------
@@ -276,6 +315,20 @@ def render_tames(tames: list, server_name: str = "") -> dict:
             "footer": {"text": "From the last world save (every 30 minutes) · name a tame by hovering it and pressing E"}}
 
 
+def render_builders(found: dict, server_name: str = "") -> dict:
+    named, (others, other_pieces) = builder_counts(found)
+    medals = ("🥇", "🥈", "🥉")
+    total = sum(found["builders"].values())
+    lines = [f"{medals[i] if i < 3 else f'`{i + 1:>2}.`'} **{name}**: {n:,} pieces"
+             for i, (name, n) in enumerate(named[:15])]
+    if others:
+        lines.append(f"\n…plus **{others}** builder{'s' if others != 1 else ''} I can't name yet "
+                     f"({other_pieces:,} pieces). A name is learned once they sleep in a bed or leave a tombstone.")
+    return {"title": f"🔨 Builders{' of ' + server_name if server_name else ''}: {total:,} pieces", "color": 0xA1887F,
+            "description": "\n".join(lines) or "Nothing built yet.",
+            "footer": {"text": "Pieces standing in the world now, by who placed them · from the last save"}}
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv:
@@ -297,6 +350,11 @@ def main(argv=None) -> int:
     print(f"{len(found['ships'])} ships and carts:")
     for s in found["ships"]:
         print(f"  {s['kind']:<24} {where(s['x'], s['z'])}")
+    named, (others, other_pieces) = builder_counts(found)
+    print(f"{sum(found['builders'].values())} pieces by {len(found['builders'])} builders"
+          f" ({others} without a name, {other_pieces} pieces):")
+    for name, n in named:
+        print(f"  {name:<24} {n}")
     print(f"{len(found['tames'])} tamed animals:")
     for a in sorted(found["tames"], key=lambda a: (a["kind"], a["name"].lower())):
         print(f"  {a['kind']:<12} {a['name'] or '(no name)':<16} {'*' * a['stars']:<3} {where(a['x'], a['z'])}")
