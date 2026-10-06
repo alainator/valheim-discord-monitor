@@ -48,6 +48,9 @@ On top of the Discord posts it can also, with the optional **admin bot**:
 - **Boss progress, read from the world save:** "⚔️ Moder has fallen!" when a boss goes
   down, `/muninn bosses`, and a "🏆 Bosses: 3/8 · next: Moder" channel. No mods and no
   setup ([boss progress](#boss-progress)).
+- **Portals and tombstones, from the world save too:** `/muninn portals` finds portals that
+  go nowhere, `/muninn tombstones` the gear nobody has picked up yet, with where to find it
+  ([portals and tombstones](#portals-and-tombstones)).
 - **Achievement progress from a character file:** players upload their `.fch` with
   `/valheim progress` and see which achievements they're still missing. Those who opt in
   join a `/muninn progress` board, with the **Mímir** title for the leader and a post when
@@ -81,6 +84,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Portals and tombstones, read from the world save:** `/muninn portals` lists portals whose
+  name has no partner (they go nowhere), names used three or more times, and portals without
+  a name. `/muninn tombstones` shows every tombstone nobody has emptied yet: whose, which day
+  they died and where. No mods, no setup ([portals and tombstones](#portals-and-tombstones)).
 - **`/valheim wiki`:** look up any item, creature, boss, biome, building or dungeon on the
   Valheim Wiki without leaving Discord: a card with the summary, the key stats (health,
   weaknesses, drops, materials, food values…) and a link. Suggestions appear as you type
@@ -242,6 +249,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
+  [Portals & tombstones](#portals-and-tombstones) ·
   [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
@@ -645,7 +653,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors`, `progress` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `portals`, `tombstones` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -696,6 +704,8 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, Steam achievements, or longest play streak (days in a row) | Stats database |
 | `/muninn compare <player> [other]` | Anyone | Two characters side by side: time played, visits, longest session, deaths, achievements, with the leader of each marked. No `other` = your linked character | Stats database |
 | `/muninn bosses` | Anyone | Every boss with ✅ or ⬜, when it fell, and which is next ([boss progress](#boss-progress)) | `save_dir` |
+| `/muninn portals` | Anyone | Portals that go nowhere, names used 3+ times, portals without a name, and the connected pairs ([portals](#portals-and-tombstones)) | `save_dir` |
+| `/muninn tombstones` | Anyone | Every tombstone nobody has emptied yet: whose, the day they died, and where ([tombstones](#portals-and-tombstones)) | `save_dir` |
 | `/muninn honors [member]` | Anyone | Every [honor](#honors) and who holds it, or one member's honors | Stats database |
 | `/muninn progress [only]` | Anyone | The [progress board](#the-progress-board-muninn-progress): achievement counts from `/valheim progress` uploads, for everything or one list | Stats database |
 | `/muninn uptime` | Anyone | Share of time the server was up this week, the last 7 and 30 days, with restarts and downtime | Stats database |
@@ -1352,6 +1362,44 @@ reads the same save, and follows `world` too. `world` is only needed
 with several worlds in the folder (otherwise the most recently saved one is used);
 `"announce": false` keeps the command and channel without the posts.
 
+### Portals and tombstones
+
+The world save also holds every object in the world, so the bot can read portals and
+tombstones from it, from the same `save_dir` and with no setup. Valheim saves every 30
+minutes, so both are up to half an hour behind.
+
+**`/muninn portals`**: two portals with the same name connect. The answer lists what needs
+fixing first:
+
+```
+🌀 Portals in Alheim: 32
+Going nowhere (no other portal with that name):
+🔸 Swamp · x -2015, z 1171 · 2.3 km NW of the start
+More than two with one name (which two connect is luck):
+🔶 Home ×3
+No name: 1 portal: x 412, z -88 · near the start
+Connected (13): Black Forest, Bonemass, Mountain, …
+```
+
+**`/muninn tombstones`**: a tombstone stays until its owner empties it, so every one in the
+save is gear still lying out there:
+
+```
+🪦 Tombstones still out there in Alheim: 2
+🪦 Ingrid · died on day 396
+   x -2015, z 1171 · 2.3 km NW of the start
+🪦 Bjorn · died on day 391
+   x -2382, z 486 · 2.4 km W of the start
+```
+
+- **Coordinates** are the map's x and z (east and north), the numbers the game shows with
+  the `pos` console command. The direction and distance are from the world's centre, where
+  the start is.
+- **Several worlds** in `worlds_local`? It follows `"bosses": {"world": "Alheim"}`, like
+  boss progress and the ☀️ Day channel.
+- **Check it on your server:** `docker compose exec valheim-discord-monitor python3
+  world_objects.py /valheim_save_data` prints every portal and tombstone it finds.
+
 ### Bounties
 
 Admins post a challenge; whoever does it gets the glory and a role for a week.
@@ -1764,6 +1812,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/odin restore` lists nothing | No Valheim backups in `worlds_local` yet, or `save_dir` / `backups.source_dir` points elsewhere | `sudo ls /home/valheim/valheim_save_data/worlds_local`; check the paths in `config.json` |
 | `/muninn bosses` says it can't find the world save | `save_dir` isn't the folder with `worlds_local` in it, or the save folder isn't mounted | Set `admin_bot.save_dir` to the mounted save folder (e.g. `/valheim_save_data`); `/valheim map` uses the same one |
 | A boss kill wasn't posted | Valheim hadn't saved yet (every 30 minutes, and at shutdown), or it was already down when the bot first checked | Wait for the next save. Bosses down before the first check are recorded quietly; `/muninn bosses` shows them |
+| `/muninn portals` or `tombstones` says it can't find the save | Same as for `/muninn bosses`: `save_dir` must be the folder with `worlds_local` in it | Set `admin_bot.save_dir` to the mounted save folder |
+| A tombstone you just emptied is still listed | The world hasn't been saved since (every 30 minutes) | It drops off after the next save |
 | `/muninn bosses` shows the wrong world | Several worlds in `worlds_local`; the most recently saved one is used | Set `"bosses": {"world": "Alheim"}` |
 | A Steam player's achievement wasn't posted | Their game details are private (Steam's default is Friends only), `"achievement"` isn't in `events`, or it's been under 30 minutes | `/muninn stats <character>` says "private" if it's privacy: they set Game details to Public. Otherwise check `events` |
 | Someone was posted as leaving while still playing | The log line that looked like their leave belonged to an earlier connection of theirs (fixed), or a pattern the monitor doesn't know | Update; if it happens again, share the monitor's log lines around their `EVENT logout` in an issue |
@@ -2556,6 +2606,8 @@ Added here:
   "Most achievements" leaderboard, and the Bragi title.
 - **Boss progress** read from the world save (Valheim 1.0's `_main.<N>.db2` and older
   `.db`): kill posts, `/muninn bosses` and a stat channel.
+- **Portals and tombstones** from the world's object files (`.chunk`): portals that go nowhere
+  and tombstones nobody has emptied, with where they are.
 - **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and
   lists what's missing for each achievement, with a per-platform guide to finding the file;
   `fch_progress.py` also runs on its own. An opt-in `/muninn progress` board, the Mímir
