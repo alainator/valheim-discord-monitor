@@ -47,6 +47,10 @@ On top of the Discord posts it can also, with the optional **admin bot**:
 - **Boss progress, read from the world save:** "⚔️ Moder has fallen!" when a boss goes
   down, `/muninn bosses`, and a "🏆 Bosses: 3/8 · next: Moder" channel. No mods and no
   setup ([boss progress](#boss-progress)).
+- **Achievement progress from a character file:** players upload their `.fch` with
+  `/valheim progress` and see which achievements they're still missing. Run it without a
+  file for a guide to finding it on Windows, Linux, Steam Deck or macOS
+  ([achievement progress](#achievement-progress-valheim-progress)).
 - **Honors for what the logs can't see:** 16 built-in roles like Hermóðr (crypt raider),
   Andhrímnir (cook) and Gangleri (explorer), plus your own. Admins give them directly, by
   vote or as a bounty prize ([honors](#honors)).
@@ -203,7 +207,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
-  [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
+  [Achievement progress](#achievement-progress-valheim-progress) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
@@ -664,7 +668,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/valheim request-access <character>` | Anyone | New player: "I'll join as …". The admins' refused-join notice then says who it is | Stats database |
 | `/warcouncil plan <title> <when>` | Anyone | Game night with Going / Maybe / Can't buttons, a planning thread and a reminder ping. Several times (`sat 20:00, sun 18:00`) start a poll for the time | Stats database |
 | `/warcouncil bounties` | Anyone | Open bounties with their rewards and deadlines, and the top bounty hunters | Stats database |
-| `/valheim progress <save> [only] [share]` | Anyone | Upload your character's `.fch` to see the [achievements](#achievement-progress-valheim-progress) you're still missing; `share` posts a summary | — |
+| `/valheim progress [save] [only] [share]` | Anyone | Upload your character's `.fch` to see the [achievements](#achievement-progress-valheim-progress) you're still missing; `share` posts a summary. Without a file: a guide to finding it, with a button per platform | — |
 | `/valheim map` | Anyone | World seed and a map link (spoilers; only the asker sees it) | `save_dir` |
 | `/odin permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
 | `/odin ban <id>` | Admin | Ban, and remove from the permitted list | `save_dir` |
@@ -1551,6 +1555,9 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | Handled refused-join notices aren't deleted | The bot lacks Manage Messages in the admin channel, or `tidy_notices_hours` is 0 | Grant it in the channel's permissions |
 | Stats are missing for days before the monitor ran, or for when it was down | Valheim wipes its log at every server start, so those lines are gone unless the [log archive](#the-log-archive) has them | Nothing to recover from before the archive started. From now on `--backfill` rebuilds from `logs_archive/` ([catching up](#catching-up-on-old-logs)) |
 | `logs_archive/` stays empty | `"log_archive": {"enabled": false}`, or the folder isn't writable | Check the option; the log says `Log archive: couldn't write to …` |
+| A player can't find their `.fch` | It's in a hidden or platform-specific folder | Have them run `/valheim progress` with no file and press their platform's button; on Linux, `find ~ -name "*.fch"` |
+| `/valheim progress` says it couldn't read the file | It's the `.fch.old` backup, a world file, or a save from a newer game version | Upload `Name.fch` (no `.old`) after quitting to the menu. A newer save version is flagged; the lists may need updating |
+| `/valheim progress` from a Game Pass or console player | Those versions don't keep a readable `.fch` | Only Steam (Windows, Linux, Steam Deck) and macOS characters work |
 | `/odin honor give` says it couldn't give the role | The bot lacks Manage Roles, or the honor role is above the bot's own role | Server Settings → Roles: give the bot Manage Roles and drag its role above the honor roles |
 | `/odin honor vote` doesn't start | The bot can't make polls in that channel | Allow **Create Polls** for the bot there, or run the vote in another channel |
 | A channel's command guide is missing or out of date | It was deleted, or the channel didn't exist when setup ran | `/odin setup action:guides` posts it again; the bot refreshes the others at start-up |
@@ -2278,6 +2285,9 @@ Added here:
   "Most achievements" leaderboard, and the Bragi title.
 - **Boss progress** read from the world save (Valheim 1.0's `_main.<N>.db2` and older
   `.db`): kill posts, `/muninn bosses` and a stat channel.
+- **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and
+  lists what's missing for each achievement, with a per-platform guide to finding the file;
+  `fch_progress.py` also runs on its own.
 - **Honors:** 16 built-in roles for deeds the log can't see, custom ones, and an
   admin-adopted role managed by the bot; given directly, by poll, or as a bounty prize.
 - **More community:** bounties with the Skadi role, join-to-create voice channels,
