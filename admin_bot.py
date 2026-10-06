@@ -52,8 +52,8 @@ except ImportError:
 # Commands with public replies, and the /odin setup channel they belong in. Others (their
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
-                  "uptime": "bots", "bosses": "bots", "honors": "bots", "progress": "bots", "plan": "plans",
-                  "bounties": "plans"}
+                  "uptime": "bots", "bosses": "bots", "honors": "bots", "progress": "bots", "portals": "bots",
+                  "tombstones": "bots", "plan": "plans", "bounties": "plans"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
 GUIDES = [
     ("valheim", "welcome", "🚪 Getting into the game: /valheim",
@@ -480,6 +480,7 @@ class AdminBot:
         self._boss_task = None
         self._boss_read = (None, 0.0)           # (path, mtime) of the last save read
         self._day_read = (None, 0.0, None)      # (path, mtime, in-game day) from the save
+        self._objects_read = (None, 0.0, None)  # (path, mtime, portals and tombstones) from the save
         # /valheim link sets a member's server nickname to the character (only if they have none).
         self.link_nickname = bool(cfg.get("link_nickname", False))
         # Commands used in the wrong channel get a private "run it in #…" instead. true: the
@@ -1959,6 +1960,24 @@ class AdminBot:
             self._day_read = (path, mtime, bosses.day_of(seconds) if seconds is not None else None)
         return self._day_read[2]
 
+    def world_objects(self) -> Optional[dict]:
+        """Portals and tombstones in the live world (world_objects.scan), re-read only when
+        the world has been saved since. Blocking: call it in a thread."""
+        import bosses
+        import world_objects
+        if not self.lists.save_dir:
+            return None
+        path = bosses.world_save(self.lists.save_dir, self.bosses_world)
+        if not path:
+            return None
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            return None
+        if self._objects_read[:2] != (path, mtime):
+            self._objects_read = (path, mtime, world_objects.scan(self.lists.save_dir, self.bosses_world))
+        return self._objects_read[2]
+
     def _meta(self, key: str, value=None):
         import community
         if not self.db_path:
@@ -3200,6 +3219,31 @@ class AdminBot:
                 when = {}
             await it.response.send_message(embed=discord.Embed.from_dict(
                 bosses.render(keys, bot.server_name, when)))
+
+        @muninn.command(name="portals", description="Portals in the world: which are connected, which go nowhere")
+        async def portals_cmd(it: discord.Interaction):
+            import world_objects
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)
+            if found is None:
+                await it.followup.send("I can't find the world save (`save_dir`/worlds_local).")
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(
+                world_objects.render_portals(found["portals"], bot.server_name)),
+                allowed_mentions=discord.AllowedMentions.none())
+
+        @muninn.command(name="tombstones", description="Tombstones still lying out there: whose, since when, where")
+        async def tombstones_cmd(it: discord.Interaction):
+            import bosses
+            import world_objects
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)
+            if found is None:
+                await it.followup.send("I can't find the world save (`save_dir`/worlds_local).")
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(
+                world_objects.render_tombstones(found["tombstones"], bosses.day_of, bot.server_name)),
+                allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="uptime", description="How much the server was up: this week, 30 days, restarts")
         async def uptime_cmd(it: discord.Interaction):
