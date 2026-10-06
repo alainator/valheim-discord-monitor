@@ -389,6 +389,50 @@ TREE_VARIETIES = {"Fir": 193, "Oak": 194, "Pine": 195, "Ashlands": 196,
 
 SUPPORTED_VERSION = 46
 
+# Where each platform keeps the character file, for /valheim progress with no file attached.
+# key -> (button label, emoji, guide text in Discord markdown)
+FIND_GUIDES = {
+    "windows": ("Windows", "🪟", (
+        "Your character is a file named after them, e.g. `Ingrid.fch`.\n\n"
+        "1. Press **Win+R**, paste this and press Enter:\n"
+        "```\n%USERPROFILE%\\AppData\\LocalLow\\IronGate\\Valheim\\characters_local\n```\n"
+        "2. Your `.fch` is in that folder. Not there? Try `…\\Valheim\\characters` (older or Steam Cloud "
+        "characters), or the Steam Cloud copy in "
+        "`C:\\Program Files (x86)\\Steam\\userdata\\<number>\\892970\\remote\\characters`.\n"
+        "3. In Discord, run `/valheim progress`, click **save** and pick the file "
+        "(or drag it from File Explorer onto the box).")),
+    "linux": ("Linux", "🐧", (
+        "Your character is a file named after them, e.g. `Ingrid.fch`. The quickest way to find it, in a terminal:"
+        "\n```\nfind ~ -name \"*.fch\" 2>/dev/null\n```\n"
+        "Usually one of these:\n"
+        "• **Native Linux version** (Steam's default): `~/.config/unity3d/IronGate/Valheim/characters_local/`\n"
+        "• **Proton** (the Windows version): `~/.local/share/Steam/steamapps/compatdata/892970/pfx/drive_c/users/"
+        "steamuser/AppData/LocalLow/IronGate/Valheim/characters_local/`\n"
+        "• **Steam Cloud**: `~/.local/share/Steam/userdata/<number>/892970/remote/characters/`\n"
+        "• **Flatpak Steam**: the same, under `~/.var/app/com.valvesoftware.Steam/`\n\n"
+        "Those folders are hidden: in Discord's file picker press **Ctrl+H** (show hidden) or **Ctrl+L** and paste "
+        "the path, or copy the file to your Desktop first.")),
+    "deck": ("Steam Deck", "🎮", (
+        "1. Switch to **Desktop Mode** (Steam button → Power → Switch to Desktop).\n"
+        "2. Open **Dolphin** (the file manager), press **Ctrl+H** to show hidden folders, and go to\n"
+        "```\n/home/deck/.config/unity3d/IronGate/Valheim/characters_local/\n```\n"
+        "3. Your character is the `.fch` named after them, e.g. `Ingrid.fch`. Open Discord in desktop mode (or in "
+        "a browser) and upload it with `/valheim progress`. Using Proton instead? See the Linux guide.")),
+    "mac": ("macOS", "🍎", (
+        "1. In Finder press **Cmd+Shift+G**, paste this and press Enter:\n"
+        "```\n~/Library/Application Support/IronGate/Valheim/characters_local\n```\n"
+        "2. Your character is the `.fch` named after them, e.g. `Ingrid.fch`. Not there? Try "
+        "`…/Valheim/characters`.\n"
+        "3. Upload it with `/valheim progress` (drag it from Finder onto the **save** box).")),
+    "console": ("Xbox / Game Pass", "🎯", (
+        "Console players can't get at their character file, so this only works on PC.\n\n"
+        "The **Game Pass / Microsoft Store** PC version stores characters in an encrypted container with random "
+        "file names, not as a `.fch`, so it can't be read either. **Steam** (Windows, Linux, Steam Deck) and "
+        "**macOS** work.")),
+}
+FIND_TIPS = ("**Before you upload:** quit to the main menu or exit the game, so the file has your latest progress. "
+             "Upload `Name.fch`, not `Name.fch.old` (that's the previous save).")
+
 
 class Reader:
     def __init__(self, data, pos=0):

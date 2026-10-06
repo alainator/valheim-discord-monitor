@@ -1239,11 +1239,26 @@ Valheim's achievements ("craft every item", "kill every creature", "catch every 
 in every way"…) are tracked in each player's **character file**, which lives on their own
 PC, not on the server. So players upload it:
 
-1. Find your character file. On Windows it's
-   `%USERPROFILE%\AppData\LocalLow\IronGate\Valheim\characters_local\<name>.fch`
-   (Steam Cloud characters are under `…\Valheim\characters`). Paste that path into File
-   Explorer's address bar to open the folder.
+1. Find your character file, `YourName.fch` (see the table below). **Not sure? Run
+   `/valheim progress` without a file**: the bot replies with a guide and a button per
+   platform (Windows, Linux, Steam Deck, macOS, Xbox / Game Pass), so players never need
+   this page.
 2. In Discord: `/valheim progress save:` and pick the file.
+
+| Platform | Where the character file is |
+|---|---|
+| **Windows** | `%USERPROFILE%\AppData\LocalLow\IronGate\Valheim\characters_local\` (paste it into Win+R). Older or Steam Cloud characters: `…\Valheim\characters\`, or `C:\Program Files (x86)\Steam\userdata\<number>\892970\remote\characters\` |
+| **Linux, native** (Steam's default) | `~/.config/unity3d/IronGate/Valheim/characters_local/` |
+| **Linux, Proton** | `~/.local/share/Steam/steamapps/compatdata/892970/pfx/drive_c/users/steamuser/AppData/LocalLow/IronGate/Valheim/characters_local/` |
+| **Linux, Steam Cloud** | `~/.local/share/Steam/userdata/<number>/892970/remote/characters/` |
+| **Linux, Flatpak Steam** | the same paths under `~/.var/app/com.valvesoftware.Steam/` |
+| **Steam Deck** | Desktop Mode → Dolphin (Ctrl+H for hidden folders) → `/home/deck/.config/unity3d/IronGate/Valheim/characters_local/` |
+| **macOS** | `~/Library/Application Support/IronGate/Valheim/characters_local/` (Finder: Cmd+Shift+G) |
+| **Xbox, Game Pass PC** | Not readable: consoles don't expose the file, and the Game Pass PC version keeps characters in an encrypted container instead of a `.fch` |
+
+On Linux, `find ~ -name "*.fch" 2>/dev/null` finds it wherever it is. The folders starting
+with `.` are hidden: in Discord's file picker press **Ctrl+H** (show hidden) or **Ctrl+L**
+and paste the path, or copy the file to your Desktop first.
 
 Only you see the answer:
 - **A summary** with one line per list, its count (e.g. *Items crafted: 312/414*) and the first
@@ -1270,7 +1285,10 @@ Only you see the answer:
 - **Nothing is kept.** The bot reads the file, answers, and forgets it.
 - **Upload the latest save.** The game writes the file when you quit or save, so play first,
   then upload. Don't upload `.fch.old`, which is the previous save.
-- **Console players** can't reach their character files, so this is for PC players.
+- **Console and Game Pass players** can't get a readable character file, so this works for
+  Steam (Windows, Linux, Steam Deck) and macOS.
+- **Uploaded the wrong file** (a `.fch.old`, a world file, a screenshot)? The bot says so and
+  shows the guide.
 - The lists were built from Valheim 1.0.16 (Deep North included) and character files version
   46. After a big game update, some new items may show up as "in save but not in the
   built-in lists" until the lists are updated.
