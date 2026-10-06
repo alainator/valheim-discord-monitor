@@ -36,7 +36,7 @@ class BotCommandsTest(unittest.TestCase):
             groups = asyncio.run(build())
         self.assertEqual({k: v[0] for k, v in groups.items()}, {
             "valheim": sorted(["join", "map", "link", "unlink", "notify", "request-access", "progress",
-                              "patch-notes"]),
+                              "patch-notes", "wiki"]),
             "muninn": sorted(["stats", "top", "titles", "online", "compare", "uptime", "bosses", "honors",
                               "progress"]),
             "warcouncil": ["bounties", "plan"],

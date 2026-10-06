@@ -62,6 +62,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   ([bounties](#bounties), [join-to-create](#join-to-create-voice-channels)).
 - **Restore a world backup** from Discord with `/odin restore`, undoable
   ([restore](#restoring-a-backup-odin-restore)).
+- **`/valheim wiki`:** a card from the Valheim Wiki for any item, creature, boss or biome,
+  with the stats that matter ([wiki lookup](#wiki-lookup-valheim-wiki)).
 - **Valheim patch notes** in #runestone whenever Iron Gate releases a patch, and
   `/valheim patch-notes` for the latest. No setup ([patch notes](#valheim-patch-notes)).
 
@@ -79,6 +81,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/valheim wiki`:** look up any item, creature, boss, biome, building or dungeon on the
+  Valheim Wiki without leaving Discord: a card with the summary, the key stats (health,
+  weaknesses, drops, materials, food values…) and a link. Suggestions appear as you type
+  ([wiki lookup](#wiki-lookup-valheim-wiki)).
 - **The Day channel is right from the start:** ☀️ Day now comes from the world save too, so it
   shows the real day as soon as the bot starts, instead of "after the next sleep", and keeps
   counting on nights nobody sleeps through ([stat channels](#stat-channels)).
@@ -236,7 +242,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
-  [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
+  [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
@@ -638,7 +644,7 @@ The commands are in four groups, one per place they're used:
 
 | Group | Commands | Where |
 |---|---|---|
-| **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes` | Anywhere: the replies are private |
+| **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
 | **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors`, `progress` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
@@ -701,6 +707,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/warcouncil bounties` | Anyone | Open bounties with their rewards and deadlines, and the top bounty hunters | Stats database |
 | `/valheim progress [save] [only] [share] [board]` | Anyone | Upload your character's `.fch` to see the [achievements](#achievement-progress-valheim-progress) you're still missing; `share` posts a summary; `board:True` puts your counts on `/muninn progress` (`False` takes them off). Without a file: a guide to finding it, with a button per platform | — (the board: stats database) |
 | `/valheim map` | Anyone | World seed and a map link (spoilers; only the asker sees it) | `save_dir` |
+| `/valheim wiki <page> [share]` | Anyone | A card from the Valheim Wiki: summary, key stats and a link ([wiki lookup](#wiki-lookup-valheim-wiki)); only the asker sees it unless `share` | Internet access to the wiki |
 | `/valheim patch-notes` | Anyone | The latest Valheim [patch notes](#valheim-patch-notes) from Steam; only the asker sees them | Internet access to Steam |
 | `/odin permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
 | `/odin ban <id>` | Admin | Ban, and remove from the permitted list | `save_dir` |
@@ -1145,6 +1152,44 @@ Read the full patch notes on Steam
 ```json
 "patch_notes": { "enabled": true, "channel_id": "", "public_test": false }
 ```
+
+### Wiki lookup: `/valheim wiki`
+
+`/valheim wiki Draugr` answers with a card from the [Valheim Wiki](https://valheim.fandom.com),
+in any channel, so nobody has to alt-tab mid-fight:
+
+```
+📖 Draugr
+Draugr are aggressive creatures found in Swamps or in Draugr Villages, Sunken Crypts, and
+sometimes towers in the Mountain. …
+🗺️ Found in: Swamp        ❤️ Health: 100 / 200 / 300 (0–2★)
+⚔️ Weaknesses: Resistant to: Fire · Immune to: Poison
+🎁 Drops: Draugr trophy, Entrails
+Read more on the Valheim Wiki
+```
+
+What's on the card comes from the page's infobox, the stats table at the top of each wiki
+page, so it depends on the kind of page:
+
+| Page | Shows |
+|---|---|
+| Creatures and bosses | Biome, health per star level, weaknesses and resistances, drops, summoning item, tameable |
+| Items and food | Where it's made, materials, health / stamina / eitr, duration, effect, weight, stack, whether it goes through portals |
+| Weapons and armor | Damage or armor, materials, block, station level |
+| Buildings | Materials, durability, size |
+| Biomes | Boss, hostile and passive creatures, resources, dungeons, NPCs |
+| Dungeons and places | Where they are, what's inside, resources |
+
+Pages without an infobox get the summary, the picture and the link.
+
+- **Suggestions as you type** come from the wiki's search. Pick one, or type a name and the
+  best match is used.
+- **Only you see it.** `share:True` posts it in the channel.
+- **Live, not built in:** nothing goes stale when the game is patched, but the bot needs to
+  reach `valheim.fandom.com`. Answers are kept for 6 hours.
+- **Credit:** the wiki's text is CC BY-SA, so every card names the Valheim Wiki and links
+  the page.
+- **Turn it off** with `"wiki": false` in the `admin_bot` block.
 
 ### Players & community
 
@@ -1663,6 +1708,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
 | Mímir has a holder but nobody got the role | The leading character isn't linked | `/valheim link <character>`; the role follows within a minute |
+| `/valheim wiki` says it couldn't reach the wiki, or shows no suggestions | No internet from the container, or the wiki is slow (suggestions give up after 2.5 s) | Check the container's network; type the full name and press Enter |
 | No patch notes after a Valheim patch | The first check only remembers what's out; or the bot can't reach Steam (log: `patch notes check failed`); or it can't post in #runestone | Wait for the next patch; allow outbound HTTPS to `api.steampowered.com`; give the bot Send Messages and Embed Links in #runestone, or set `patch_notes.channel_id` |
 | `/valheim patch-notes` says it couldn't reach Steam | No internet from the container, or Steam is down | Check the container's network; try again later |
 | Bot offline; no `admin_bot` line in the log, and the `Monitoring …` line doesn't end in `; admin bot on` | The monitor didn't see `admin_bot.enabled: true`: a config edit made after the container started, or the old code | `git pull`, then `docker compose up -d --build --force-recreate` |
@@ -2347,6 +2393,7 @@ or run it in a terminal.
 | `discord.digest_seconds` | 0 | Group joins and leaves within this many seconds into one post. |
 | `admin_bot.announce_channel_id` | #runestone | The [rules channel](#the-rules-channel-runestone) for `/odin rules`, `/odin announce`, news and [patch notes](#valheim-patch-notes). |
 | `admin_bot.runestone_news` | false | Also post Valheim updates, restores and boss kills in the rules channel. |
+| `admin_bot.wiki` | true | `/valheim wiki` lookups on the [Valheim Wiki](#wiki-lookup-valheim-wiki); `false` turns it off. |
 | `admin_bot.patch_notes` | `{"enabled": true}` | Post Valheim [patch notes](#valheim-patch-notes) from Steam. `channel_id`: another channel than #runestone. `public_test`: public test patches too. `false` turns it off. |
 | `admin_bot.voice_lobby` | — | `true` or `{"name", "template", "limit"}`: [join-to-create voice](#join-to-create-voice-channels). |
 | `admin_bot.bounties.channel_id` | #war-council | Where `/odin bounty` posts. |
@@ -2515,6 +2562,8 @@ Added here:
   title and "finished a list" posts.
 - **Patch notes:** Iron Gate's patch notes from Steam's news feed, posted in #runestone and
   shown by `/valheim patch-notes`.
+- **Wiki lookup:** `/valheim wiki` cards from the Valheim Wiki's infoboxes, with suggestions
+  as you type.
 - **Honors:** 16 built-in roles for deeds the log can't see, custom ones, and an
   admin-adopted role managed by the bot; given directly, by poll, or as a bounty prize.
 - **More community:** bounties with the Skadi role, join-to-create voice channels,
