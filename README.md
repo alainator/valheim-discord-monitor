@@ -1585,6 +1585,28 @@ way. The map zooms to where the deaths are. Underneath, the worst spots:
 - **Hotspots** group deaths in 250 m squares.
 - Kept in the stats database (`death_spots`), so it survives restarts and updates.
 
+**Reading the map:**
+
+| Mark | Means |
+|---|---|
+| 🔴 Red dot | One tombstone |
+| ⭕ Red circle with a number | One of the 5 worst 250 m squares, and how many died there; bigger means more |
+| 🟣 Purple diamond | A portal, with its name (names that would overlap are left off) |
+| 🟢 Green ring | The start (the middle of the world) |
+| Grid | Map coordinates every 500, 1000 or 2000 m depending on the zoom; x goes east, z north |
+
+**Good to know:**
+- **Fewer than `/muninn stats` says:** the stats count every death in the log; the map only
+  has deaths whose tombstone lasted until a world save. The difference is mostly quick corpse
+  runs.
+- **Deaths with nothing to drop** (an empty inventory) leave no tombstone, so they aren't on
+  the map either.
+- **After `/odin restore`**, tombstones that come back with the restored world are already
+  recorded and aren't counted twice.
+- **Starting over:** delete the rows from `death_spots` in the stats database, e.g. after
+  switching worlds.
+- **Everyone in #🪶┃muninns-roost sees it,** including where people died, near bases too.
+
 ### Ships and tames
 
 Two more things read from the same world save, with no setup:
