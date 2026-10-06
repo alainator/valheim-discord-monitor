@@ -164,7 +164,7 @@ WELCOME_DM = ("👋 Welcome to **{guild}**, {member}! We play Valheim on **{serv
               "See you in the tenth world.")
 
 # Huginn's posts the bot reacts to, so people can react along.
-REACTIONS = {"honor": "🎉", "boss": "🏆", "raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
+REACTIONS = {"patch_notes": "🛠️", "honor": "🎉", "boss": "🏆", "raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
              "weekly_recap": "📜", "version_mismatch": "⚠️"}
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -505,6 +505,15 @@ class AdminBot:
         ch = str(cfg.get("announce_channel_id", ""))
         self.runestone_channel = int(ch) if ch.isdigit() else None
         self.runestone_news = bool(cfg.get("runestone_news", False))
+        # Valheim patch notes from Steam (patch_notes.py), posted in #runestone when Iron Gate
+        # releases a patch. true/false, or {"enabled", "channel_id", "public_test"}.
+        pn = cfg.get("patch_notes", True)
+        pn = {"enabled": pn} if isinstance(pn, bool) else pn if isinstance(pn, dict) else {}
+        self.patch_notes_on = bool(pn.get("enabled", True))
+        ch = str(pn.get("channel_id", ""))
+        self.patch_channel = int(ch) if ch.isdigit() else None
+        self.patch_public_test = bool(pn.get("public_test", False))
+        self._patch_task = None
         # Bounties: /odin bounty posts a challenge; whoever an admin confirms gets a role.
         bc = cfg.get("bounties") or {}
         ch = str(bc.get("channel_id", ""))
@@ -634,6 +643,8 @@ class AdminBot:
             return                            # the rest need the database from attach()
         if self.db_path and self._plan_task is None:
             self._plan_task = asyncio.ensure_future(self._plan_loop())
+        if self.patch_notes_on and self._patch_task is None:
+            self._patch_task = asyncio.ensure_future(self._patch_loop())
         if self.bosses_on and self.lists.save_dir and self._boss_task is None:
             self._boss_task = asyncio.ensure_future(self._boss_loop())
         if self.titles_on and self._titles_task is None:
@@ -2318,6 +2329,66 @@ class AdminBot:
         if self.tidy_hours > 0 and it.message:
             self._queue_tidy(it.message.channel.id, it.message.id)
 
+    # -- Valheim patch notes --------------------------------------------------------
+    async def _check_patches(self, items: Optional[list] = None) -> list:
+        """Post patch notes Iron Gate published since the last check, oldest first. The first
+        check only remembers what's there, so installing the bot doesn't repost old patches.
+        Returns the posts it made."""
+        import patch_notes
+        if items is None:
+            items = await asyncio.to_thread(patch_notes.fetch)
+        raw = self._meta("patch:seen")
+        try:
+            seen = set(json.loads(raw)) if raw else set()
+        except ValueError:
+            seen = set()
+        new = patch_notes.new_patches(items, seen, self.patch_public_test)
+        if raw is None:
+            log.info("admin_bot: patch notes: the latest is %s; new ones will be posted",
+                     next((i.get("title") for i in items if patch_notes.is_patch(i, self.patch_public_test)), "none"))
+            new = []
+        posted = []
+        for item in new:
+            if await self._post_patch(patch_notes.embed(item)):
+                posted.append(item)
+            else:
+                break                         # try again next time, keeping the order
+        seen |= {str(i.get("gid")) for i in (items if raw is None else posted)}
+        self._meta("patch:seen", json.dumps(sorted(seen, key=lambda g: int(g) if g.isdigit() else 0)[-100:]))
+        return posted
+
+    async def _post_patch(self, embed: dict) -> bool:
+        """patch_notes.channel_id, else #runestone, else Huginn's feed. True once it's out."""
+        import discord
+        channel = None
+        if self.patch_channel:
+            try:
+                channel = self.client.get_channel(self.patch_channel) or await self.client.fetch_channel(self.patch_channel)
+            except discord.HTTPException as e:
+                log.warning("admin_bot: patch_notes.channel_id %s: %s", self.patch_channel, e)
+        channel = channel or await self._runestone()
+        if channel is not None:
+            try:
+                await channel.send(embed=discord.Embed.from_dict(embed), allowed_mentions=discord.AllowedMentions.none())
+                return True
+            except discord.HTTPException as e:
+                log.warning("admin_bot: couldn't post patch notes in #%s: %s", getattr(channel, "name", "?"), e)
+                return False
+        if self.post_embed:
+            return bool(await asyncio.get_running_loop().run_in_executor(
+                None, lambda: self.post_embed(embed, "patch_notes")))
+        return False
+
+    async def _patch_loop(self) -> None:
+        """Check Steam's news feed every hour."""
+        await asyncio.sleep(60)
+        while True:
+            try:
+                await self._check_patches()
+            except Exception as e:  # noqa: BLE001  (Steam down, no network)
+                log.info("admin_bot: patch notes check failed: %s", e)
+            await asyncio.sleep(3600)
+
     # -- the rules channel (#runestone) -----------------------------------------
     async def _runestone(self):
         """The rules/announcements channel: announce_channel_id, else #runestone from
@@ -2825,7 +2896,8 @@ class AdminBot:
         # Server Settings → Integrations (Discord only does that per top-level command):
         #   /valheim     anywhere (private replies)   /muninn     stats, in #muninns-roost
         #   /warcouncil  game nights, #war-council    /odin       admins; hidden from members
-        valheim = app_commands.Group(name="valheim", description="Join the Valheim server: join code, map, link, notify")
+        valheim = app_commands.Group(name="valheim",
+                                     description="Join the Valheim server: join code, map, link, notify, patch notes")
         muninn = app_commands.Group(name="muninn", description="Ask Muninn: stats, leaderboards, titles, who's online")
         warcouncil = app_commands.Group(name="warcouncil", description="Plan raids and game nights")
         odin = app_commands.Group(name="odin", description="Server admin: access lists, restarts, settings, setup",
@@ -3303,6 +3375,22 @@ class AdminBot:
             await it.response.send_message(
                 f"🗺️ **{world}**: seed `{seed}`\n[Open the world map]({community.map_url(seed)}): "
                 "**spoilers**, it shows the whole world, including places nobody has found yet.", ephemeral=True)
+
+        @valheim.command(name="patch-notes", description="What changed in the latest Valheim patch")
+        async def patch_notes_(it: discord.Interaction):
+            import patch_notes
+            await it.response.defer(ephemeral=True)
+            try:
+                items = await asyncio.to_thread(patch_notes.fetch)
+            except Exception as e:  # noqa: BLE001
+                log.info("admin_bot: /valheim patch-notes: %s", e)
+                await it.followup.send("Couldn't reach Steam's news feed just now. Try again in a bit.", ephemeral=True)
+                return
+            latest = next((i for i in items if patch_notes.is_patch(i, bot.patch_public_test)), None)
+            if latest is None:
+                await it.followup.send("No patch notes in Steam's recent Valheim news.", ephemeral=True)
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(patch_notes.embed(latest)), ephemeral=True)
 
         @valheim.command(name="join", description="How to join the Valheim server: join code, address, password")
         async def join(it: discord.Interaction):

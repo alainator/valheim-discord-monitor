@@ -59,6 +59,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   ([bounties](#bounties), [join-to-create](#join-to-create-voice-channels)).
 - **Restore a world backup** from Discord with `/odin restore`, undoable
   ([restore](#restoring-a-backup-odin-restore)).
+- **Valheim patch notes** in #runestone whenever Iron Gate releases a patch, and
+  `/valheim patch-notes` for the latest. No setup ([patch notes](#valheim-patch-notes)).
 
 And without the bot:
 - **Raid alerts, version-mismatch alerts, session summaries, first-visit welcomes,
@@ -74,6 +76,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Valheim patch notes:** when Iron Gate releases a patch, the bot posts its notes in
+  #runestone (formatted, with a link to the full notes on Steam), and `/valheim patch-notes`
+  shows the latest one to anyone. On by default; it starts with the next patch
+  ([patch notes](#valheim-patch-notes)).
 - **Everything stays in step:** at each start the bot updates the channel topics it set
   (now listing every `/muninn` and `/warcouncil` command), the channel guide and the pinned
   command guides. The Hall of Champions gains **Óðr** (who's away) and **Skadi** (this week's
@@ -214,7 +220,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
-  [Achievement progress](#achievement-progress-valheim-progress) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
+  [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
@@ -615,7 +621,7 @@ The commands are in four groups, one per place they're used:
 
 | Group | Commands | Where |
 |---|---|---|
-| **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress` | Anywhere: the replies are private |
+| **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes` | Anywhere: the replies are private |
 | **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
@@ -677,6 +683,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/warcouncil bounties` | Anyone | Open bounties with their rewards and deadlines, and the top bounty hunters | Stats database |
 | `/valheim progress [save] [only] [share]` | Anyone | Upload your character's `.fch` to see the [achievements](#achievement-progress-valheim-progress) you're still missing; `share` posts a summary. Without a file: a guide to finding it, with a button per platform | — |
 | `/valheim map` | Anyone | World seed and a map link (spoilers; only the asker sees it) | `save_dir` |
+| `/valheim patch-notes` | Anyone | The latest Valheim [patch notes](#valheim-patch-notes) from Steam; only the asker sees them | Internet access to Steam |
 | `/odin permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
 | `/odin ban <id>` | Admin | Ban, and remove from the permitted list | `save_dir` |
 | `/odin unban <id>` / `unpermit <id>` | Admin | Remove from one list | `save_dir` |
@@ -1070,7 +1077,31 @@ Messages** to pin the guide; without them you're told what to do by hand.
 - **Big news, optionally:** with `"runestone_news": true`, a Valheim update being installed,
   a world restore and each boss kill are also posted here, so they don't scroll away in
   #huginns-watch. Restart countdowns and joins stay in #huginns-watch.
+- **Valheim patch notes** are posted here when Iron Gate releases a patch
+  ([patch notes](#valheim-patch-notes)).
 - Another channel instead: `"announce_channel_id": "<channel id>"`.
+
+### Valheim patch notes
+
+When Iron Gate releases a patch, the bot posts its notes in #runestone: the title, the
+notes turned into Discord formatting (headings, bullets, links), cut to fit with a
+**Read the full patch notes on Steam** link. Anyone can run `/valheim patch-notes` to see the
+latest patch privately, in any channel.
+
+- **Where it comes from:** Steam's public news feed for Valheim, checked every hour. Iron
+  Gate tags its patch posts as patch notes; other news (dev blogs, merch) is skipped. No API
+  key or mod needed, but the bot needs to reach `api.steampowered.com`.
+- **Nothing old is reposted:** the first check only remembers the patches already out, so
+  the first post is the next patch.
+- **Where it posts:** `patch_notes.channel_id` if set, else #runestone
+  (`announce_channel_id` or the one `/odin setup` made), else Huginn's feed.
+- **Public test patches** are skipped, since they don't reach a server on the normal
+  branch. `"public_test": true` posts them too, marked 🧪.
+- **Turn it off** with `"patch_notes": false` in the `admin_bot` block.
+
+```json
+"patch_notes": { "enabled": true, "channel_id": "", "public_test": false }
+```
 
 ### Players & community
 
@@ -1530,6 +1561,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| No patch notes after a Valheim patch | The first check only remembers what's out; or the bot can't reach Steam (log: `patch notes check failed`); or it can't post in #runestone | Wait for the next patch; allow outbound HTTPS to `api.steampowered.com`; give the bot Send Messages and Embed Links in #runestone, or set `patch_notes.channel_id` |
+| `/valheim patch-notes` says it couldn't reach Steam | No internet from the container, or Steam is down | Check the container's network; try again later |
 | Bot offline; no `admin_bot` line in the log, and the `Monitoring …` line doesn't end in `; admin bot on` | The monitor didn't see `admin_bot.enabled: true`: a config edit made after the container started, or the old code | `git pull`, then `docker compose up -d --build --force-recreate` |
 | `Expecting property name enclosed in double quotes` (or other JSON errors) | Usually a comma after the last item in a block, e.g. `},` right before the final `}` | Remove that comma; check with `python3 -m json.tool config.json` |
 | `admin_bot stopped: Improper token has been passed.` | The token Discord got is wrong: an old token after a reset, the Client Secret instead of the bot token, or placeholder text left in `.env` | See the length check below |
@@ -2180,6 +2213,7 @@ or run it in a terminal.
 | `discord.digest_seconds` | 0 | Group joins and leaves within this many seconds into one post. |
 | `admin_bot.announce_channel_id` | #runestone | The [rules channel](#the-rules-channel-runestone) for `/odin rules`, `/odin announce` and news. |
 | `admin_bot.runestone_news` | false | Also post Valheim updates, restores and boss kills in the rules channel. |
+| `admin_bot.patch_notes` | `{"enabled": true}` | Post Valheim [patch notes](#valheim-patch-notes) from Steam. `channel_id`: another channel than #runestone. `public_test`: public test patches too. `false` turns it off. |
 | `admin_bot.voice_lobby` | — | `true` or `{"name", "template", "limit"}`: [join-to-create voice](#join-to-create-voice-channels). |
 | `admin_bot.bounties.channel_id` | #war-council | Where `/odin bounty` posts. |
 | `admin_bot.bounties.role` / `role_days` | Skadi / 7 | The bounty winner's role and how long they keep it; `false` for no role. |
@@ -2343,6 +2377,8 @@ Added here:
 - **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and
   lists what's missing for each achievement, with a per-platform guide to finding the file;
   `fch_progress.py` also runs on its own.
+- **Patch notes:** Iron Gate's patch notes from Steam's news feed, posted in #runestone and
+  shown by `/valheim patch-notes`.
 - **Honors:** 16 built-in roles for deeds the log can't see, custom ones, and an
   admin-adopted role managed by the bot; given directly, by poll, or as a bounty prize.
 - **More community:** bounties with the Skadi role, join-to-create voice channels,

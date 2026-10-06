@@ -28,7 +28,7 @@ from typing import Optional
 TEMPLATE = [
     {"key": "gates", "name": "🚪 The Gates", "aliases": ["Information", "Info", "Welcome", "Start Here"],
      "channels": [
-         ("rules", "text", "📜┃runestone", "Rules and announcements. Read before you set sail.",
+         ("rules", "text", "📜┃runestone", "Rules, announcements and Valheim patch notes. Read before you set sail.",
           ["rules", "announcements", "rules-and-info", "info", "server-rules", "news"], {"readonly"}),
          ("welcome", "text", "🚪┃the-gates",
           "New here? /valheim join shows the join code and address. /valheim request-access <character> "
@@ -46,7 +46,7 @@ TEMPLATE = [
           ["builds", "building", "bases", "base-tours", "creations"], set()),
          ("bots", "text", "🪶┃muninns-roost",
           "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses and honors. "
-          "/valheim join, link, notify, map and progress work in any channel.",
+          "/valheim join, link, notify, map, progress and patch-notes work in any channel.",
           ["bot-commands", "bots", "commands", "bot", "bot-spam", "botspam"], set()),
      ]},
     {"key": "wilds", "name": "⚔️ The Wilds", "aliases": ["Gaming", "Valheim", "Game", "Games"],
@@ -86,7 +86,10 @@ TEMPLATE = [
 OLD_TOPICS = {
     "bots": ("Ask Muninn: /valheim stats, top, titles, link, notify, map and more.",
              "Ask Muninn: /muninn stats, top, titles and online. /valheim join, link, notify and map "
-             "work in any channel."),
+             "work in any channel.",
+             "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses and honors. "
+             "/valheim join, link, notify, map and progress work in any channel."),
+    "rules": ("Rules and announcements. Read before you set sail.",),
     "plans": ("Plan raids and game nights with /valheim plan.",
               "Plan raids and game nights with /warcouncil plan."),
     "welcome": ("New here? /valheim join shows the join code and address. /valheim request-access <character> "
