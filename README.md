@@ -79,6 +79,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **The Day channel is right from the start:** ☀️ Day now comes from the world save too, so it
+  shows the real day as soon as the bot starts, instead of "after the next sleep", and keeps
+  counting on nights nobody sleeps through ([stat channels](#stat-channels)).
 - **Streaks and the server's birthday:** `/muninn stats` shows each player's current and best
   play streak (days in a row), `/muninn top streak` ranks the longest streaks, and on the
   day the server turns 100 days old, then every year, Huginn posts a birthday look-back:
@@ -945,7 +948,7 @@ voice channels or categories.
 | `server` | Online / offline and the version; ⬆️ when the updater has found an update |
 | `join_code` | The crossplay join code (known after the first join since the last restart) |
 | `uptime` | Time since the server started |
-| `day` | The in-game day. Valheim logs it when everyone sleeps, so it updates each morning in game |
+| `day` | The in-game day, read from the world save (written every 30 minutes and at shutdown), and from the log when everyone sleeps, whichever is further along. Needs `save_dir` for the save; without it, it waits for the first sleep |
 | `saved` | The last world save and how long it took |
 | `backup` | When Valheim last made a world backup |
 | `disk` | Free space on the save disk |
@@ -1299,7 +1302,8 @@ folder `/valheim map` uses, so there's nothing to set up:
 
 It reads the newest `_main.<N>.db2` in `worlds_local/<world>/` (Valheim 1.0) or
 `<world>.db` (older servers), never a backup. Options:
-`"bosses": {"enabled": true, "announce": true, "world": "Alheim"}`. `world` is only needed
+`"bosses": {"enabled": true, "announce": true, "world": "Alheim"}`. The ☀️ Day stat channel
+reads the same save, and follows `world` too. `world` is only needed
 with several worlds in the folder (otherwise the most recently saved one is used);
 `"announce": false` keeps the command and channel without the posts.
 
@@ -1654,6 +1658,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | Symptom | Cause | Fix |
 |---|---|---|
 | The server's birthday came on the wrong day, or not at all | It counts from the first visit in the stats database, which can be later than the server's real start; and it needs `milestone` in `events` | Load older logs with `--backfill` ([catching up](#catching-up-on-old-logs)) so the first visit is right |
+| ☀️ Day says "not known yet" | No world save found under `save_dir` (and nobody has slept since the start) | Check `save_dir` points at the folder holding `worlds_local`; with several worlds, set `bosses.world` |
+| ☀️ Day is behind the game by a day | The save is up to 30 minutes old | It catches up at the next save or the next sleep |
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
 | Mímir has a holder but nobody got the role | The leading character isn't linked | `/valheim link <character>`; the role follows within a minute |
@@ -2319,7 +2325,7 @@ or run it in a terminal.
 | `admin_bot.lfg.reminder_minutes` | 15 | Ping game-night signups this long before the start. |
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
 | `admin_bot.bosses.enabled` / `announce` | true / true | [Boss progress](#boss-progress) from the world save; `announce` posts each new kill. |
-| `admin_bot.bosses.world` | the newest | Which world in `worlds_local`, if there are several. |
+| `admin_bot.bosses.world` | the newest | Which world in `worlds_local`, if there are several (for boss progress and the ☀️ Day channel). |
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
 | `admin_bot.map.seed` | "" | Use this seed instead of reading it from the world file. |
 | `admin_bot.link_nickname` | false | `/valheim link` sets the member's server nickname to their character, if they have no nickname yet (needs Manage Nicknames; the server owner's can't be changed). |

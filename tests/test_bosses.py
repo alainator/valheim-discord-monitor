@@ -25,12 +25,12 @@ def keys_blob(keys):
     return b"\x00" * 300 + out + b"\x01\xce/\x00\x00Ab\xe9" * 50
 
 
-def write_db2(folder, n, keys):
+def write_db2(folder, n, keys, seconds=668787.4):
     """A Valheim 1.0 _main.<N>.db2: version 41, the world time, the packed size, then gzip."""
     os.makedirs(folder, exist_ok=True)
     packed = gzip.compress(keys_blob(keys))
     with open(os.path.join(folder, f"_main.{n}.db2"), "wb") as f:
-        f.write(struct.pack("<i", 41) + struct.pack("<d", 668787.4) + struct.pack("<i", len(packed)) + packed)
+        f.write(struct.pack("<i", 41) + struct.pack("<d", seconds) + struct.pack("<i", len(packed)) + packed)
 
 
 REAL = ["defeated_eikthyr", "defeated_gdking", "killed_surtling", "defeated_writhan", "defeated_bonemass"]
@@ -103,6 +103,60 @@ class SaveTest(unittest.TestCase):
 
 
 @unittest.skipIf(discord is None, "discord.py not installed")
+class DayTest(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.worlds = os.path.join(self.d, "worlds_local")
+
+    def test_real_header(self):
+        """The first 16 bytes of a real Alheim _main.1029.db2."""
+        os.makedirs(os.path.join(self.worlds, "Alheim"))
+        with open(os.path.join(self.worlds, "Alheim", "_main.1029.db2"), "wb") as f:
+            f.write(bytes.fromhex("29000000 4023b8c3e6702441 c46a0200 1f8b0800".replace(" ", "")))
+        self.assertAlmostEqual(bosses.world_time(self.d), 669811.38, places=2)
+        self.assertEqual(bosses.day_of(bosses.world_time(self.d)), 372)
+
+    def test_days(self):
+        self.assertEqual(bosses.day_of(2040), 1)                  # a new world starts on day 1
+        self.assertEqual(bosses.day_of(3599.9), 1)
+        self.assertEqual(bosses.day_of(3600), 2)
+        self.assertEqual(bosses.day_of(25920.5), 14)              # the night before day 15
+
+    def test_older_db_and_junk(self):
+        os.makedirs(self.worlds)
+        path = os.path.join(self.worlds, "Alheim.db")
+        with open(path, "wb") as f:
+            f.write(struct.pack("<id", 33, 90000.0) + b"\x00" * 64)
+        self.assertEqual(bosses.day_of(bosses.world_time(self.d)), 50)
+        for junk in (b"", b"\x01\x02", struct.pack("<id", -5, 1.0), struct.pack("<id", 41, float("nan"))):
+            with open(path, "wb") as f:
+                f.write(junk)
+            self.assertIsNone(bosses.world_time(self.d))
+        self.assertIsNone(bosses.world_time(tempfile.mkdtemp()))   # no save at all
+
+
+@unittest.skipIf(discord is None, "discord.py not installed")
+class DayChannelTest(unittest.TestCase):
+    def test_save_day_and_the_log_day(self):
+        import admin_bot
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            world = os.path.join(d, "worlds_local", "Alheim")
+            write_db2(world, 1, [], seconds=372 * 1800 + 60)
+            b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "Alheim")
+            snap = {}
+            b.live = SimpleNamespace(snapshot=lambda: dict(snap))
+            self.assertEqual(b._stat_name("day"), "☀️ Day 372")             # no sleep logged yet: the save
+            snap["day"] = 373                                                # everyone slept since the save
+            self.assertEqual(b._stat_name("day"), "☀️ Day 373")
+            write_db2(world, 2, [], seconds=375 * 1800)                      # a newer save, further along
+            self.assertEqual(b._stat_name("day"), "☀️ Day 375")
+        with tempfile.TemporaryDirectory() as d:                             # no save: the log, or nothing
+            b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "S")
+            b.live = SimpleNamespace(snapshot=lambda: {})
+            self.assertEqual(b._stat_name("day"), "☀️ Day: not known yet")
+
+
 class BotTest(unittest.TestCase):
     def test_first_check_is_quiet_then_new_kills_are_posted(self):
         import admin_bot

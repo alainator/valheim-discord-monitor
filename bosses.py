@@ -1,10 +1,13 @@
 """
-Boss progress, read from the world save. No mods: Valheim keeps the world's "global keys"
+Boss progress and the in-game day, read from the world save. No mods: Valheim keeps the world's "global keys"
 (defeated_eikthyr, defeated_gdking, …) in the save, and those say which bosses are down.
 
   * Valheim 1.0: worlds_local/<world>/_main.<N>.db2, a small header and then a gzip
     stream; the keys are plain strings inside it. The highest <N> is the newest save.
   * Older servers: worlds_local/<world>.db, uncompressed, keys as plain strings.
+
+Both formats start with the world version (int32) and the game clock in seconds (float64),
+so the day is known without unpacking anything; a day lasts DAY_SECONDS.
 
 Plain functions, testable without a server.
 """
@@ -12,8 +15,10 @@ Plain functions, testable without a server.
 from __future__ import annotations
 
 import glob
+import math
 import os
 import re
+import struct
 import zlib
 from typing import Optional
 
@@ -33,6 +38,7 @@ NAMES = {b[0]: b[1] for b in BOSSES}
 # Kall's exact key isn't known yet, so any defeated_* key naming Kall or Fimbul counts as him.
 RE_KALL = re.compile(rb"defeated_[a-z0-9_]{0,24}?(?:kall|fimbul)")
 GZIP = b"\x1f\x8b\x08"
+DAY_SECONDS = 1800                  # Valheim's day length (EnvMan.m_dayLengthSec)
 
 
 def name_of(key: str) -> str:
@@ -103,6 +109,29 @@ def read_keys(save_dir: str, world: Optional[str] = None) -> Optional[set]:
         if data is None:
             return None
     return _keys_in(data)
+
+
+def world_time(save_dir: str, world: Optional[str] = None) -> Optional[float]:
+    """The game clock (seconds) in the live world's newest save, or None without a readable
+    save. It's written with every save (every 30 minutes and at shutdown)."""
+    path = world_save(save_dir, world)
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as f:
+            head = f.read(12)
+        version, seconds = struct.unpack("<id", head)
+    except (OSError, struct.error):
+        return None
+    if not (0 < version < 1000 and math.isfinite(seconds) and 0 <= seconds < 1e12):
+        return None
+    return seconds
+
+
+def day_of(seconds: float) -> int:
+    """The day number Valheim shows ("Day 142") for a game clock in seconds. A new world
+    starts at 2040 s, on day 1."""
+    return int(seconds // DAY_SECONDS)
 
 
 def progress(keys: set) -> dict:

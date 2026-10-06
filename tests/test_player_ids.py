@@ -56,7 +56,7 @@ class ParserTest(unittest.TestCase):
         live.observe(got[0])
         self.assertEqual(live.snapshot()["day"], 15)
         self.assertEqual(stat_channels.name_for("day", live.snapshot()), "☀️ Day 15")
-        self.assertEqual(stat_channels.name_for("day", {}), "☀️ Day: after the next sleep")
+        self.assertEqual(stat_channels.name_for("day", {}), "☀️ Day: not known yet")
 
     def test_day_is_read_from_the_log_at_start_up(self):
         with tempfile.TemporaryDirectory() as d:

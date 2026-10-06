@@ -478,6 +478,7 @@ class AdminBot:
         self.boss_keys: Optional[set] = None   # last read from the save
         self._boss_task = None
         self._boss_read = (None, 0.0)           # (path, mtime) of the last save read
+        self._day_read = (None, 0.0, None)      # (path, mtime, in-game day) from the save
         # /valheim link sets a member's server nickname to the character (only if they have none).
         self.link_nickname = bool(cfg.get("link_nickname", False))
         # Commands used in the wrong channel get a private "run it in #…" instead. true: the
@@ -1927,11 +1928,35 @@ class AdminBot:
             titles["away"] = (self.away_role_name, len(self._away_holders()), self.away_days)
         if self.bounty_role_name:
             titles["bounty_hunter"] = (self.bounty_role_name, self._bounty_hunter_names())
+        snap = self.live.snapshot() if self.live else {}
+        if key == "day":
+            # The log only says the day when everyone sleeps; the save always has it (up to
+            # 30 minutes old). Whichever is further along.
+            saved = self._save_day()
+            if saved and saved > (snap.get("day") or 0):
+                snap = dict(snap, day=saved)
         name = stat_channels.name_for(
-            key, self.live.snapshot() if self.live else {}, db,
+            key, snap, db,
             offset=community.log_clock_offset(db) if db else 0,
             update_waiting=bool(self.updater and self.updater.new), titles=titles)
         return name[:100] if name else None
+
+    def _save_day(self) -> Optional[int]:
+        """The in-game day from the world save, re-read only when the save changes."""
+        import bosses
+        if not self.lists.save_dir:
+            return None
+        path = bosses.world_save(self.lists.save_dir, self.bosses_world)
+        if not path:
+            return None
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            return None
+        if self._day_read[:2] != (path, mtime):
+            seconds = bosses.world_time(self.lists.save_dir, self.bosses_world)
+            self._day_read = (path, mtime, bosses.day_of(seconds) if seconds is not None else None)
+        return self._day_read[2]
 
     def _meta(self, key: str, value=None):
         import community
