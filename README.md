@@ -83,7 +83,7 @@ And without the bot:
   play streak (days in a row), `/muninn top streak` ranks the longest streaks, and on the
   day the server turns 100 days old, then every year, Huginn posts a birthday look-back:
   vikings, hours, deaths, who set sail first and who played most
-  ([milestones](#extras-raids-summaries-milestones-recap-board-backups)).
+  ([streaks and the birthday](#streaks-anniversaries-and-the-servers-birthday)).
 - **Progress board:** `/valheim progress board:True` puts your counts (never the lists) on
   `/muninn progress`, a leaderboard for everything or one list. The leader gets the
   **Mímir** title, and Huginn posts "🎣 Ingrid has caught every fish!" when someone finishes
@@ -239,6 +239,7 @@ And without the bot:
   [Testing](#testing-it) ·
   [Troubleshooting](#troubleshooting)
 - **Extras:** [Raids, summaries, milestones, recap](#extras-raids-summaries-milestones-recap-board-backups) ·
+  [Streaks & the server's birthday](#streaks-anniversaries-and-the-servers-birthday) ·
   [Status board](#status-board) · [Backup copies](#world-backup-copies) ·
   [Restoring a backup](#restoring-a-backup-odin-restore) ·
   [Server health](#server-health) ·
@@ -1748,15 +1749,15 @@ switched on by adding their name to `events` in `config.json`:
 | `version_mismatch` | ⚠️ "Someone tried to join with a **newer** version of Valheim: the server needs an update." (or *older*: they need to update). At most once an hour. | `Network version check, their:41, mine:40` |
 | `session_summary` | Replaces the plain leave message: "**Ingrid** left Alheim after 2h 14m and died 3 times." | the player's join and leave |
 | `welcome` | Replaces the join message on someone's **first ever** visit: "🎉 **Ingrid** arrived for the first time. Welcome, viking!" | stats database |
-| `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths. At login: "**Ingrid** is on a **7-day streak** 🔥" (3, 5, 7, 10, 14, 21, 30… days in a row) or "first set sail here **1 year ago** today 🎂" (100 days, then yearly), at most once a day. The **server's birthday** (100 days after the first visit in the stats database, then yearly), from noon: "🎂 Alheim is 1 year old today!" with vikings, hours, deaths, who set sail first, who played most and the longest streak; also in #runestone with `runestone_news` | stats database |
+| `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths. At login: "**Ingrid** is on a **7-day streak** 🔥" (3, 5, 7, 10, 14, 21, 30… days in a row) or "first set sail here **1 year ago** today 🎂" (100 days, then yearly), at most once a day. The **server's birthday** (100 days after the first visit in the stats database, then yearly), from noon: "🎂 Alheim is 1 year old today!" with vikings, hours, deaths, who set sail first, who played most and the longest streak; also in #runestone with `runestone_news` ([details](#streaks-anniversaries-and-the-servers-birthday)) | stats database |
 | `weekly_recap` | 📜 A weekly embed with a **chart of hours played per day**: top players by time, most deaths, raids, new vikings, total hours, peak online, and exploration ("12 new areas discovered: 3 sunken crypts, 1 fuling village") | stats database, `Placed location` lines |
 | `update` | ✅ "Valheim updated: l-1.0.16 → l-1.0.17" when the server comes back on a new version, plus the [auto-updater](#auto-updates-and-restarts-from-discord)'s "update available" and "installing" posts | `Valheim version:` at boot |
 
 `welcome`, `milestone` and `weekly_recap` need the stats database (`database.path`).
 
 **Reactions:** with the admin bot on, it reacts to some of Huginn's posts so people can join
-in: ⚔️ raids, 👋 welcomes, 🏆 milestones and boss kills, 🏅 achievements, 👑 titles, 📜 the weekly recap, ⚠️
-version mismatches. It needs Add Reactions in that channel.
+in: ⚔️ raids, 👋 welcomes, 🏆 milestones (birthdays too) and boss kills, 🏅 achievements, 👑 titles,
+📜 the weekly recap, 🎉 honors and finished achievement lists, 🛠️ patch notes, ⚠️ version mismatches. It needs Add Reactions in that channel.
 
 **The weekly recap has a chart:** a bar chart of hours played per day, drawn with Pillow
 (included in the Docker image). Without Pillow, the recap is posted without it.
@@ -1771,6 +1772,37 @@ was already online when the monitor started gets a plain leave message.
 - It posts once per week, at or after that hour in the container's time zone (`TZ` in `.env`).
 - A restart doesn't post it twice. A missed day is skipped rather than posted late.
 - Quiet weeks with nobody playing post nothing.
+
+### Streaks, anniversaries and the server's birthday
+
+All from the play history in the stats database, with `milestone` in `events`:
+
+- **A play streak** is the number of days in a row someone started at least one session.
+  Days follow the container's time zone (`TZ` in `.env`), so set it to yours. A streak stays
+  alive until a day ends without playing: not having played yet today doesn't break it.
+- **At login**, Huginn posts "**Ingrid** is on a **7-day streak** 🔥" at 3, 5, 7, 10, 14, 21,
+  30, 50, 75 and 100 days, or "**Ingrid** first set sail here **1 year ago** today 🎂" on the
+  100th day after their first visit and every year after. At most one of these per player per
+  day.
+- **`/muninn stats`** shows the streak: `🔥 Play streak: 4 days now · best 12 days` (just
+  the best when they're not on one).
+- **`/muninn top`** has a **Longest play streak** board: the best streak each player has
+  ever had.
+- **The server's birthday:** on the day the server turns 100 days old, then every year,
+  Huginn posts a look-back from noon (once). It also goes to #runestone with
+  `"runestone_news": true`:
+
+  ```
+  🎂 Alheim is 1 year old today!
+  Skål to everyone who's set sail here. Here's the saga so far:
+  Vikings: 23          Time played: 1204h        Deaths: 812
+  First to set sail: Ingrid, October 6, 2025
+  Most time in-game: Ingrid: 212h     Longest streak: Bjorn: 19 days in a row
+  ```
+
+  The 100-day one is titled "🎂 100 days of Alheim!". The age counts from the **first visit
+  in the stats database**. If the monitor started after the server did, load the older logs
+  with [`--backfill`](#catching-up-on-old-logs) to get the real date.
 
 ### Quiet hours and digests
 
