@@ -45,7 +45,7 @@ TEMPLATE = [
          ("builds", "text", "🔨┃the-forge", "Builds, bases and base tours.",
           ["builds", "building", "bases", "base-tours", "creations"], set()),
          ("bots", "text", "🪶┃muninns-roost",
-          "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses and honors. "
+          "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses, honors and progress. "
           "/valheim join, link, notify, map, progress and patch-notes work in any channel.",
           ["bot-commands", "bots", "commands", "bot", "bot-spam", "botspam"], set()),
      ]},
@@ -88,7 +88,9 @@ OLD_TOPICS = {
              "Ask Muninn: /muninn stats, top, titles and online. /valheim join, link, notify and map "
              "work in any channel.",
              "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses and honors. "
-             "/valheim join, link, notify, map and progress work in any channel."),
+             "/valheim join, link, notify, map and progress work in any channel.",
+             "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses and honors. "
+             "/valheim join, link, notify, map, progress and patch-notes work in any channel."),
     "rules": ("Rules and announcements. Read before you set sail.",),
     "plans": ("Plan raids and game nights with /valheim plan.",
               "Plan raids and game nights with /warcouncil plan."),

@@ -244,6 +244,8 @@ TITLES = {
     "longest": ("Thor", "drank from the sea and lowered it: longest single session", 0x3498DB),
     "achievements": ("Bragi", "sings the great deeds of heroes: most Steam achievements", 0xE67E22),
     "least": ("Hœnir", "the silent god who hardly lifts a finger: least time played", 0x7F8C8D),
+    "progress": ("Mímir", "the wisest, who knows all things: most achievement progress (/muninn progress)",
+                 0x1ABC9C),
 }
 # Hœnir only counts players seen in the last LEAST_ACTIVE_DAYS with at least
 # LEAST_MIN_SECONDS played in all, so it doesn't stick to someone who quit, or who
@@ -262,6 +264,8 @@ _TITLE_SQL = {
     "longest": "SELECT player, MAX(duration_seconds) AS v FROM play_sessions WHERE login_at >= ? GROUP BY player",
     "achievements": "SELECT player, COUNT(*) AS v FROM (" + _STEAM_UNLOCKS.format(since="?") + ") "
                     "WHERE player IS NOT NULL GROUP BY player",
+    # A snapshot from the last upload, so it's the same whatever the period.
+    "progress": "SELECT player, MAX(done) AS v FROM fch_progress WHERE ? IS NOT NULL GROUP BY player",
 }
 
 
@@ -355,7 +359,7 @@ def render_titles(holders: dict, changed: set = frozenset(), period: str = "all"
         if not h:
             lines.append(f"**{role}**: nobody yet\n*{why}*")
             continue
-        value = str(h["v"]) if cat in ("deaths", "sessions", "achievements") else _dur(h["v"])
+        value = str(h["v"]) if cat in ("deaths", "sessions", "achievements", "progress") else _dur(h["v"])
         who = f"<@{h['user_id']}> ({h['player']})" if h.get("user_id") else \
             f"**{h['player']}** (not linked: `/valheim link {h['player']}` to get the role)"
         new = " 🆕" if cat in changed else ""
@@ -513,6 +517,81 @@ def uptime(conn, since: int, until: int) -> dict:
         down += until - t
     span = max(until - since, 1)
     return {"fraction": max(0.0, 1 - down / span), "restarts": restarts, "down_seconds": down}
+
+
+# ---------------------------------------------------------------------------
+# The progress board: achievement counts players share from /valheim progress
+# ---------------------------------------------------------------------------
+def progress_counts(sections: list) -> dict:
+    """{list key: [done, total]} from fch_progress.report(); the counts only, no item names."""
+    return {s["key"]: [len(s["done"]), s["total"]] for s in sections}
+
+
+def progress_entry(conn, player: str) -> Optional[dict]:
+    import json
+    r = _one(conn, "SELECT * FROM fch_progress WHERE player = ? COLLATE NOCASE", (player,))
+    if r:
+        r["sections"] = json.loads(r["sections"] or "{}")
+    return r
+
+
+def save_progress(conn, player: str, user_id, counts: dict, now: Optional[float] = None) -> tuple:
+    """Put a character's counts on the board, or update them. Returns (error or None, the
+    list keys finished since the last upload). A first upload finishes nothing, so joining
+    the board doesn't announce lists done long ago."""
+    import json
+    old = progress_entry(conn, player)
+    if old and old["user_id"] != str(user_id):
+        return f"**{old['player']}** is on the board for <@{old['user_id']}>. Ask an admin if that's wrong.", []
+    finished = [k for k, (done, total) in counts.items()
+                if old and total and done >= total and (old["sections"].get(k) or [0, 1])[0] < total]
+    done, total = sum(c[0] for c in counts.values()), sum(c[1] for c in counts.values())
+    conn.execute("INSERT INTO fch_progress(player, user_id, done, total, sections, updated_at) VALUES (?,?,?,?,?,?) "
+                 "ON CONFLICT(player) DO UPDATE SET user_id=excluded.user_id, done=excluded.done, "
+                 "total=excluded.total, sections=excluded.sections, updated_at=excluded.updated_at",
+                 (old["player"] if old else player, str(user_id), done, total, json.dumps(counts),
+                  int(now if now is not None else time.time())))
+    conn.commit()
+    return None, finished
+
+
+def drop_progress(conn, player: str, user_id) -> bool:
+    """Take a character off the board (only its uploader can)."""
+    n = conn.execute("DELETE FROM fch_progress WHERE player = ? COLLATE NOCASE AND user_id = ?",
+                     (player, str(user_id))).rowcount
+    conn.commit()
+    return n > 0
+
+
+def progress_board(conn, key: str = "", limit: int = 15) -> list:
+    """[{"player", "user_id", "done", "total", "updated_at"}], best first: by everything,
+    or by one list (key)."""
+    import json
+    rows = _rows(conn, "SELECT * FROM fch_progress")
+    out = []
+    for r in rows:
+        if key:
+            done, total = (json.loads(r["sections"] or "{}").get(key) or [0, 0])
+            if not total:
+                continue
+            r = dict(r, done=done, total=total)
+        out.append(r)
+    out.sort(key=lambda r: (-r["done"], r["player"].lower()))
+    return out[:limit]
+
+
+def render_progress_board(rows: list, key: str = "", title: str = "", emoji: str = "📜") -> dict:
+    medals = ("🥇", "🥈", "🥉")
+    lines = []
+    for i, r in enumerate(rows):
+        pct = round(100 * r["done"] / r["total"]) if r["total"] else 0
+        mark = " ✅" if r["total"] and r["done"] >= r["total"] else ""
+        lines.append(f"{medals[i] if i < 3 else f'`{i + 1:>2}.`'} **{r['player']}**: {r['done']}/{r['total']} "
+                     f"({pct}%){mark} · <t:{r['updated_at']}:R>")
+    return {"title": f"{emoji} Achievement progress" + (f": {title}" if key else ""), "color": 0x1ABC9C,
+            "description": "\n".join(lines) or "Nobody's on the board yet. Upload your character with "
+                                               "`/valheim progress` and `board:True` to join.",
+            "footer": {"text": "From each player's last /valheim progress with board:True · counts only"}}
 
 
 # ---------------------------------------------------------------------------

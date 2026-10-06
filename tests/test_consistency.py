@@ -115,6 +115,41 @@ class CommandsTest(unittest.TestCase):
                     missing.append(f"/{group} {name}")
         self.assertEqual(missing, [], "commands missing from README.md")
 
+    def test_discord_limits(self):
+        """Discord refuses the whole command sync if one name or description is too long:
+        names 1-32 characters, descriptions 1-100, at most 25 options or choices. (discord.py
+        cuts a long option description to 100 with "…" instead, which reads badly: also caught.)"""
+        import admin_bot
+        with tempfile.TemporaryDirectory() as d:
+            bot = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "S")
+
+            async def payloads():
+                client = bot._build_client()
+                bot._register_commands(client.tree)
+                return [g.to_dict(client.tree) for g in client.tree.get_commands()]
+            groups = asyncio.run(payloads())
+        bad = []
+
+        def walk(item, path):
+            path = f"{path} {item['name']}".strip()
+            if not 1 <= len(item["name"]) <= 32:
+                bad.append(f"{path}: name has {len(item['name'])} characters")
+            if "description" in item and not 1 <= len(item["description"]) <= 100:
+                bad.append(f"{path}: description has {len(item['description'])} characters")
+            if item.get("description", "").endswith("…") and item["description"] != "…":   # "…": none given
+                bad.append(f"{path}: description is cut short in Discord (over 100 characters)")
+            for key in ("options", "choices"):
+                if len(item.get(key) or []) > 25:
+                    bad.append(f"{path}: {len(item[key])} {key}")
+            for c in item.get("choices") or []:
+                if not 1 <= len(c["name"]) <= 100:
+                    bad.append(f"{path}: choice {c['name']!r} has {len(c['name'])} characters")
+            for o in item.get("options") or []:
+                walk(o, "/" + path if not path.startswith("/") else path)
+        for g in groups:
+            walk(g, "")
+        self.assertEqual(bad, [], "Discord would refuse these commands")
+
     def test_every_group_has_a_pinned_guide(self):
         import admin_bot
         self.assertEqual(sorted(g[0] for g in admin_bot.GUIDES), sorted(self.tree))
