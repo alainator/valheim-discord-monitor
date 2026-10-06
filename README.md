@@ -50,7 +50,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   setup ([boss progress](#boss-progress)).
 - **Portals and tombstones, from the world save too:** `/muninn portals` finds portals that
   go nowhere, `/muninn tombstones` the gear nobody has picked up yet, with where to find it
-  ([portals and tombstones](#portals-and-tombstones)).
+  ([portals and tombstones](#portals-and-tombstones)). `/muninn ships` finds every boat, and
+  `/muninn tames` every tamed animal and its name ([ships and tames](#ships-and-tames)).
 - **Achievement progress from a character file:** players upload their `.fch` with
   `/valheim progress` and see which achievements they're still missing. Those who opt in
   join a `/muninn progress` board, with the **Mímir** title for the leader and a post when
@@ -84,6 +85,11 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Ships and tames, from the world save:** `/muninn ships` lists every raft, karve, longship
+  and drakkar (and cart) with where it is, furthest first, so the boat left on a far shore
+  turns up. `/muninn tames` counts the tamed wolves, boars, lox, chickens and asksvin, and
+  lists the named ones with their stars and where they are
+  ([ships and tames](#ships-and-tames)).
 - **Portals and tombstones, read from the world save:** `/muninn portals` lists portals whose
   name has no partner (they go nowhere), names used three or more times, and portals without
   a name. `/muninn tombstones` shows every tombstone nobody has emptied yet: whose, which day
@@ -249,7 +255,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
-  [Portals & tombstones](#portals-and-tombstones) ·
+  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) ·
   [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
@@ -653,7 +659,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `portals`, `tombstones` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -705,6 +711,8 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn compare <player> [other]` | Anyone | Two characters side by side: time played, visits, longest session, deaths, achievements, with the leader of each marked. No `other` = your linked character | Stats database |
 | `/muninn bosses` | Anyone | Every boss with ✅ or ⬜, when it fell, and which is next ([boss progress](#boss-progress)) | `save_dir` |
 | `/muninn portals` | Anyone | Portals that go nowhere, names used 3+ times, portals without a name, and the connected pairs ([portals](#portals-and-tombstones)) | `save_dir` |
+| `/muninn ships` | Anyone | Every raft, karve, longship and drakkar, furthest from the start first, and the carts ([ships](#ships-and-tames)) | `save_dir` |
+| `/muninn tames` | Anyone | Tamed animals: how many of each, and the named ones with stars and where they are ([tames](#ships-and-tames)) | `save_dir` |
 | `/muninn tombstones` | Anyone | Every tombstone nobody has emptied yet: whose, the day they died, and where ([tombstones](#portals-and-tombstones)) | `save_dir` |
 | `/muninn honors [member]` | Anyone | Every [honor](#honors) and who holds it, or one member's honors | Stats database |
 | `/muninn progress [only]` | Anyone | The [progress board](#the-progress-board-muninn-progress): achievement counts from `/valheim progress` uploads, for everything or one list | Stats database |
@@ -1428,6 +1436,42 @@ save is gear still lying out there:
 - **Lost the map marker?** The death marker on the map can be removed by accident;
   the coordinates here are the way back.
 
+### Ships and tames
+
+Two more things read from the same world save, with no setup:
+
+**`/muninn ships`**: every raft, karve, longship and drakkar, furthest from the start first,
+which is usually the one somebody sailed off in and left behind. Carts are listed too.
+
+```
+⛵ Ships in Alheim: 4
+1 raft · 2 karves · 1 longship
+⛵ Longship · x 3290, z 470 · 3.3 km E of the start
+⛵ Karve · x -2360, z 1550 · 2.8 km NW of the start
+⛵ Karve · x 560, z 450 · 0.7 km NE of the start
+🛶 Raft · x 30, z -10 · near the start
+🛒 Carts (1): x 40, z 5 · near the start
+```
+
+**`/muninn tames`**: how many tamed animals of each kind, then the ones with names, their
+stars and where they are:
+
+```
+🐾 Tamed animals in Alheim: 23
+🐗 12 boars · 🐺 6 wolves · 🐔 3 hens · 🦣 2 lox
+🐺 Fenrir (wolf ★★) · x 560, z 450 · 0.7 km NE of the start
+🦣 Big Bertha (lox) · x 580, z 500 · 0.8 km NE of the start
+…plus 21 without a name
+```
+
+- **Tames only.** The save keeps wild animals in explored areas too; only the ones marked
+  tamed are counted. Cubs and piglets born to tames count as tamed.
+- **Names** are the ones given in game (hover a tame and press E). Unnamed ones are only
+  counted.
+- **Stars** come from the animal's level: a 2-star wolf shows ★★.
+- Like portals and tombstones, both are up to 30 minutes behind, follow `bosses.world`, and
+  `python3 world_objects.py /valheim_save_data` lists them on the command line.
+
 ### Bounties
 
 Admins post a challenge; whoever does it gets the glory and a role for a week.
@@ -1841,6 +1885,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn bosses` says it can't find the world save | `save_dir` isn't the folder with `worlds_local` in it, or the save folder isn't mounted | Set `admin_bot.save_dir` to the mounted save folder (e.g. `/valheim_save_data`); `/valheim map` uses the same one |
 | A boss kill wasn't posted | Valheim hadn't saved yet (every 30 minutes, and at shutdown), or it was already down when the bot first checked | Wait for the next save. Bosses down before the first check are recorded quietly; `/muninn bosses` shows them |
 | `/muninn portals` or `tombstones` says it can't find the save | Same as for `/muninn bosses`: `save_dir` must be the folder with `worlds_local` in it | Set `admin_bot.save_dir` to the mounted save folder |
+| A ship or tame you know about is missing | The world hasn't been saved since it moved or was tamed, or it's a kind the bot doesn't know | Wait for the next save; the known kinds are listed under [ships and tames](#ships-and-tames) |
 | A tombstone you just emptied is still listed | The world hasn't been saved since (every 30 minutes) | It drops off after the next save |
 | `/muninn bosses` shows the wrong world | Several worlds in `worlds_local`; the most recently saved one is used | Set `"bosses": {"world": "Alheim"}` |
 | A Steam player's achievement wasn't posted | Their game details are private (Steam's default is Friends only), `"achievement"` isn't in `events`, or it's been under 30 minutes | `/muninn stats <character>` says "private" if it's privacy: they set Game details to Public. Otherwise check `events` |
@@ -2536,7 +2581,7 @@ save; never written to):
 | `_main.<N>.fwl2` | World name and seed | `/valheim map` |
 | `_main.<N>.db2`, first 12 bytes | World version and the game clock | The ☀️ Day channel, tombstone days |
 | `_main.<N>.db2`, packed part | Global keys (`defeated_eikthyr`, …) | [Boss progress](#boss-progress) |
-| `*.chunk` | Every object in the world | [Portals and tombstones](#portals-and-tombstones) |
+| `*.chunk` | Every object in the world | [Portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames) |
 
 Valheim writes all of them at each save (every 30 minutes and at shutdown), so everything
 read from the save is up to half an hour behind the game. Before 1.0 a world was one
@@ -2650,7 +2695,8 @@ Added here:
 - **Boss progress** read from the world save (Valheim 1.0's `_main.<N>.db2` and older
   `.db`): kill posts, `/muninn bosses` and a stat channel.
 - **Portals and tombstones** from the world's object files (`.chunk`): portals that go nowhere
-  and tombstones nobody has emptied, with where they are.
+  and tombstones nobody has emptied, with where they are. Also ships and carts, and tamed
+  animals with their names.
 - **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and
   lists what's missing for each achievement, with a per-platform guide to finding the file;
   `fch_progress.py` also runs on its own. An opt-in `/muninn progress` board, the Mímir

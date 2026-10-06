@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Portals and tombstones, read from the world save. No mods.
+Portals, tombstones, ships and tamed animals, read from the world save. No mods.
 
 Valheim 1.0 keeps a world's objects ("ZDOs") in uncompressed worlds_local/<world>/*.chunk
 files next to _main.<N>.db2 (older servers: inside <world>.db). Each object is stored as
@@ -10,7 +10,10 @@ its position (3 floats), its prefab's hash, then its data, where strings are a k
   * a portal is the portal prefab's hash, with its name under the "tag" key;
   * a tombstone is Player_tombstone's hash, with "ownerName" and "timeOfDeath" (game time
     in 100 ns ticks). It disappears once its owner empties it, so every tombstone in the
-    save is one still lying out there.
+    save is one still lying out there;
+  * a ship or cart is just its prefab and position;
+  * an animal is saved wild or tame alike: a tame one has the int "tamed" = 1, and maybe
+    the name players gave it ("TamedName") and its "level" (1 + stars).
 
 Run it on its own to check a save: python3 world_objects.py /path/to/valheim_save_data
 """
@@ -43,6 +46,15 @@ def _key(text: str) -> bytes:
 PORTALS = {_key("portal_wood"): "portal", _key("portal_stone"): "stone portal", _key("portal"): "stone portal"}
 TOMBSTONE = _key("Player_tombstone")
 TAG, OWNER_NAME, TIME_OF_DEATH = _key("tag"), _key("ownerName"), _key("timeOfDeath")
+# prefab -> (what to call it, emoji)
+SHIPS = {_key(p): kind for p, kind in (("Raft", ("raft", "🛶")), ("Karve", ("karve", "⛵")),
+                                       ("VikingShip", ("longship", "⛵")), ("VikingShip_Ashlands", ("drakkar", "🚢")),
+                                       ("Cart", ("cart", "🛒")))}
+TAMEABLE = {_key(p): kind for p, kind in (
+    ("Wolf", ("wolf", "🐺")), ("Wolf_cub", ("wolf cub", "🐺")), ("Boar", ("boar", "🐗")), ("Boar_piggy", ("piglet", "🐗")),
+    ("Lox", ("lox", "🦣")), ("Lox_Calf", ("lox calf", "🦣")), ("Hen", ("hen", "🐔")), ("Chicken", ("chick", "🐣")),
+    ("Asksvin", ("asksvin", "🦎")), ("Asksvin_hatchling", ("asksvin hatchling", "🦎")))}
+TAMED, TAMED_NAME, LEVEL = _key("tamed"), _key("TamedName"), _key("level")
 WINDOW = 512                     # bytes after the prefab hash to look for an object's data
 
 
@@ -77,6 +89,13 @@ def _string(data: bytes, start: int, end: int, key: bytes) -> Optional[str]:
         return None
 
 
+def _int(data: bytes, start: int, end: int, key: bytes) -> Optional[int]:
+    i = data.find(key, start, end)
+    if i < 0 or i + 8 > len(data):
+        return None
+    return struct.unpack_from("<i", data, i + 4)[0]
+
+
 def _long(data: bytes, start: int, end: int, key: bytes) -> Optional[int]:
     i = data.find(key, start, end)
     if i < 0 or i + 12 > len(data):
@@ -92,27 +111,34 @@ def _hits(data: bytes, key: bytes):
 
 
 def scan_bytes(data: bytes) -> dict:
-    """{"portals": [...], "tombstones": [...]} found in one file's bytes."""
-    portal_at = sorted((i, kind) for key, kind in PORTALS.items() for i in _hits(data, key))
-    portals = []
-    for n, (i, kind) in enumerate(portal_at):
+    """{"portals", "tombstones", "ships", "tames": [...]} found in one file's bytes."""
+    kinds = [(PORTALS, "portal"), ({TOMBSTONE: None}, "tombstone"), (SHIPS, "ship"), (TAMEABLE, "animal")]
+    hits = sorted((i, what, kind) for table, what in kinds for key, kind in table.items() for i in _hits(data, key))
+    out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": []}
+    for n, (i, what, kind) in enumerate(hits):
         pos = _position(data, i)
         if not pos:
             continue
-        # Stop at the next portal, so a portal without a name never takes its neighbour's.
-        end = min(i + WINDOW, portal_at[n + 1][0] if n + 1 < len(portal_at) else len(data))
-        tag = _string(data, i + 4, end, TAG)
-        portals.append({"kind": kind, "tag": (tag or "").strip(), "x": pos[0], "y": pos[1], "z": pos[2]})
-    tombstones = []
-    for i in _hits(data, TOMBSTONE):
-        pos = _position(data, i)
-        owner = _string(data, i + 4, i + WINDOW, OWNER_NAME) if pos else None
-        if not owner:
-            continue
-        ticks = _long(data, i + 4, i + WINDOW, TIME_OF_DEATH)
-        died = ticks / 1e7 if ticks and 0 < ticks < 10 ** 17 else None
-        tombstones.append({"owner": owner, "died": died, "x": pos[0], "y": pos[1], "z": pos[2]})
-    return {"portals": portals, "tombstones": tombstones}
+        # An object's data ends where the next one we know starts, so a value is never
+        # taken from a neighbour (a nameless portal from the next portal, say).
+        end = min(i + WINDOW, hits[n + 1][0] if n + 1 < len(hits) else len(data))
+        place = {"x": pos[0], "y": pos[1], "z": pos[2]}
+        if what == "portal":
+            out["portals"].append({"kind": kind, "tag": (_string(data, i + 4, end, TAG) or "").strip(), **place})
+        elif what == "tombstone":
+            owner = _string(data, i + 4, end, OWNER_NAME)
+            if owner:
+                ticks = _long(data, i + 4, end, TIME_OF_DEATH)
+                died = ticks / 1e7 if ticks and 0 < ticks < 10 ** 17 else None
+                out["tombstones"].append({"owner": owner, "died": died, **place})
+        elif what == "ship":
+            out["ships"].append({"kind": kind[0], "emoji": kind[1], **place})
+        elif _int(data, i + 4, end, TAMED) == 1:
+            level = _int(data, i + 4, end, LEVEL)
+            out["tames"].append({"kind": kind[0], "emoji": kind[1], "name": (_string(data, i + 4, end, TAMED_NAME)
+                                                                            or "").strip(),
+                                 "stars": max(0, min(level - 1, 5)) if level else 0, **place})
+    return out
 
 
 def object_files(save_dir: str, world: Optional[str] = None) -> list:
@@ -132,15 +158,15 @@ def scan(save_dir: str, world: Optional[str] = None) -> Optional[dict]:
     files = object_files(save_dir, world)
     if not files:
         return None
-    out = {"portals": [], "tombstones": []}
+    out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": []}
     for path in files:
         try:
             with open(path, "rb") as f:
                 found = scan_bytes(f.read())
         except OSError:
             continue
-        out["portals"] += found["portals"]
-        out["tombstones"] += found["tombstones"]
+        for k in out:
+            out[k] += found[k]
     return out
 
 
@@ -210,6 +236,46 @@ def render_tombstones(tombstones: list, day_of=None, server_name: str = "") -> d
             "footer": {"text": "From the last world save (every 30 minutes) · gone once its owner empties it"}}
 
 
+def render_ships(ships: list, server_name: str = "") -> dict:
+    boats = [s for s in ships if s["kind"] != "cart"]
+    carts = [s for s in ships if s["kind"] == "cart"]
+    lines = [f"{s['emoji']} **{s['kind'].capitalize()}** · {where(s['x'], s['z'])}"
+             for s in sorted(boats, key=lambda s: -math.hypot(s["x"], s["z"]))[:20]]
+    if len(boats) > 20:
+        lines.append(f"…and {len(boats) - 20} more")
+    if carts:
+        lines.append(f"\n🛒 **Carts** ({len(carts)}): " + "; ".join(where(c["x"], c["z"]) for c in carts[:5])
+                     + (" …" if len(carts) > 5 else ""))
+    counts = {}
+    for s in boats:
+        counts[s["kind"]] = counts.get(s["kind"], 0) + 1
+    summary = " · ".join(f"{n} {k}{'s' if n != 1 else ''}" for k, n in counts.items())
+    return {"title": f"⛵ Ships{' in ' + server_name if server_name else ''}: {len(boats)}", "color": 0x1F6FB2,
+            "description": ((summary + "\n\n") if summary else "") + ("\n".join(lines) or "No ships yet. Time to build a raft."),
+            "footer": {"text": "From the last world save (every 30 minutes) · furthest from the start first"}}
+
+
+def render_tames(tames: list, server_name: str = "") -> dict:
+    counts: dict = {}
+    for t in tames:
+        counts.setdefault((t["emoji"], t["kind"]), 0)
+        counts[(t["emoji"], t["kind"])] += 1
+    summary = " · ".join(f"{e} {n} {k}{'' if n == 1 or k.endswith(('lox', 'asksvin')) else 's'}"
+                         for (e, k), n in sorted(counts.items(), key=lambda c: -c[1]))
+    named = sorted((t for t in tames if t["name"]), key=lambda t: t["name"].lower())
+    lines = [f"{t['emoji']} **{t['name']}** ({t['kind']}{' ' + '★' * t['stars'] if t['stars'] else ''})"
+             f" · {where(t['x'], t['z'])}" for t in named[:25]]
+    if len(named) > 25:
+        lines.append(f"…and {len(named) - 25} more with names")
+    unnamed = len(tames) - len(named)
+    if unnamed and named:
+        lines.append(f"…plus {unnamed} without a name")
+    return {"title": f"🐾 Tamed animals{' in ' + server_name if server_name else ''}: {len(tames)}", "color": 0x8D6E63,
+            "description": ((summary + "\n\n") if summary else "") + ("\n".join(lines) or
+                            ("None of them have names yet." if tames else "No tamed animals yet. Wolves love meat.")),
+            "footer": {"text": "From the last world save (every 30 minutes) · name a tame by hovering it and pressing E"}}
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv:
@@ -228,6 +294,12 @@ def main(argv=None) -> int:
     import bosses
     for t in found["tombstones"]:
         print(f"  {t['owner']:<24} day {bosses.day_of(t['died']) if t['died'] else '?'}  {where(t['x'], t['z'])}")
+    print(f"{len(found['ships'])} ships and carts:")
+    for s in found["ships"]:
+        print(f"  {s['kind']:<24} {where(s['x'], s['z'])}")
+    print(f"{len(found['tames'])} tamed animals:")
+    for a in sorted(found["tames"], key=lambda a: (a["kind"], a["name"].lower())):
+        print(f"  {a['kind']:<12} {a['name'] or '(no name)':<16} {'*' * a['stars']:<3} {where(a['x'], a['z'])}")
     return 0
 
 
