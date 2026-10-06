@@ -47,6 +47,7 @@ GROUPS = [
         "title_longest": "Thor: longest single session",
         "title_achievements": "Bragi: most Steam achievements",
         "title_least": "Hœnir: least time played (of players seen this month)",
+        "title_progress": "Mímir: most achievement progress (/muninn progress)",
         "away": "Óðr: how many linked players haven't been on for a while",
         "bounty_hunter": "Skadi: who holds the bounty hunter role this week",
     }),
@@ -66,6 +67,7 @@ TITLE_LABELS = {
     "title_longest": ("⚡", "longest session"),
     "title_achievements": ("📜", "most achievements"),
     "title_least": ("🤫", "least hours"),
+    "title_progress": ("🧠", "most progress"),
 }
 
 

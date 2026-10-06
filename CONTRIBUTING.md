@@ -24,6 +24,11 @@ list every time.
       table above that.
 - [ ] **Command guides:** these are built from the command tree, so nothing to do. Check that the
       description reads well, since it's shown in the pinned guide and in Discord's `/` menu.
+- [ ] **Discord's limits:** names up to 32 characters, descriptions (commands and options) up
+      to 100, at most 25 options or choices. The consistency test checks; a description that's
+      too long is cut short in Discord.
+- [ ] **A name another group already uses** (`/valheim progress` and `/muninn progress`): the
+      home-channel check skips `/valheim`, so that's fine, but say which one you mean in docs.
 - [ ] **Texts that point people to it:** the welcome DM (`WELCOME_DM`), the starter rules
       (`DEFAULT_RULES`), the `/valheim progress` guide (`fch_progress.FIND_GUIDES`), and the channel
       guide (built from the topics).

@@ -164,6 +164,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
             winner_id  TEXT,
             done_at    INTEGER
         );
+        -- /valheim progress board:True: the counts a player chose to share (never the item lists)
+        CREATE TABLE IF NOT EXISTS fch_progress (
+            player     TEXT PRIMARY KEY,             -- the character, as the log spells it
+            user_id    TEXT NOT NULL,                -- who uploaded it
+            done       INTEGER NOT NULL,
+            total      INTEGER NOT NULL,
+            sections   TEXT NOT NULL,                -- JSON {list key: [done, total]}
+            updated_at INTEGER NOT NULL              -- real epoch
+        );
 
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,

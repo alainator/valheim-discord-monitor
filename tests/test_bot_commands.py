@@ -37,7 +37,8 @@ class BotCommandsTest(unittest.TestCase):
         self.assertEqual({k: v[0] for k, v in groups.items()}, {
             "valheim": sorted(["join", "map", "link", "unlink", "notify", "request-access", "progress",
                               "patch-notes"]),
-            "muninn": sorted(["stats", "top", "titles", "online", "compare", "uptime", "bosses", "honors"]),
+            "muninn": sorted(["stats", "top", "titles", "online", "compare", "uptime", "bosses", "honors",
+                              "progress"]),
             "warcouncil": ["bounties", "plan"],
             "odin": sorted(["permit", "ban", "unban", "unpermit", "lists", "settings", "modifier", "preset",
                             "setkey", "backups", "update-check", "restart", "restart-cancel", "setup",

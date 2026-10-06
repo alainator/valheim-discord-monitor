@@ -48,7 +48,9 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   down, `/muninn bosses`, and a "🏆 Bosses: 3/8 · next: Moder" channel. No mods and no
   setup ([boss progress](#boss-progress)).
 - **Achievement progress from a character file:** players upload their `.fch` with
-  `/valheim progress` and see which achievements they're still missing. Run it without a
+  `/valheim progress` and see which achievements they're still missing. Those who opt in
+  join a `/muninn progress` board, with the **Mímir** title for the leader and a post when
+  someone finishes a list. Run it without a
   file for a guide to finding it on Windows, Linux, Steam Deck or macOS
   ([achievement progress](#achievement-progress-valheim-progress)).
 - **Honors for what the logs can't see:** 16 built-in roles like Hermóðr (crypt raider),
@@ -76,6 +78,11 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Progress board:** `/valheim progress board:True` puts your counts (never the lists) on
+  `/muninn progress`, a leaderboard for everything or one list. The leader gets the
+  **Mímir** title, and Huginn posts "🎣 Ingrid has caught every fish!" when someone finishes
+  a list. Opt-in, and `board:False` takes you off
+  ([the progress board](#the-progress-board-muninn-progress)).
 - **Valheim patch notes:** when Iron Gate releases a patch, the bot posts its notes in
   #runestone (formatted, with a link to the full notes on Steam), and `/valheim patch-notes`
   shows the latest one to anyone. On by default; it starts with the next patch
@@ -622,7 +629,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors`, `progress` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -674,6 +681,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn compare <player> [other]` | Anyone | Two characters side by side: time played, visits, longest session, deaths, achievements, with the leader of each marked. No `other` = your linked character | Stats database |
 | `/muninn bosses` | Anyone | Every boss with ✅ or ⬜, when it fell, and which is next ([boss progress](#boss-progress)) | `save_dir` |
 | `/muninn honors [member]` | Anyone | Every [honor](#honors) and who holds it, or one member's honors | Stats database |
+| `/muninn progress [only]` | Anyone | The [progress board](#the-progress-board-muninn-progress): achievement counts from `/valheim progress` uploads, for everything or one list | Stats database |
 | `/muninn uptime` | Anyone | Share of time the server was up this week, the last 7 and 30 days, with restarts and downtime | Stats database |
 | `/muninn titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
 | `/valheim notify <when> [player] [players]` | Anyone | DM me when the first player joins an empty server, when `players` are online (`crowd`), or when a given character joins; `off` / `list` | Stats database |
@@ -681,7 +689,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/valheim request-access <character>` | Anyone | New player: "I'll join as …". The admins' refused-join notice then says who it is | Stats database |
 | `/warcouncil plan <title> <when>` | Anyone | Game night with Going / Maybe / Can't buttons, a planning thread and a reminder ping. Several times (`sat 20:00, sun 18:00`) start a poll for the time | Stats database |
 | `/warcouncil bounties` | Anyone | Open bounties with their rewards and deadlines, and the top bounty hunters | Stats database |
-| `/valheim progress [save] [only] [share]` | Anyone | Upload your character's `.fch` to see the [achievements](#achievement-progress-valheim-progress) you're still missing; `share` posts a summary. Without a file: a guide to finding it, with a button per platform | — |
+| `/valheim progress [save] [only] [share] [board]` | Anyone | Upload your character's `.fch` to see the [achievements](#achievement-progress-valheim-progress) you're still missing; `share` posts a summary; `board:True` puts your counts on `/muninn progress` (`False` takes them off). Without a file: a guide to finding it, with a button per platform | — (the board: stats database) |
 | `/valheim map` | Anyone | World seed and a map link (spoilers; only the asker sees it) | `save_dir` |
 | `/valheim patch-notes` | Anyone | The latest Valheim [patch notes](#valheim-patch-notes) from Steam; only the asker sees them | Internet access to Steam |
 | `/odin permit <id>` | Admin | Unban, and add to the permitted list if you use one | `save_dir` |
@@ -939,7 +947,7 @@ voice channels or categories.
 | `achievements` | Steam achievements unlocked, all players together |
 | `bosses` | Bosses defeated in this world and the next one ("🏆 Bosses: 3/8 · next: Moder"), from the [world save](#boss-progress) |
 | `title_owner` | Odin: the Discord server's owner |
-| `title_time`, `title_deaths`, `title_sessions`, `title_longest`, `title_achievements`, `title_least` | The [title](#title-roles) holders: Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir (`titles` means all of them) |
+| `title_time`, `title_deaths`, `title_sessions`, `title_longest`, `title_achievements`, `title_least`, `title_progress` | The [title](#title-roles) holders: Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir, Mímir (`titles` means all of them) |
 | `away` | Óðr: how many linked players [haven't been on](#title-roles) for a while ("🛶 Óðr (away 14+ days): 2") |
 | `bounty_hunter` | Skadi: who holds the [bounty](#bounties) hunter role this week |
 
@@ -1350,7 +1358,8 @@ Only you see the answer:
 
 - **`only:`** shows one list. **`share:True`** also posts the counts (not the missing items)
   in the channel, for bragging.
-- **Nothing is kept.** The bot reads the file, answers, and forgets it.
+- **Nothing is kept** unless you join the [progress board](#the-progress-board-muninn-progress),
+  and then only the counts. The bot reads the file, answers, and forgets it.
 - **Upload the latest save.** The game writes the file when you quit or save, so play first,
   then upload. Don't upload `.fch.old`, which is the previous save.
 - **Console and Game Pass players** can't get a readable character file, so this works for
@@ -1363,6 +1372,26 @@ Only you see the answer:
 - It also runs on its own, without Discord:
   `python3 fch_progress.py MyViking.fch` (add `-f` to list what's done, `-o bosses,fishing`
   for some lists).
+
+#### The progress board: `/muninn progress`
+
+Players who want to compare can put their counts on a shared board:
+
+- **Join** with `/valheim progress save:… board:True`. The bot keeps the counts per list
+  (e.g. *Fish caught: 9/12*), never what's done or missing. Later uploads update them
+  without `board:True` again.
+- **Leave** with `/valheim progress save:… board:False`: the counts are deleted.
+- **`/muninn progress`** shows the board in #🪶┃muninns-roost: everyone's total, with when
+  they last uploaded. `only:` ranks one list, e.g. `only: 🎣 Fish caught`.
+- **Finishing a list** posts in Huginn's feed: "🎣 Ingrid has caught every fish!". It
+  compares with your last upload, so joining the board doesn't announce lists finished long
+  ago.
+- **Mímir**, the wisest of the gods, is a [title role](#title-roles) for whoever has done
+  the most, handed out with the other titles each week. As with every title, the role goes
+  to the Discord account [linked](#players--community) to the character.
+- **One uploader per character:** the character is matched to the name in the server log,
+  and only the person who put it on the board can update it or take it off.
+- The counts are only as fresh as the last upload. Each line shows when that was.
 
 ### Honors
 
@@ -1421,8 +1450,8 @@ own role so it can hand them out.
 
 ### Title roles
 
-The leader of each `/muninn top` board gets a role named after a figure from Norse
-mythology:
+The leader of each `/muninn top` board, and of the `/muninn progress` board, gets a role
+named after a figure from Norse mythology:
 
 | Role | Leaderboard | Why |
 |---|---|---|
@@ -1432,6 +1461,10 @@ mythology:
 | **Thor** | Longest single session | Drank from a horn linked to the sea and lowered the ocean |
 | **Bragi** | Most Steam achievements | God of poetry, who sings the great deeds of heroes in Valhalla |
 | **Hœnir** | **Least** time played (10+ minutes, seen in the last 30 days) | The silent god, sent to the Vanir as a hostage, who never decided anything on his own |
+| **Mímir** | Most achievement progress on the [progress board](#the-progress-board-muninn-progress) | The wisest of the gods, whose well holds all knowledge; even Odin gave an eye to drink from it |
+
+**Mímir** only counts players who joined the [progress board](#the-progress-board-muninn-progress),
+by their last upload, so it's the same whether `period` is all time or weekly.
 
 **Hœnir** only counts players seen in the last 30 days with at least 10 minutes played,
 so it doesn't stick to someone who quit, or who logged on for a few seconds to take a peek. It's meant as a friendly
@@ -1488,7 +1521,7 @@ at the top of the member list. Options:
   "day": "sunday",
   "hour": 18,
   "channel_id": "",
-  "roles": { "time": "", "deaths": "", "sessions": "", "longest": "", "achievements": "" }
+  "roles": { "time": "", "deaths": "", "sessions": "", "longest": "", "achievements": "", "least": "", "progress": "" }
 }
 ```
 - **`period`:** `all` (default) or `week`.
@@ -1515,11 +1548,12 @@ The channels have themed names too: see [server setup](#server-setup-odin-setup)
 | **Thor** | Title role: longest single session | Drank from a horn linked to the sea and lowered the ocean | 〃 |
 | **Bragi** | Title role: most Steam achievements | Sings the great deeds of heroes in Valhalla | 〃 (plus the Steam key) |
 | **Hœnir** | Title role: least time played (players seen in the last 30 days with 10+ minutes) | The silent god who hardly lifts a finger | 〃 |
+| **Mímir** | Title role: most achievement progress on the [progress board](#the-progress-board-muninn-progress) | The wisest of the gods, who knows all things | 〃 (plus `/valheim progress board:True`) |
 | **Óðr** | Every linked player away for 14+ days, until they're back | Freyja's wandering husband, always gone | 〃 |
 | **Hermóðr, Andhrímnir, Freyr, Gangleri…** | [Honors](#honors) for deeds the log can't see, given by admins | Each named for what they're known for | `/odin honor give` |
 | **Skadi** | Role for a week after claiming a [bounty](#bounties) | Goddess of the hunt, on skis with her bow | `/odin bounty` (on by default) |
 
-Title roles go to whoever leads that `/muninn top` board at the weekly check
+Title roles go to whoever leads that `/muninn top` board (Mímir: `/muninn progress`) at the weekly check
 ([details](#title-roles)).
 
 **All of it at once**, in the `admin_bot` block of `config.json` (plus `"username":
@@ -1541,7 +1575,7 @@ time it hands each one out. None of them grant any permissions.
 1. **Muninn**, the bot's own role (it has the bot icon). It must stay **above** every role
    it hands out.
 2. **Odin**. The bot moves it here when it creates it.
-3. **Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir, Óðr, Skadi, In Valheim**, in any order.
+3. **Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir, Mímir, Óðr, Skadi, In Valheim**, in any order.
 
 Roles the bot creates start at the bottom of the list, so they're below its own role and it
 can hand them out. If you drag one above Muninn, the log says `can't give the … role`.
@@ -1581,6 +1615,9 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
+| "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
+| Mímir has a holder but nobody got the role | The leading character isn't linked | `/valheim link <character>`; the role follows within a minute |
 | No patch notes after a Valheim patch | The first check only remembers what's out; or the bot can't reach Steam (log: `patch notes check failed`); or it can't post in #runestone | Wait for the next patch; allow outbound HTTPS to `api.steampowered.com`; give the bot Send Messages and Embed Links in #runestone, or set `patch_notes.channel_id` |
 | `/valheim patch-notes` says it couldn't reach Steam | No internet from the container, or Steam is down | Check the container's network; try again later |
 | Bot offline; no `admin_bot` line in the log, and the `Monitoring …` line doesn't end in `; admin bot on` | The monitor didn't see `admin_bot.enabled: true`: a config edit made after the container started, or the old code | `git pull`, then `docker compose up -d --build --force-recreate` |
@@ -2222,7 +2259,7 @@ or run it in a terminal.
 | `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |
 | `admin_bot.titles.day` / `hour` | sunday / 18 | When to reassign the titles (container time zone). |
 | `admin_bot.titles.channel_id` | — | Where to post title changes; empty = the webhook channel. |
-| `admin_bot.titles.roles` | — | Existing role IDs per category (`time`, `deaths`, `sessions`, `longest`, `achievements`, `least`); otherwise the bot creates them. |
+| `admin_bot.titles.roles` | — | Existing role IDs per category (`time`, `deaths`, `sessions`, `longest`, `achievements`, `least`, `progress`); otherwise the bot creates them. |
 | `admin_bot.titles.away_days` / `away_role` / `away_dm` | 14 / Óðr / false | The [away role](#title-roles) for linked players not seen for that long; `away_role: false` turns it off; `away_dm` sends one "come back" DM. |
 | `health.low_disk_gb` | 10 | Warn when the save disk has less free space than this. |
 | `health.slow_save_seconds` | 5 | Warn when a world save takes longer than this. |
@@ -2330,6 +2367,7 @@ renamed or removed, all of them change in the same pull request.
 | Real commands only | A topic, guide intro, the welcome DM, the starter rules, the progress guide, `host/README.md` or this README names a command that doesn't exist. |
 | Every command documented | A command (subgroup commands too) is missing from this README. |
 | A guide per group | A command group has no pinned command guide. |
+| Discord's limits | A command or option name is over 32 characters, a description over 100 (Discord would refuse the commands, or show it cut short), or there are more than 25 options or choices. |
 | Home channels | A `/muninn` or `/warcouncil` command has no home channel in `COMMAND_PLACES`, or that channel's topic doesn't mention it. |
 | Titles have stat channels | A title has no `title_<category>` stat channel or label. |
 | Everything documented | A stat channel, honor, role (in [Roles & names](#roles--names)) or achievement list is missing from this README. |
@@ -2397,7 +2435,8 @@ Added here:
   `.db`): kill posts, `/muninn bosses` and a stat channel.
 - **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and
   lists what's missing for each achievement, with a per-platform guide to finding the file;
-  `fch_progress.py` also runs on its own.
+  `fch_progress.py` also runs on its own. An opt-in `/muninn progress` board, the Mímir
+  title and "finished a list" posts.
 - **Patch notes:** Iron Gate's patch notes from Steam's news feed, posted in #runestone and
   shown by `/valheim patch-notes`.
 - **Honors:** 16 built-in roles for deeds the log can't see, custom ones, and an

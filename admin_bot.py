@@ -52,7 +52,8 @@ except ImportError:
 # Commands with public replies, and the /odin setup channel they belong in. Others (their
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
-                  "uptime": "bots", "bosses": "bots", "honors": "bots", "plan": "plans", "bounties": "plans"}
+                  "uptime": "bots", "bosses": "bots", "honors": "bots", "progress": "bots", "plan": "plans",
+                  "bounties": "plans"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
 GUIDES = [
     ("valheim", "welcome", "🚪 Getting into the game: /valheim",
@@ -164,7 +165,7 @@ WELCOME_DM = ("👋 Welcome to **{guild}**, {member}! We play Valheim on **{serv
               "See you in the tenth world.")
 
 # Huginn's posts the bot reacts to, so people can react along.
-REACTIONS = {"patch_notes": "🛠️", "honor": "🎉", "boss": "🏆", "raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
+REACTIONS = {"patch_notes": "🛠️", "progress": "🎉", "honor": "🎉", "boss": "🏆", "raid": "⚔️", "achievement": "🏅", "milestone": "🏆", "welcome": "👋", "titles": "👑",
              "weekly_recap": "📜", "version_mismatch": "⚠️"}
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -2329,6 +2330,44 @@ class AdminBot:
         if self.tidy_hours > 0 and it.message:
             self._queue_tidy(it.message.channel.id, it.message.id)
 
+    # -- the progress board (/valheim progress board:True, /muninn progress) ----------
+    async def _progress_board(self, user_id, name: str, parsed: dict, board: Optional[bool]) -> str:
+        """Keep the uploader's counts on the board when they asked for it (board True, or
+        None while they're already on it), take them off with False. Announces lists
+        finished since the last upload in Huginn's feed. Returns a line for the reply."""
+        import community
+        import fch_progress
+        if board is None and not self.db_path:
+            return ""
+        if not self.db_path:
+            return "\nThe progress board needs the stats database (`database.path`), which isn't set up here."
+        player = community.known_player(self.db, name) or name
+        entry = community.progress_entry(self.db, player)
+        mine = bool(entry and entry["user_id"] == str(user_id))
+        if board is False:
+            if community.drop_progress(self.db, player, user_id):
+                return f"\n**{player}** is off the progress board."
+            return ""
+        if board is None and not mine:
+            return ("\nWant your counts (not the lists) on `/muninn progress`? Upload again with "
+                    "`board:True`.")
+        counts = community.progress_counts(fch_progress.report(parsed))
+        err, finished = community.save_progress(self.db, player, user_id, counts)
+        if err:
+            return "\n" + err
+        for key in finished:
+            title, emoji = fch_progress.SECTIONS[key]
+            embed = {"title": f"{emoji} {player} {fch_progress.FINISHED[key]}!",
+                     "description": f"**{title}**: {counts[key][1]}/{counts[key][1]}. See where everyone stands "
+                                    f"with `/muninn progress`.", "color": 0x1ABC9C}
+            log.info("admin_bot: %s finished %s", player, title)
+            if self.post_embed:
+                await asyncio.get_running_loop().run_in_executor(None, lambda e=embed: self.post_embed(e, "progress"))
+        done = sum(c[0] for c in counts.values())
+        hint = "" if community.linked_user(self.db, player) else \
+            f" Link the character (`/valheim link {player}`) to be in the running for the Mímir title."
+        return f"\nYour counts are on the progress board ({done} done): `/muninn progress`.{hint}"
+
     # -- Valheim patch notes --------------------------------------------------------
     async def _check_patches(self, items: Optional[list] = None) -> list:
         """Post patch notes Iron Gate published since the last check, oldest first. The first
@@ -2881,6 +2920,8 @@ class AdminBot:
         name = getattr(cmd, "name", None)
         if not name or self._is_admin(it.user):
             return None
+        if getattr(getattr(cmd, "parent", None), "name", None) == "valheim":
+            return None                       # private replies: anywhere (/valheim progress, not /muninn's)
         want = self.command_channel(name)
         if want is None:
             return None
@@ -3054,7 +3095,22 @@ class AdminBot:
             embed = community.render_top(category, community.top(bot.db, category, 10))
             await it.response.send_message(embed=discord.Embed.from_dict(embed))
 
-        @muninn.command(name="titles", description="Who holds Heimdall, Hel, Sleipnir, Thor and Bragi (the top of each board)")
+        @muninn.command(name="progress", description="Achievement progress board: who's done the most, "
+                                                      "from /valheim progress uploads")
+        @app_commands.describe(only="Just one list, e.g. fish caught (default: everything)")
+        @app_commands.choices(only=[app_commands.Choice(name=f"{e} {t}", value=k)
+                                    for k, (t, e) in fch_progress.SECTIONS.items()])
+        async def progress_board(it: discord.Interaction, only: str = ""):
+            if not await need_db(it):
+                return
+            rows = community.progress_board(bot.db, only)
+            title, emoji = fch_progress.SECTIONS.get(only, ("", "📜"))
+            embed = community.render_progress_board(rows, only, title, emoji)
+            await it.response.send_message(embed=discord.Embed.from_dict(embed),
+                                           allowed_mentions=discord.AllowedMentions.none())
+
+        @muninn.command(name="titles", description="Who holds each title role: Heimdall, Hel, Sleipnir, Thor, Bragi, "
+                                                    "Hœnir, Mímir")
         @app_commands.describe(refresh="Admins: reassign the titles now instead of waiting for the weekly run")
         async def titles(it: discord.Interaction, refresh: bool = False):
             if not await need_db(it):
@@ -3300,11 +3356,13 @@ class AdminBot:
                                                        "you're still missing")
         @app_commands.describe(save="Your character file, e.g. Ingrid.fch. Leave it out to see where to find it",
                                only="Just one list (default: all)",
-                               share="Also post a summary in this channel for everyone to see")
+                               share="Also post a summary in this channel for everyone to see",
+                               board="True: show your counts on /muninn progress (kept for later uploads). "
+                                     "False: take them off")
         @app_commands.choices(only=[app_commands.Choice(name=f"{e} {t}", value=k)
                                     for k, (t, e) in fch_progress.SECTIONS.items()])
         async def progress(it: discord.Interaction, save: Optional[discord.Attachment] = None, only: str = "",
-                           share: bool = False):
+                           share: bool = False, board: Optional[bool] = None):
             import io
             if save is None:                          # no file: where to find it, per platform
                 await it.response.send_message(embed=discord.Embed.from_dict(find_save_embed()),
@@ -3342,6 +3400,11 @@ class AdminBot:
                 note = (f"\n⚠️ This save is profile v{parsed['version']}; the lists were made for "
                         f"v{fch_progress.SUPPORTED_VERSION}, so some counts may be off.")
             text = fch_progress.render_text(parsed, sections, full=True, name=name)
+            try:
+                note += await bot._progress_board(it.user.id, name, parsed, board)
+            except Exception as e:  # noqa: BLE001  (the board is extra: the answer still goes out)
+                log.warning("admin_bot: progress board update for %s failed: %s", name, e)
+                note += "\nCouldn't update the progress board just now; try again later."
             await it.followup.send(
                 content="Here's what your character has done, and what's still missing. The full list is in the "
                         "file." + note,
@@ -3655,8 +3718,8 @@ class AdminBot:
                                    f"{stone.mention}: {msg.jump_url}{hint}", ephemeral=True)
 
         @odin.command(name="setup", description="Admins: organise this Discord into Valheim-themed channels")
-        @app_commands.describe(action="preview: show what would change · apply: do it (asks first) · "
-                                      "undo: put renamed channels back · guides: pin the command guides")
+        @app_commands.describe(action="preview: see the changes · apply: make them (asks first) · undo · "
+                                      "guides: pin command guides")
         @app_commands.choices(action=[app_commands.Choice(name="preview", value="preview"),
                                       app_commands.Choice(name="apply", value="apply"),
                                       app_commands.Choice(name="undo", value="undo"),

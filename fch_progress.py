@@ -566,6 +566,23 @@ SECTIONS = {
     "trophies": ("Trophies collected", "🏆"),
 }
 
+# What a finished list is announced as: "🎣 Ingrid has caught every fish!"
+FINISHED = {
+    "crafted": "has crafted every item",
+    "weapons": "has crafted every weapon",
+    "cooked": "has cooked every dish",
+    "built": "has built every piece",
+    "deaths": "has died in every way there is",
+    "tree-deaths": "has been killed by every kind of tree",
+    "enemies": "has slain every kind of enemy",
+    "enemies-hard": "has slain every kind of enemy on Hard",
+    "bosses": "has slain every boss",
+    "bosses-hard": "has slain every boss on Hard",
+    "minibosses": "has defeated every mini-boss",
+    "fishing": "has caught every fish",
+    "trophies": "has collected every trophy",
+}
+
 
 def _section(key, done, universe, label=strip, ignore=frozenset()):
     done_in = {k: v for k, v in done.items() if k in universe}
