@@ -45,9 +45,9 @@ TEMPLATE = [
          ("builds", "text", "🔨┃the-forge", "Builds, bases and base tours.",
           ["builds", "building", "bases", "base-tours", "creations"], set()),
          ("bots", "text", "🪶┃muninns-roost",
-          "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses, honors, progress, portals, "
-          "tombstones, ships and tames. /valheim join, link, notify, map, progress, patch-notes and wiki work in "
-          "any channel.",
+          "Ask Muninn: /muninn stats, top, titles, online, when, compare, uptime, bosses, honors, progress, "
+          "portals, tombstones, ships and tames. /valheim join, link, notify, map, progress, patch-notes and wiki "
+          "work in any channel.",
           ["bot-commands", "bots", "commands", "bot", "bot-spam", "botspam"], set()),
      ]},
     {"key": "wilds", "name": "⚔️ The Wilds", "aliases": ["Gaming", "Valheim", "Game", "Games"],
@@ -97,7 +97,10 @@ OLD_TOPICS = {
              "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses, honors and progress. "
              "/valheim join, link, notify, map, progress, patch-notes and wiki work in any channel.",
              "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses, honors, progress, portals "
-             "and tombstones. /valheim join, link, notify, map, progress, patch-notes and wiki work in any channel."),
+             "and tombstones. /valheim join, link, notify, map, progress, patch-notes and wiki work in any channel.",
+             "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses, honors, progress, portals, "
+             "tombstones, ships and tames. /valheim join, link, notify, map, progress, patch-notes and wiki work in "
+             "any channel."),
     "rules": ("Rules and announcements. Read before you set sail.",),
     "plans": ("Plan raids and game nights with /valheim plan.",
               "Plan raids and game nights with /warcouncil plan."),

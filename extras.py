@@ -258,6 +258,42 @@ class WeeklyRecap:
         return out.getvalue()
 
 
+def heatmap(grid: list, title: str) -> Optional[bytes]:
+    """A PNG heatmap of a 7 × 24 grid (community.online_grid), or None without Pillow or data."""
+    if not grid or not any(v for row in grid for v in row):
+        return None
+    try:
+        from io import BytesIO
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return None
+    cell, left, top, pad = 30, 60, 56, 20
+    w, h = left + 24 * cell + pad, top + 7 * cell + 40
+    img = Image.new("RGB", (w, h), (43, 45, 49))                  # Discord's dark background
+    draw = ImageDraw.Draw(img)
+    try:
+        font, small = ImageFont.load_default(size=20), ImageFont.load_default(size=14)
+    except TypeError:                                              # Pillow before 10.1
+        font = small = ImageFont.load_default()
+    draw.text((pad, 16), title, fill=(242, 243, 245), font=font)
+    peak = max(v for row in grid for v in row)
+    low, high = (49, 51, 56), (230, 126, 34)
+    for d, row in enumerate(grid):
+        draw.text((pad, top + d * cell + cell / 2), ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[d],
+                  fill=(181, 186, 193), font=small, anchor="lm")
+        for hr, v in enumerate(row):
+            f = (v / peak) ** 0.7 if v > 0 else 0
+            colour = tuple(round(lo + (hi - lo) * f) for lo, hi in zip(low, high))
+            x, y = left + hr * cell, top + d * cell
+            draw.rectangle([x + 1, y + 1, x + cell - 2, y + cell - 2], fill=colour)
+    for hr in range(0, 24, 3):
+        draw.text((left + hr * cell + cell / 2, top + 7 * cell + 8), f"{hr:02d}", fill=(181, 186, 193),
+                  font=small, anchor="mt")
+    out = BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # Backups
 # ---------------------------------------------------------------------------

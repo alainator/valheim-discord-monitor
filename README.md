@@ -37,7 +37,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
 - **Community:** `/muninn stats` and `/muninn top`, DMs when friends come online, an
   "In Valheim" role, weekly **title roles** for the leaderboard leaders (Heimdall, Hel,
   Sleipnir, Thor, Bragi), an **Odin** role for the server owner, game nights with a
-  planning thread, reminders and **time polls**, a world map link, play streaks, a yearly
+  planning thread, reminders and **time polls**, a "when do people play" heatmap, a world
+  map link, play streaks, a yearly
   **server birthday** post, and a smoother first join
   ([players & community](#players--community), [roles & names](#roles--names)).
 - **Server health:** warnings before the save disk fills up or saves get slow, and an
@@ -85,6 +86,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/muninn when`:** a heatmap of when people usually play, by weekday and hour, with the
+  busiest hours and the best time for a game night. `player:` shows when one character is
+  usually on ([when people play](#when-people-play-muninn-when)).
 - **Ships and tames, from the world save:** `/muninn ships` lists every raft, karve, longship
   and drakkar (and cart) with where it is, furthest first, so the boat left on a far shore
   turns up. `/muninn tames` counts the tamed wolves, boars, lox, chickens and asksvin, and
@@ -256,7 +260,7 @@ And without the bot:
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
   [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) ·
-  [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
+  [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [When people play](#when-people-play-muninn-when) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
@@ -659,7 +663,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -711,6 +715,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn compare <player> [other]` | Anyone | Two characters side by side: time played, visits, longest session, deaths, achievements, with the leader of each marked. No `other` = your linked character | Stats database |
 | `/muninn bosses` | Anyone | Every boss with ✅ or ⬜, when it fell, and which is next ([boss progress](#boss-progress)) | `save_dir` |
 | `/muninn portals` | Anyone | Portals that go nowhere, names used 3+ times, portals without a name, and the connected pairs ([portals](#portals-and-tombstones)) | `save_dir` |
+| `/muninn when [player] [weeks]` | Anyone | Heatmap of when people usually play, by weekday and hour, with the best time for a game night; `player` for one character ([details](#when-people-play-muninn-when)) | Stats database |
 | `/muninn ships` | Anyone | Every raft, karve, longship and drakkar, furthest from the start first, and the carts ([ships](#ships-and-tames)) | `save_dir` |
 | `/muninn tames` | Anyone | Tamed animals: how many of each, and the named ones with stars and where they are ([tames](#ships-and-tames)) | `save_dir` |
 | `/muninn tombstones` | Anyone | Every tombstone nobody has emptied yet: whose, the day they died, and where ([tombstones](#portals-and-tombstones)) | `save_dir` |
@@ -1208,6 +1213,32 @@ Pages without an infobox get the summary, the picture and the link.
 - **Credit:** the wiki's text is CC BY-SA, so every card names the Valheim Wiki and links
   the page.
 - **Turn it off** with `"wiki": false` in the `admin_bot` block.
+
+### When people play: `/muninn when`
+
+"Is anyone on tonight?" and "when should we do the Bonemass run?", answered from the play
+history the bot already keeps. `/muninn when` posts a heatmap of the last 4 weeks:
+
+```
+     00 02 04 06 08 10 12 14 16 18 20 22
+Mon  ·· ·· ·· ·· ·· ·· ·· ·· ▂▂ ▃▃ ▅▅ ▃▃
+Tue  ·· ·· ·· ·· ·· ·· ·· ·· ▁▁ ▃▃ ▄▄ ▂▂
+…
+Sat  ▂▂ ·· ·· ·· ·· ▂▂ ▃▃ ▄▄ ▅▅ ▇▇ ██ ▆▆
+Sun  ▁▁ ·· ·· ·· ·· ▃▃ ▄▄ ▄▄ ▃▃ ▄▄ ▃▃ ▁▁
+Best time for a game night: Sat 20:00–22:00 (3.1 online on average).
+Busiest hours: Sat 21:00 (3.4) · Sat 20:00 (2.9) · Fri 21:00 (2.6)
+```
+
+With Pillow (included in the Docker image) a coloured picture of all 24 hours comes with it.
+
+- **What the numbers mean:** how many players were online on average in that hour of the
+  week. 3.1 means about three people, most weeks.
+- **`player:Ingrid`** shows when one character is usually on, as the share of each hour they
+  were playing ("Most likely on: Fri 20:00–22:00").
+- **`weeks:`** looks further back, 1 to 12 weeks.
+- **Server time:** hours are in the container's time zone (`TZ` in `.env`).
+- It goes well with [`/warcouncil plan`](#players--community): pick the time it suggests.
 
 ### Players & community
 
@@ -1825,6 +1856,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | The server's birthday came on the wrong day, or not at all | It counts from the first visit in the stats database, which can be later than the server's real start; and it needs `milestone` in `events` | Load older logs with `--backfill` ([catching up](#catching-up-on-old-logs)) so the first visit is right |
 | ☀️ Day says "not known yet" | No world save found under `save_dir` (and nobody has slept since the start) | Check `save_dir` points at the folder holding `worlds_local`; with several worlds, set `bosses.world` |
 | ☀️ Day is behind the game by a day | The save is up to 30 minutes old | It catches up at the next save or the next sleep |
+| `/muninn when`'s hours are shifted | The container's time zone isn't yours | Set `TZ` in `.env` (e.g. `TZ=America/Los_Angeles`) and recreate the container |
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
 | Mímir has a holder but nobody got the role | The leading character isn't linked | `/valheim link <character>`; the role follows within a minute |
@@ -2708,7 +2740,7 @@ Added here:
 - **Honors:** 16 built-in roles for deeds the log can't see, custom ones, and an
   admin-adopted role managed by the bot; given directly, by poll, or as a bounty prize.
 - **More community:** bounties with the Skadi role, join-to-create voice channels,
-  `/muninn compare` and `uptime`, `/odin announce`, play streaks (in `/muninn stats` and
+  `/muninn compare`, `uptime` and `when` (a weekday × hour heatmap), `/odin announce`, play streaks (in `/muninn stats` and
   `/muninn top`), anniversaries and the server's birthday, quiet hours and digests for the feed, "come join" DMs and welcome DMs.
 - **`/odin restore`:** puts back one of Valheim's backups through the host helper, keeping
   the current world as a backup.

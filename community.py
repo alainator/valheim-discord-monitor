@@ -525,6 +525,77 @@ def login_milestone(conn, player: str, now: _dt.datetime, offset: int = 0) -> Op
     return detail
 
 
+# ---------------------------------------------------------------------------
+# When people play (/muninn when)
+# ---------------------------------------------------------------------------
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+SPARK = "·▁▂▃▄▅▆▇█"
+
+
+def online_grid(conn, offset: int, weeks: int = 4, player: str = "", now: Optional[float] = None) -> list:
+    """7 × 24 (Monday first, local hours): how many players were online on average in each
+    hour of the week over the last `weeks` weeks (one player's share of the hour, for
+    `player`). Log times + offset = real time."""
+    now = time.time() if now is None else now
+    since = now - weeks * 7 * 86400
+    grid = [[0.0] * 24 for _ in range(7)]
+    sql = ("SELECT login_at, COALESCE(logout_at, last_seen_at) AS until FROM play_sessions "
+           "WHERE COALESCE(logout_at, last_seen_at) > ? AND login_at < ?")
+    params = [since - offset, now - offset]
+    if player:
+        sql += " AND player = ? COLLATE NOCASE"
+        params.append(player)
+    for r in _rows(conn, sql, params):
+        t, end = max(r["login_at"] + offset, since), min((r["until"] or r["login_at"]) + offset, now)
+        while t < end:
+            local = _dt.datetime.fromtimestamp(t).astimezone()
+            hour_end = (local.replace(minute=0, second=0, microsecond=0) + _dt.timedelta(hours=1)).timestamp()
+            step = min(end, hour_end) - t
+            grid[local.weekday()][local.hour] += step / 3600
+            t += max(step, 1)
+    return [[v / weeks for v in row] for row in grid]
+
+
+def busiest(grid: list, span: int = 2) -> tuple:
+    """(weekday, start hour, average online) of the busiest `span`-hour stretch."""
+    best = (0, 0, 0.0)
+    for d in range(7):
+        for h in range(24):
+            avg = sum(grid[(d + (h + i) // 24) % 7][(h + i) % 24] for i in range(span)) / span
+            if avg > best[2]:
+                best = (d, h, avg)
+    return best
+
+
+def render_when(grid: list, weeks: int, player: str = "", server_name: str = "") -> dict:
+    """/muninn when: a text heatmap (2-hour columns), the busiest times and a suggestion."""
+    cols = [[(row[h] + row[h + 1]) / 2 for h in range(0, 24, 2)] for row in grid]
+    peak = max(max(r) for r in cols)
+    if peak <= 0:
+        who = f"**{player}** hasn't" if player else "Nobody has"
+        return {"title": "🕰️ When people play", "color": 0x5865F2,
+                "description": f"{who} played in the last {weeks} week{'s' if weeks != 1 else ''}."}
+    lines = ["     " + " ".join(f"{h:02d}" for h in range(0, 24, 2))]
+    for d, row in enumerate(cols):
+        lines.append(f"{WEEKDAYS[d]}  " + " ".join(
+            (SPARK[0] if v <= 0 else SPARK[1 + min(7, round(v / peak * 7))]) * 2 for v in row))
+    hours = sorted(((grid[d][h], d, h) for d in range(7) for h in range(24)), reverse=True)[:3]
+    d, h, avg = busiest(grid)
+    unit = "of the time" if player else "online on average"
+    if player:
+        top = " · ".join(f"{WEEKDAYS[d_]} {h_:02d}:00 ({v:.0%})" for v, d_, h_ in hours if v > 0)
+        tip = f"Most likely on: **{WEEKDAYS[d]} {h:02d}:00–{(h + 2) % 24:02d}:00** ({avg:.0%} {unit})."
+    else:
+        top = " · ".join(f"{WEEKDAYS[d_]} {h_:02d}:00 ({v:.1f})" for v, d_, h_ in hours if v > 0)
+        tip = (f"Best time for a game night: **{WEEKDAYS[d]} {h:02d}:00–{(h + 2) % 24:02d}:00** "
+               f"({avg:.1f} {unit}).")
+    title = f"🕰️ When {player} plays" if player else f"🕰️ When people play{' on ' + server_name if server_name else ''}"
+    return {"title": title, "color": 0x5865F2,
+            "description": "```\n" + "\n".join(lines) + "\n```\n" + tip + f"\nBusiest hours: {top}",
+            "footer": {"text": f"Last {weeks} week{'s' if weeks != 1 else ''} · server time · "
+                               + ("share of each hour they were on" if player else "average players online per hour")}}
+
+
 def render_compare(a: dict, b: dict) -> dict:
     """/muninn compare: two player_stats() side by side, with the leader of each row marked."""
     rows = [("Time played", "seconds", _dur), ("Visits", "sessions", str), ("Longest session", "longest", _dur),
