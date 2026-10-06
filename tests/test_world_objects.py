@@ -346,3 +346,65 @@ class CommandErrorTest(unittest.TestCase):
         self.assertEqual([s[0] for s in sent], ["followup", "response"])
         self.assertTrue(all(s[2] for s in sent))                   # only the user sees it
         self.assertIn("Something went wrong", sent[0][1])
+
+
+class DeathMapTest(unittest.TestCase):
+    def test_recording_hotspots_and_cards(self):
+        import community
+        import stats_db
+        with tempfile.TemporaryDirectory() as d:
+            st = stats_db.Store(os.path.join(d, "s.db"))
+            graves = [{"owner": "Ingrid", "died": 700000.4, "x": -2010.2, "y": 0, "z": 1170.0},
+                      {"owner": "Bjorn", "died": 700500.0, "x": -2050.0, "y": 0, "z": 1150.0},
+                      {"owner": "Bjorn", "died": None, "x": 300.0, "y": 0, "z": 300.0}]
+            self.assertEqual(community.record_death_spots(st.conn, graves), 3)
+            self.assertEqual(community.record_death_spots(st.conn, graves[:2]), 0)      # seen again: once
+            self.assertEqual(len(community.death_spots(st.conn)), 3)
+            self.assertEqual(len(community.death_spots(st.conn, "bjorn")), 2)
+            points = community.death_spots(st.conn)
+            st.close()
+        spots = wo.hotspots(points)
+        self.assertEqual(spots[0][0], 2)                                    # the two near x -2030
+        self.assertEqual(spots[0][3], {"Ingrid": 1, "Bjorn": 1})
+        e = wo.render_deathmap(points, server_name="Alheim")
+        self.assertEqual(e["title"], "💀 Where we die in Alheim")
+        self.assertIn("**3** tombstones recorded.", e["description"])
+        self.assertIn("☠️ **2** · x -2030, z 1160 · 2.3 km NW of the start", e["description"])
+        self.assertIn("No tombstones recorded yet", wo.render_deathmap([], "Bjorn")["description"])
+
+    def test_picture(self):
+        try:
+            import PIL  # noqa: F401
+        except ImportError:
+            self.skipTest("Pillow not installed")
+        self.assertIsNone(wo.death_map([]))
+        pts = [{"owner": "Ingrid", "x": -2000, "z": 1170}, {"owner": "Bjorn", "x": -2010, "z": 1160}]
+        png = wo.death_map(pts, [{"tag": "Elder", "x": -1741, "z": 1018}], "Where we die")
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+    @unittest.skipIf(discord is None, "discord.py not installed")
+    def test_bot_records_tombstones_from_each_scan(self):
+        import asyncio
+        import admin_bot
+        import community
+        with tempfile.TemporaryDirectory() as d:
+            world = os.path.join(d, "worlds_local", "Alheim")
+            os.makedirs(world)
+            with open(os.path.join(world, "_main.1.db2"), "wb") as f:
+                f.write(struct.pack("<id", 41, 700000.0))
+            with open(os.path.join(world, "a.chunk"), "wb") as f:
+                f.write(b"\x29\x00" + TOMBSTONE)
+            b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "S")
+            b.attach(db_path=os.path.join(d, "s.db"))
+            b._meta("touch", 1)
+
+            async def scan():
+                return await asyncio.to_thread(b.world_objects)
+            asyncio.run(scan())
+            self.assertEqual([p["owner"] for p in community.death_spots(b.db)], ["Geedorah"])
+            with open(os.path.join(world, "a.chunk"), "wb") as f:      # emptied: gone from the save
+                f.write(b"\x29\x00")
+            with open(os.path.join(world, "_main.2.db2"), "wb") as f:
+                f.write(struct.pack("<id", 41, 701800.0))
+            asyncio.run(scan())
+            self.assertEqual(len(community.death_spots(b.db)), 1)       # still on the map
