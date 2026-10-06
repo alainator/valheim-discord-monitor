@@ -74,6 +74,11 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Everything stays in step:** at each start the bot updates the channel topics it set
+  (now listing every `/muninn` and `/warcouncil` command), the channel guide and the pinned
+  command guides. The Hall of Champions gains **Óðr** (who's away) and **Skadi** (this week's
+  bounty hunters), and `/muninn titles` lists the bounty hunters too
+  ([server setup](#server-setup-odin-setup)).
 - **`/valheim progress`:** upload your character file (`.fch`) and see which achievements
   you're still missing (crafting, building, cooking, kills, bosses, fish, trophies, ways
   to die), with a full list to download and an optional summary to share
@@ -926,6 +931,8 @@ voice channels or categories.
 | `bosses` | Bosses defeated in this world and the next one ("🏆 Bosses: 3/8 · next: Moder"), from the [world save](#boss-progress) |
 | `title_owner` | Odin: the Discord server's owner |
 | `title_time`, `title_deaths`, `title_sessions`, `title_longest`, `title_achievements`, `title_least` | The [title](#title-roles) holders: Heimdall, Hel, Sleipnir, Thor, Bragi, Hœnir (`titles` means all of them) |
+| `away` | Óðr: how many linked players [haven't been on](#title-roles) for a while ("🛶 Óðr (away 14+ days): 2") |
+| `bounty_hunter` | Skadi: who holds the [bounty](#bounties) hunter role this week |
 
 **Setup:** add this to the `admin_bot` block, then `docker compose up -d --force-recreate`:
 ```json
@@ -1018,6 +1025,10 @@ The [stat channels](#stat-channels) stay on top.
   `/muninn` in #muninns-roost, `/warcouncil` in #war-council and `/odin` in the admin
   channel. Each lists the group's commands with what they do, built from the commands
   themselves, and the bot updates them at start-up so new commands show up.
+- **It keeps its own texts current.** At every start the bot also updates channel topics
+  that still show an older default wording, and the channel guide built from them, so an
+  update's new commands and features appear without running setup again. Topics you wrote
+  yourself are never touched, and nothing is created at start-up.
   `/odin setup action:guides` posts them without running the rest of setup (or again, if
   one was deleted).
 - **#runestone** is left for your rules and announcements: fill it with `/odin rules` and
@@ -1563,7 +1574,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | A channel's command guide is missing or out of date | It was deleted, or the channel didn't exist when setup ran | `/odin setup action:guides` posts it again; the bot refreshes the others at start-up |
 | Members get "Run `/muninn stats` in #…" | That command belongs in its home channel since `/odin setup` | Run it there, or change it with `admin_bot.command_channels` (`false` turns it off) |
 | A command's home channel is wrong or was deleted | It points at the channel setup remembered | Run `/odin setup apply` again (it recreates missing channels), or set `"command_channels": {"stats": "<channel id>"}` |
-| `/valheim stats`, `/valheim plan` or `/valheim permit` are gone | The commands were split into groups | Use `/muninn stats` (and `top`, `titles`, `online`), `/warcouncil plan`, and `/odin` for the admin commands. Press Ctrl+R if Discord still shows the old ones |
+| `/valheim stats`, `/valheim plan` or `/valheim permit` are gone | The commands were split into groups | Use `/muninn stats` (and the other `/muninn` commands), `/warcouncil plan`, and `/odin` for the admin commands. Press Ctrl+R if Discord still shows the old ones |
 | You can see `/muninn`, `/warcouncil` and `/odin` in every channel | You're the owner or an admin: Discord shows them everything | Members don't; check with a friend or a second account |
 | A bot admin can't see `/odin` | Discord hides it from anyone without Manage Server | Server Settings → Integrations → the bot → `/odin` → add their role |
 | `/odin restore` says "couldn't stop the server" | The sudoers line for stop/start is missing | Add it ([restore setup](#restoring-a-backup-odin-restore)); `sudo -l -U valheim` must list `stop` and `start` |
@@ -2238,6 +2249,10 @@ python valheim_discord_monitor.py --config config.example.json --replay sample_c
   naming and rate limiting, the extras (live state, board, milestones, recap, backups),
   and the audit fixes. They run offline, with no Discord or
   Valheim needed.
+- **Consistency:** `tests/test_consistency.py` fails when a command, role, honor or stat
+  channel isn't reflected everywhere that describes it (README, channel topics, home
+  channels, welcome DM, guides). Adding a feature? Follow the checklist in
+  [CONTRIBUTING.md](CONTRIBUTING.md).
 - **CI:** `.github/workflows/tests.yml` runs the tests on Python 3.9 and 3.12, does the
   replay, and builds the Docker image, on every push to `main` and every pull request.
 - **Sample log:** `sample_console.log` is a short example log with crossplay joins, a

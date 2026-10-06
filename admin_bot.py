@@ -160,6 +160,7 @@ WELCOME_DM = ("👋 Welcome to **{guild}**, {member}! We play Valheim on **{serv
               "• `/valheim request-access`: tell the admins which character you'll play, if the server "
               "uses a permitted list\n"
               "• `/valheim link`: link your character, for the In Valheim role and your stats\n"
+              "• `/valheim progress`: see which achievements your character is still missing\n"
               "See you in the tenth world.")
 
 # Huginn's posts the bot reacts to, so people can react along.
@@ -656,7 +657,9 @@ class AdminBot:
             show = self._stats_show_cfg
             if show is None:                 # everything that makes sense with this config
                 show = [k for k in stat_channels.STATS
-                        if not (k.startswith("title_") and k != "title_owner" and not self.titles_on)]
+                        if not (k.startswith("title_") and k != "title_owner" and not self.titles_on)
+                        and not (k == "away" and not (self.titles_on and self.away_role_name))
+                        and not (k == "bounty_hunter" and not self.bounty_role_name)]
             unknown = [k for k in show if k not in stat_channels.STATS and k not in stat_channels.ALIASES]
             if unknown:
                 log.warning("admin_bot: unknown stat_channels.show entries %s; known: %s",
@@ -1651,8 +1654,9 @@ class AdminBot:
         self._meta("layout:undo", json.dumps(undo))
         return problems
 
-    async def _layout_guide(self, guild, p: dict) -> None:
-        """Post (or update) a guide to every channel in the welcome channel."""
+    async def _layout_guide(self, guild, p: dict, create: bool = True) -> None:
+        """Post (or update) a guide to every channel in the welcome channel. create=False only
+        updates a guide that was posted before (at start-up)."""
         import discord
         import stat_channels
         cid = self._meta("layout:ch:welcome")
@@ -1688,6 +1692,8 @@ class AdminBot:
                 except discord.NotFound:
                     msg = None
             if msg is None:
+                if not create:
+                    return
                 msg = await channel.send(embed=embed)
                 self._meta("layout:guide", msg.id)
             if not getattr(msg, "pinned", False):
@@ -1738,12 +1744,39 @@ class AdminBot:
         return done
 
     async def _refresh_guides(self) -> None:
+        """At start-up, bring what /odin setup posted up to date with this version of the bot: the
+        pinned command guides, channel topics still showing an older default, and the channel guide.
+        Nothing is created here; only what's already there is updated."""
         await asyncio.sleep(20)
         try:
             guild = self.client.get_guild(self.guild_id) or await self.client.fetch_guild(self.guild_id)
             await self._command_guides(guild, create=False)
+            changed = await self._refresh_topics(guild)
+            import server_layout
+            await self._layout_guide(guild, server_layout.template_plan(), create=False)
+            if changed:
+                log.info("admin_bot: updated %d channel topic(s) to this version's wording", changed)
         except Exception as e:  # noqa: BLE001
-            log.info("admin_bot: couldn't refresh the command guides: %s", e)
+            log.info("admin_bot: couldn't refresh the guides and topics: %s", e)
+
+    async def _refresh_topics(self, guild) -> int:
+        """Topics /odin setup set that still show an older default get the current one. Topics
+        someone wrote themselves are left alone. Returns how many changed."""
+        import discord
+        import server_layout
+        changed = 0
+        for ch in server_layout.template_plan()["channels"]:
+            cid = self._meta(f"layout:ch:{ch['key']}")
+            channel = guild.get_channel(int(cid)) if cid and str(cid).isdigit() else None
+            if channel is None or not ch["topic"] or not hasattr(channel, "topic"):
+                continue
+            if (channel.topic or "") in server_layout.OLD_TOPICS.get(ch["key"], ()):
+                try:
+                    await channel.edit(topic=ch["topic"], reason="Valheim bot: updated channel topic")
+                    changed += 1
+                except discord.HTTPException as e:
+                    log.info("admin_bot: couldn't update the topic of #%s: %s", channel, e)
+        return changed
 
     async def _layout_undo(self, guild) -> tuple:
         """Put every renamed/moved channel back. Channels the setup created are left (and
@@ -1878,6 +1911,10 @@ class AdminBot:
         if db:
             titles.update({f"title_{cat}": (name, (community.title_holder(db, cat) or {}).get("player"))
                            for cat, (name, _, _) in community.TITLES.items()})
+        if self.away_role_name and self.titles_on:
+            titles["away"] = (self.away_role_name, len(self._away_holders()), self.away_days)
+        if self.bounty_role_name:
+            titles["bounty_hunter"] = (self.bounty_role_name, self._bounty_hunter_names())
         name = stat_channels.name_for(
             key, self.live.snapshot() if self.live else {}, db,
             offset=community.log_clock_offset(db) if db else 0,
@@ -2649,6 +2686,16 @@ class AdminBot:
                 log.info("admin_bot: couldn't announce bounty #%s: %s", b["id"], e)
         log.info("admin_bot: bounty #%s confirmed for %s by %s", b["id"], uid, it.user)
 
+    def _bounty_hunter_names(self) -> list:
+        """Who holds the bounty role now, by linked character (or "a hunter" when not linked)."""
+        import community
+        names = []
+        for uid, until in self._bounty_holders().items():
+            if until > time.time():
+                mine = community.linked_players(self.db, uid) if self.db_path else []
+                names.append(mine[0] if mine else "a hunter")
+        return names
+
     def _bounty_holders(self) -> dict:
         try:
             return {str(k): float(v) for k, v in json.loads(self._meta("bounty:holders") or "{}").items()}
@@ -2958,8 +3005,10 @@ class AdminBot:
                 await it.followup.send(f"Couldn't update the title roles: {e}", ephemeral=True)
                 return
             away = sorted(bot._away_holders()) if bot.away_role_name else None
+            hunters = (bot.bounty_role_name, sorted(u for u, t in bot._bounty_holders().items() if t > time.time())) \
+                if bot.bounty_role_name else None
             await it.followup.send(embed=discord.Embed.from_dict(
-                community.render_titles(holders, changed, bot.titles_period, away, bot.away_days)),
+                community.render_titles(holders, changed, bot.titles_period, away, bot.away_days, hunters)),
                 allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="compare", description="Two characters side by side: time, visits, deaths and more")
