@@ -1521,6 +1521,28 @@ bed or leave a tombstone.
 - From the same world save as [portals and tombstones](#portals-and-tombstones): up to 30
   minutes behind, no setup, follows `bosses.world`.
 
+**Good to know:**
+- **What counts** is anything placed with the hammer: building pieces, furniture,
+  workbenches and their upgrades, chests, torches, fences, portals, boats and carts. Every
+  piece counts as one, so a fence post counts the same as a longship.
+- **Each character has its own ID.** Someone who plays two characters shows up twice. A
+  character deleted and remade under the same name gets a new ID; both are added together
+  under that name.
+- **Names come from what's in the world now.** If a player's only bed is torn down and they
+  have no tombstone lying around, their pieces go back to "can't name yet" until they sleep
+  in a bed again. Keeping a bed somewhere is enough.
+- **When the counts update:** whenever someone runs `/muninn builders` (or `portals`,
+  `tombstones`, `ships`, `tames`) after a new save, and before each weekly title run, so
+  Völundr always goes by the latest save.
+- **Check it on your server:** `docker compose exec valheim-discord-monitor python3
+  world_objects.py /valheim_save_data` lists the builders along with everything else:
+  ```
+  11049 pieces by 7 builders (0 without a name, 0 pieces):
+    Ingrid                   5341
+    Bjorn                    3291
+    …
+  ```
+
 ### Ships and tames
 
 Two more things read from the same world save, with no setup:
