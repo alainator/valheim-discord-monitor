@@ -53,7 +53,7 @@ except ImportError:
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
                   "uptime": "bots", "bosses": "bots", "honors": "bots", "progress": "bots", "portals": "bots",
-                  "tombstones": "bots", "ships": "bots", "tames": "bots", "when": "bots", "builders": "bots",
+                  "tombstones": "bots", "ships": "bots", "tames": "bots", "when": "bots", "builders": "bots", "deathmap": "bots",
                   "plan": "plans",
                   "bounties": "plans"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
@@ -483,6 +483,7 @@ class AdminBot:
         self._boss_read = (None, 0.0)           # (path, mtime) of the last save read
         self._day_read = (None, 0.0, None)      # (path, mtime, in-game day) from the save
         self._objects_read = (None, 0.0, None)  # (path, mtime, portals and tombstones) from the save
+        self._world_task = None
         # /valheim link sets a member's server nickname to the character (only if they have none).
         self.link_nickname = bool(cfg.get("link_nickname", False))
         # Commands used in the wrong channel get a private "run it in #…" instead. true: the
@@ -649,6 +650,8 @@ class AdminBot:
             return                            # the rest need the database from attach()
         if self.db_path and self._plan_task is None:
             self._plan_task = asyncio.ensure_future(self._plan_loop())
+        if self.lists.save_dir and self.db_path and self._world_task is None:
+            self._world_task = asyncio.ensure_future(self._world_loop())
         if self.patch_notes_on and self._patch_task is None:
             self._patch_task = asyncio.ensure_future(self._patch_loop())
         if self.bosses_on and self.lists.save_dir and self._boss_task is None:
@@ -1987,6 +1990,7 @@ class AdminBot:
                 conn = stats_db.connect(self.db_path)
                 try:
                     community.save_builders(conn, world_objects.builder_counts(found)[0])
+                    community.record_death_spots(conn, found["tombstones"])     # for the death map
                 finally:
                     conn.close()
         return self._objects_read[2]
@@ -2408,6 +2412,17 @@ class AdminBot:
         await it.response.edit_message(embed=embed, view=self._buttons(pid, disabled=True))
         if self.tidy_hours > 0 and it.message:
             self._queue_tidy(it.message.channel.id, it.message.id)
+
+    async def _world_loop(self) -> None:
+        """Read the world save after each save (checked every 10 minutes), so tombstones are
+        recorded for the death map even when nobody runs a command."""
+        await asyncio.sleep(90)
+        while True:
+            try:
+                await asyncio.to_thread(self.world_objects)
+            except Exception as e:  # noqa: BLE001
+                log.info("admin_bot: world save check failed: %s", e)
+            await asyncio.sleep(600)
 
     # -- the progress board (/valheim progress board:True, /muninn progress) ----------
     async def _progress_board(self, user_id, name: str, parsed: dict, board: Optional[bool]) -> str:
@@ -3317,6 +3332,30 @@ class AdminBot:
             await it.followup.send(embed=discord.Embed.from_dict(
                 world_objects.render_builders(found, bot.server_name)),
                 allowed_mentions=discord.AllowedMentions.none())
+
+        @muninn.command(name="deathmap", description="A map of where people die most, from the tombstones seen")
+        @app_commands.describe(player="Just one character (default: everyone)")
+        async def deathmap_cmd(it: discord.Interaction, player: str = ""):
+            import io
+            import world_objects
+            if not await need_db(it):
+                return
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)          # records any new tombstones first
+            name = (community.known_player(bot.db, player) or player.strip()) if player.strip() else ""
+            points = community.death_spots(bot.db, name)
+            embed = world_objects.render_deathmap(points, name, bot.server_name)
+            title = (f"Where {name} dies" if name else "Where we die") + f" · {len(points)} tombstones"
+            png = await asyncio.to_thread(world_objects.death_map, points, (found or {}).get("portals", []), title)
+            if png:
+                embed["image"] = {"url": "attachment://deathmap.png"}
+                await it.followup.send(embed=discord.Embed.from_dict(embed),
+                                       file=discord.File(io.BytesIO(png), filename="deathmap.png"),
+                                       allowed_mentions=discord.AllowedMentions.none())
+            else:
+                await it.followup.send(embed=discord.Embed.from_dict(embed),
+                                       allowed_mentions=discord.AllowedMentions.none())
+        deathmap_cmd.autocomplete("player")(player_choices)
 
         @muninn.command(name="ships", description="Every ship and cart in the world, and where it is")
         async def ships_cmd(it: discord.Interaction):

@@ -53,7 +53,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   go nowhere, `/muninn tombstones` the gear nobody has picked up yet, with where to find it
   ([portals and tombstones](#portals-and-tombstones)). `/muninn ships` finds every boat, and
   `/muninn tames` every tamed animal and its name ([ships and tames](#ships-and-tames)), and
-  `/muninn builders` who built the most, with a **Völundr** title ([builders](#builders-muninn-builders)).
+  `/muninn builders` who built the most, with a **Völundr** title ([builders](#builders-muninn-builders)),
+  and `/muninn deathmap` where everyone keeps dying ([death map](#death-map-muninn-deathmap)).
 - **Achievement progress from a character file:** players upload their `.fch` with
   `/valheim progress` and see which achievements they're still missing. Those who opt in
   join a `/muninn progress` board, with the **Mímir** title for the leader and a post when
@@ -87,6 +88,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/muninn deathmap`:** a map of where people die, built up from every tombstone the world
+  saves show, with your portals for bearings and the worst spots circled and listed with
+  coordinates. `player:` for one character ([death map](#death-map-muninn-deathmap)).
 - **Fixed: `/muninn builders` (and portals, tombstones, ships, tames) not answering** the first
   time they ran after a world save. Any command that fails now answers with a short message
   instead of staying on "thinking…".
@@ -271,7 +275,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
-  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) · [Builders](#builders-muninn-builders) ·
+  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) · [Builders](#builders-muninn-builders) · [Death map](#death-map-muninn-deathmap) ·
   [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [When people play](#when-people-play-muninn-when) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
@@ -675,7 +679,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -729,6 +733,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn portals` | Anyone | Portals that go nowhere, names used 3+ times, portals without a name, and the connected pairs ([portals](#portals-and-tombstones)) | `save_dir` |
 | `/muninn when [player] [weeks]` | Anyone | Heatmap of when people usually play, by weekday and hour, with the best time for a game night; `player` for one character ([details](#when-people-play-muninn-when)) | Stats database |
 | `/muninn builders` | Anyone | Who built the most: pieces still standing in the world, per builder ([builders](#builders-muninn-builders)) | `save_dir` |
+| `/muninn deathmap [player]` | Anyone | A map of where people die, from every tombstone seen in a world save, with the worst spots listed ([death map](#death-map-muninn-deathmap)) | `save_dir`, stats database |
 | `/muninn ships` | Anyone | Every raft, karve, longship and drakkar, furthest from the start first, and the carts ([ships](#ships-and-tames)) | `save_dir` |
 | `/muninn tames` | Anyone | Tamed animals: how many of each, and the named ones with stars and where they are ([tames](#ships-and-tames)) | `save_dir` |
 | `/muninn tombstones` | Anyone | Every tombstone nobody has emptied yet: whose, the day they died, and where ([tombstones](#portals-and-tombstones)) | `save_dir` |
@@ -1550,6 +1555,36 @@ bed or leave a tombstone.
     …
   ```
 
+### Death map: `/muninn deathmap`
+
+Every tombstone that shows up in a world save is written down (whose, which day, where),
+and stays recorded after it's emptied. `/muninn deathmap` draws them:
+
+![/muninn deathmap: tombstones in red, the worst spots circled, portals in purple](assets/deathmap.png)
+
+*(Example with made-up deaths.)* Red dots are tombstones, red circles the worst spots with
+how many died there, purple diamonds your portals and green the start, so you can find your
+way. The map zooms to where the deaths are. Underneath, the worst spots:
+
+```
+💀 Where we die in Alheim
+23 tombstones recorded.
+☠️ 7 · x -2062, z 1169 · 2.4 km NW of the start
+   Sigrid ×3, Ingrid ×2, Bjorn ×2
+☠️ 2 · x -1838, z 1114 · 2.1 km NW of the start
+```
+
+- **`player:Ingrid`** maps one character's deaths.
+- **How deaths are found:** the bot reads the world save every time Valheim writes one
+  (checked every 10 minutes), and any command that reads the save does too. A tombstone
+  emptied before the next save (Valheim saves every 30 minutes) is never seen, so quick
+  corpse runs near base may be missing. Deaths far out, the ones worth mapping, almost
+  always last that long.
+- **It starts now:** tombstones lying around when you update are recorded straight away;
+  older, already-emptied ones can't be recovered.
+- **Hotspots** group deaths in 250 m squares.
+- Kept in the stats database (`death_spots`), so it survives restarts and updates.
+
 ### Ships and tames
 
 Two more things read from the same world save, with no setup:
@@ -1947,6 +1982,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
 | A `/muninn` world command (builders, portals, tombstones, ships, tames) never answered | A bug in versions before this one: the first run after each save failed | Update; a failing command now always answers, and the error is in the bot's log |
+| A death is missing from `/muninn deathmap` | The tombstone was emptied before the world was next saved (every 30 minutes) | Nothing to fix: only tombstones that last until a save are seen |
 | A builder shows as "can't name yet" | They've never slept in a bed or left a tombstone in this world | Have them sleep in a bed once; the name shows after the next save |
 | Mímir has a holder but nobody got the role | The leading character isn't linked | `/valheim link <character>`; the role follows within a minute |
 | `/valheim wiki` says it couldn't reach the wiki, or shows no suggestions | No internet from the container, or the wiki is slow (suggestions give up after 2.5 s) | Check the container's network; type the full name and press Enter |
@@ -2750,7 +2786,7 @@ save; never written to):
 | `_main.<N>.fwl2` | World name and seed | `/valheim map` |
 | `_main.<N>.db2`, first 12 bytes | World version and the game clock | The ☀️ Day channel, tombstone days |
 | `_main.<N>.db2`, packed part | Global keys (`defeated_eikthyr`, …) | [Boss progress](#boss-progress) |
-| `*.chunk` | Every object in the world | [Portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the weekly world digest](#this-week-in-the-world) |
+| `*.chunk` | Every object in the world | [Portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the death map](#death-map-muninn-deathmap), [the weekly world digest](#this-week-in-the-world) |
 
 Valheim writes all of them at each save (every 30 minutes and at shutdown), so everything
 read from the save is up to half an hour behind the game. Before 1.0 a world was one
@@ -2868,6 +2904,8 @@ Added here:
   animals with their names.
 - **Builders board:** pieces standing in the world per builder, named through beds and
   tombstones, with the Völundr title.
+- **Death map:** every tombstone seen in a world save is recorded and mapped, with the
+  worst spots.
 - **Weekly world digest:** the recap compares this week's world save with last week's:
   pieces and builders, portals, ships, tombstones and tames.
 - **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and

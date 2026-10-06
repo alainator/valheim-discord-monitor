@@ -181,6 +181,16 @@ def init_schema(conn: sqlite3.Connection) -> None:
             updated_at INTEGER NOT NULL              -- real epoch
         );
 
+        -- /muninn deathmap: every tombstone seen in a world save, kept after it's emptied
+        CREATE TABLE IF NOT EXISTS death_spots (
+            owner   TEXT NOT NULL,
+            died    INTEGER NOT NULL,                -- game time in seconds (0 if unknown)
+            x       INTEGER NOT NULL,
+            z       INTEGER NOT NULL,
+            seen_at INTEGER NOT NULL,                -- real epoch, first seen
+            PRIMARY KEY (owner, died, x, z)
+        );
+
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT

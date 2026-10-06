@@ -329,6 +329,100 @@ def render_builders(found: dict, server_name: str = "") -> dict:
             "footer": {"text": "Pieces standing in the world now, by who placed them · from the last save"}}
 
 
+# -- the death map ------------------------------------------------------------------------
+def hotspots(points: list, cell: float = 250) -> list:
+    """[(deaths, x, z, {owner: n})] for each `cell`-metre square with deaths, worst first;
+    x, z is the average spot inside it."""
+    cells: dict = {}
+    for p in points:
+        key = (math.floor(p["x"] / cell), math.floor(p["z"] / cell))
+        cells.setdefault(key, []).append(p)
+    out = []
+    for group in cells.values():
+        who: dict = {}
+        for p in group:
+            who[p["owner"]] = who.get(p["owner"], 0) + 1
+        out.append((len(group), sum(p["x"] for p in group) / len(group), sum(p["z"] for p in group) / len(group), who))
+    return sorted(out, key=lambda h: -h[0])
+
+
+def render_deathmap(points: list, player: str = "", server_name: str = "") -> dict:
+    title = f"💀 Where {player} dies" if player else f"💀 Where we die{' in ' + server_name if server_name else ''}"
+    if not points:
+        return {"title": title, "color": 0x992D22,
+                "description": "No tombstones recorded yet. Each one is noted when a world save has it, so "
+                               "deaths show up here from now on."}
+    lines = [f"**{len(points)}** tombstone{'s' if len(points) != 1 else ''} recorded."]
+    for n, x, z, who in hotspots(points)[:5]:
+        names = ", ".join(f"{o} ×{c}" if c > 1 else o for o, c in sorted(who.items(), key=lambda kv: -kv[1])[:4])
+        lines.append(f"☠️ **{n}** · {where(x, z)}" + ("" if player else f"\n   {names}"))
+    return {"title": title, "color": 0x992D22, "description": "\n".join(lines),
+            "footer": {"text": "Tombstones seen in world saves · one recovered within ~30 minutes may be missed"}}
+
+
+def death_map(points: list, portals: list = (), title: str = "Where we die") -> Optional[bytes]:
+    """A PNG map of tombstone spots (red), with portals (purple) and the start for bearings,
+    zoomed to where the deaths are. None without Pillow or deaths."""
+    if not points:
+        return None
+    try:
+        from io import BytesIO
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return None
+    xs, zs = [p["x"] for p in points] + [0], [p["z"] for p in points] + [0]
+    cx, cz = (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2
+    half = max(max(xs) - min(xs), max(zs) - min(zs), 800) / 2 * 1.15
+    size, top = 800, 50
+    img = Image.new("RGB", (size, size + top), (43, 45, 49))
+    draw = ImageDraw.Draw(img, "RGBA")
+    try:
+        font, small = ImageFont.load_default(size=20), ImageFont.load_default(size=13)
+    except TypeError:                                              # Pillow before 10.1
+        font = small = ImageFont.load_default()
+
+    def px(x, z):
+        return (size / 2 + (x - cx) / half * size / 2, top + size / 2 - (z - cz) / half * size / 2)
+
+    draw.text((16, 14), title, fill=(242, 243, 245), font=font)
+    step = 500 if half < 2000 else 1000 if half < 5000 else 2000          # grid lines, metres
+    g = math.floor((cx - half) / step) * step
+    while g <= cx + half:
+        x0, _ = px(g, 0)
+        draw.line([(x0, top), (x0, top + size)], fill=(60, 63, 69), width=1)
+        draw.text((x0 + 3, top + size - 16), f"x {g:.0f}", fill=(128, 132, 142), font=small)
+        g += step
+    g = math.floor((cz - half) / step) * step
+    while g <= cz + half:
+        _, z0 = px(0, g)
+        draw.line([(0, z0), (size, z0)], fill=(60, 63, 69), width=1)
+        draw.text((4, z0 + 2), f"z {g:.0f}", fill=(128, 132, 142), font=small)
+        g += step
+    sx, sy = px(0, 0)
+    labelled: list = [(sx, sy)]                  # keep portal names clear of "start"
+    for p in portals:
+        x, y = px(p["x"], p["z"])
+        if 0 <= x <= size and top <= y <= top + size:
+            draw.polygon([(x, y - 5), (x + 5, y), (x, y + 5), (x - 5, y)], fill=(126, 87, 194))
+            if p.get("tag") and all(math.hypot(x - a, y - b) > 60 for a, b in labelled):
+                labelled.append((x, y))
+                draw.text((x + 7, y - 7), p["tag"], fill=(179, 157, 219), font=small)
+    draw.ellipse([sx - 6, sy - 6, sx + 6, sy + 6], outline=(87, 242, 135), width=2)
+    draw.text((sx + 9, sy - 7), "start", fill=(87, 242, 135), font=small)
+    for p in points:
+        x, y = px(p["x"], p["z"])
+        draw.ellipse([x - 5, y - 5, x + 5, y + 5], fill=(237, 66, 69, 150))
+    for n, hx, hz, _ in hotspots(points)[:5]:
+        if n > 1:
+            x, y = px(hx, hz)
+            r = 8 + 3 * min(n, 10)
+            draw.ellipse([x - r, y - r, x + r, y + r], outline=(237, 66, 69), width=2)
+            draw.text((x, y - r - 3), str(n), fill=(255, 255, 255), font=small, anchor="mb")
+    out = BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
+
+
 # -- the weekly world digest ---------------------------------------------------------------
 def snapshot(found: dict) -> dict:
     """What to remember of the world for next week's comparison (JSON-friendly)."""

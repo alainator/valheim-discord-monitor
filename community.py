@@ -650,6 +650,24 @@ def save_builders(conn, counts: list, now: Optional[float] = None) -> None:
     conn.commit()
 
 
+def record_death_spots(conn, tombstones: list, now: Optional[float] = None) -> int:
+    """Remember tombstones from a world save (world_objects.scan); each only once. Returns
+    how many were new."""
+    when = int(now if now is not None else time.time())
+    before = conn.total_changes
+    conn.executemany("INSERT OR IGNORE INTO death_spots(owner, died, x, z, seen_at) VALUES (?,?,?,?,?)",
+                     [(t["owner"], round(t["died"] or 0), round(t["x"]), round(t["z"]), when) for t in tombstones])
+    conn.commit()
+    return conn.total_changes - before
+
+
+def death_spots(conn, player: str = "") -> list:
+    """[{"owner", "died", "x", "z"}] recorded so far, one character's with `player`."""
+    if player:
+        return _rows(conn, "SELECT owner, died, x, z FROM death_spots WHERE owner = ? COLLATE NOCASE", (player,))
+    return _rows(conn, "SELECT owner, died, x, z FROM death_spots")
+
+
 def progress_counts(sections: list) -> dict:
     """{list key: [done, total]} from fch_progress.report(); the counts only, no item names."""
     return {s["key"]: [len(s["done"]), s["total"]] for s in sections}
