@@ -3087,7 +3087,8 @@ class AdminBot:
             await it.response.send_message(embed=discord.Embed.from_dict(embed))
         stats.autocomplete("player")(player_choices)
 
-        @muninn.command(name="top", description="Leaderboards: time played, deaths, visits, longest session, achievements")
+        @muninn.command(name="top", description="Leaderboards: time played, deaths, visits, longest session, "
+                                                 "achievements, streaks")
         @app_commands.choices(category=[app_commands.Choice(name=v[0], value=k) for k, v in community.TOP.items()])
         async def top(it: discord.Interaction, category: str = "time"):
             if not await need_db(it):

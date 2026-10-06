@@ -37,7 +37,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
 - **Community:** `/muninn stats` and `/muninn top`, DMs when friends come online, an
   "In Valheim" role, weekly **title roles** for the leaderboard leaders (Heimdall, Hel,
   Sleipnir, Thor, Bragi), an **Odin** role for the server owner, game nights with a
-  planning thread, reminders and **time polls**, a world map link, and a smoother first join
+  planning thread, reminders and **time polls**, a world map link, play streaks, a yearly
+  **server birthday** post, and a smoother first join
   ([players & community](#players--community), [roles & names](#roles--names)).
 - **Server health:** warnings before the save disk fills up or saves get slow, and an
   optional daily restart while nobody's on ([server health](#server-health)).
@@ -78,6 +79,11 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Streaks and the server's birthday:** `/muninn stats` shows each player's current and best
+  play streak (days in a row), `/muninn top streak` ranks the longest streaks, and on the
+  day the server turns 100 days old, then every year, Huginn posts a birthday look-back:
+  vikings, hours, deaths, who set sail first and who played most
+  ([milestones](#extras-raids-summaries-milestones-recap-board-backups)).
 - **Progress board:** `/valheim progress board:True` puts your counts (never the lists) on
   `/muninn progress`, a leaderboard for everything or one list. The leader gets the
   **Mímir** title, and Huginn posts "🎣 Ingrid has caught every fish!" when someone finishes
@@ -677,7 +683,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/valheim join` | Anyone | Join code, address, password (spoiler) and how to connect; only the asker sees it | The bot; `admin_bot.join` for the address |
 | `/muninn online` | Anyone | Who's on right now, and since when | The bot |
 | `/muninn stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen, Steam achievements. No name = your linked character | Stats database |
-| `/muninn top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, or Steam achievements | Stats database |
+| `/muninn top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, Steam achievements, or longest play streak (days in a row) | Stats database |
 | `/muninn compare <player> [other]` | Anyone | Two characters side by side: time played, visits, longest session, deaths, achievements, with the leader of each marked. No `other` = your linked character | Stats database |
 | `/muninn bosses` | Anyone | Every boss with ✅ or ⬜, when it fell, and which is next ([boss progress](#boss-progress)) | `save_dir` |
 | `/muninn honors [member]` | Anyone | Every [honor](#honors) and who holds it, or one member's honors | Stats database |
@@ -1142,7 +1148,8 @@ These need the stats database (`database.path`), which the bot and the monitor s
 
 - **Stats in Discord.** `/muninn stats Ingrid` shows play time, rank, visits, longest
   session, deaths (and deaths per hour), first and last seen, and Steam achievements
-  ([below](#steam-achievements-in-discord)). `/muninn top` has five leaderboards, and
+  ([below](#steam-achievements-in-discord)). `/muninn top` has six leaderboards (the
+  newest: longest play streak), `/muninn stats` shows your current and best streak, and
   `/muninn progress` ranks achievement progress from uploaded character files
   ([the progress board](#the-progress-board-muninn-progress)). Character names autocomplete.
 - **Linking.** `/valheim link Ingrid` ties a character to your Discord account, which lets
@@ -1480,8 +1487,8 @@ own role so it can hand them out.
 
 ### Title roles
 
-The leader of each `/muninn top` board, and of the `/muninn progress` board, gets a role
-named after a figure from Norse mythology:
+The leader of each `/muninn top` board (except streaks), and of the `/muninn progress`
+board, gets a role named after a figure from Norse mythology:
 
 | Role | Leaderboard | Why |
 |---|---|---|
@@ -1645,6 +1652,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| The server's birthday came on the wrong day, or not at all | It counts from the first visit in the stats database, which can be later than the server's real start; and it needs `milestone` in `events` | Load older logs with `--backfill` ([catching up](#catching-up-on-old-logs)) so the first visit is right |
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
 | Mímir has a holder but nobody got the role | The leading character isn't linked | `/valheim link <character>`; the role follows within a minute |
@@ -1740,7 +1748,7 @@ switched on by adding their name to `events` in `config.json`:
 | `version_mismatch` | ⚠️ "Someone tried to join with a **newer** version of Valheim: the server needs an update." (or *older*: they need to update). At most once an hour. | `Network version check, their:41, mine:40` |
 | `session_summary` | Replaces the plain leave message: "**Ingrid** left Alheim after 2h 14m and died 3 times." | the player's join and leave |
 | `welcome` | Replaces the join message on someone's **first ever** visit: "🎉 **Ingrid** arrived for the first time. Welcome, viking!" | stats database |
-| `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths. At login: "**Ingrid** is on a **7-day streak** 🔥" (3, 5, 7, 10, 14, 21, 30… days in a row) or "first set sail here **1 year ago** today 🎂" (100 days, then yearly), at most once a day | stats database |
+| `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths. At login: "**Ingrid** is on a **7-day streak** 🔥" (3, 5, 7, 10, 14, 21, 30… days in a row) or "first set sail here **1 year ago** today 🎂" (100 days, then yearly), at most once a day. The **server's birthday** (100 days after the first visit in the stats database, then yearly), from noon: "🎂 Alheim is 1 year old today!" with vikings, hours, deaths, who set sail first, who played most and the longest streak; also in #runestone with `runestone_news` | stats database |
 | `weekly_recap` | 📜 A weekly embed with a **chart of hours played per day**: top players by time, most deaths, raids, new vikings, total hours, peak online, and exploration ("12 new areas discovered: 3 sunken crypts, 1 fuling village") | stats database, `Placed location` lines |
 | `update` | ✅ "Valheim updated: l-1.0.16 → l-1.0.17" when the server comes back on a new version, plus the [auto-updater](#auto-updates-and-restarts-from-discord)'s "update available" and "installing" posts | `Valheim version:` at boot |
 
@@ -2472,8 +2480,8 @@ Added here:
 - **Honors:** 16 built-in roles for deeds the log can't see, custom ones, and an
   admin-adopted role managed by the bot; given directly, by poll, or as a bounty prize.
 - **More community:** bounties with the Skadi role, join-to-create voice channels,
-  `/muninn compare` and `uptime`, `/odin announce`, play streaks and anniversaries, quiet
-  hours and digests for the feed, "come join" DMs and welcome DMs.
+  `/muninn compare` and `uptime`, `/odin announce`, play streaks (in `/muninn stats` and
+  `/muninn top`), anniversaries and the server's birthday, quiet hours and digests for the feed, "come join" DMs and welcome DMs.
 - **`/odin restore`:** puts back one of Valheim's backups through the host helper, keeping
   the current world as a backup.
 - **Server health:** low-disk and slow-save warnings, an optional daily restart, and

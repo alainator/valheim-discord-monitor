@@ -1738,6 +1738,7 @@ def main():
     if backups:
         backups.copy_in_background()          # catch up on anything made while we were down
     last_backup_check = 0.0
+    last_birthday_check = 0.0
     mismatch_posted: dict = {}
 
     def post_update(text: str) -> None:
@@ -1989,6 +1990,20 @@ def main():
                         store.set_meta("weekly_recap_week", week)
                 except Exception as e:
                     log.warning("Weekly recap failed: %s", e)
+            if store and "milestone" in events and now - last_birthday_check >= 600:
+                last_birthday_check = now
+                try:
+                    today = datetime.now().astimezone()
+                    if today.hour >= 12 and store.get_meta("server_birthday_date") != today.date().isoformat():
+                        off = int(store.get_meta("log_clock_offset") or 0)
+                        embed = extras.server_birthday(store.conn, today, off, server_name)
+                        store.set_meta("server_birthday_date", today.date().isoformat())
+                        if embed:
+                            discord.post_embed("milestone", embed, events)
+                            if admin:
+                                admin.news("", embed)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Server birthday check failed: %s", e)
             if daily and daily.due(datetime.now().astimezone(), not offline and count == 0):
                 err = upd.request("restart")
                 log.info("Daily restart: %s", err or "requested (server empty)")
