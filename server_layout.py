@@ -32,7 +32,7 @@ TEMPLATE = [
           ["rules", "announcements", "rules-and-info", "info", "server-rules", "news"], {"readonly"}),
          ("welcome", "text", "🚪┃the-gates",
           "New here? /valheim join shows the join code and address. /valheim request-access <character> "
-          "asks the admins to let you in.",
+          "asks the admins to let you in. /valheim progress shows the achievements you're missing.",
           ["welcome", "start-here", "new-members", "introductions", "intros", "join"], set()),
      ]},
     {"key": "mead", "name": "🍺 The Mead Hall", "aliases": ["Text Channels", "Text", "General", "Chat",
@@ -45,17 +45,18 @@ TEMPLATE = [
          ("builds", "text", "🔨┃the-forge", "Builds, bases and base tours.",
           ["builds", "building", "bases", "base-tours", "creations"], set()),
          ("bots", "text", "🪶┃muninns-roost",
-          "Ask Muninn: /muninn stats, top, titles and online. /valheim join, link, notify and map "
-          "work in any channel.",
+          "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses and honors. "
+          "/valheim join, link, notify, map and progress work in any channel.",
           ["bot-commands", "bots", "commands", "bot", "bot-spam", "botspam"], set()),
      ]},
     {"key": "wilds", "name": "⚔️ The Wilds", "aliases": ["Gaming", "Valheim", "Game", "Games"],
      "channels": [
          ("feed", "text", "🐦┃huginns-watch",
-          "Huginn reports from the server: logins, deaths, raids, achievements and titles.",
+          "Huginn reports from the server: logins, deaths, raids, boss kills, achievements, titles and honors.",
           ["valheim", "server-feed", "server-status", "status", "game-feed", "valheim-feed", "server-log",
            "activity"], {"feed"}),
-         ("plans", "text", "🗺️┃war-council", "Plan raids and game nights with /warcouncil plan.",
+         ("plans", "text", "🗺️┃war-council",
+          "Plan raids and game nights with /warcouncil plan; open bounties with /warcouncil bounties.",
           ["lfg", "looking-for-group", "plans", "events", "game-nights", "planning", "raids"], set()),
          ("lore", "text", "🔮┃seers-stone", "Seeds, maps, tips and questions.",
           ["tips", "help", "guides", "questions", "seeds", "valheim-help", "strategy"], set()),
@@ -71,7 +72,8 @@ TEMPLATE = [
                                                         "Moderation"], "private": True,
      "channels": [
          ("admin", "text", "👁️┃odins-seat",
-          "Refused joins with Permit/Ban, update checks and restarts. Only admins see this.",
+          "Refused joins with Permit/Ban, bounty claims, update checks, restarts and restores. "
+          "Only admins see this.",
           ["admin", "admins", "mod", "mods", "staff", "admin-chat", "valheim-admin", "mod-chat"],
           {"admin", "private"}),
      ]},
@@ -79,10 +81,31 @@ TEMPLATE = [
 
 
 # Earlier default topics: a channel still showing one of these gets the current topic.
+# Kept so existing servers pick up the new wording at the bot's next start (topics someone
+# wrote themselves are never touched). Add the old text here whenever a default topic changes.
 OLD_TOPICS = {
-    "bots": ("Ask Muninn: /valheim stats, top, titles, link, notify, map and more.",),
-    "plans": ("Plan raids and game nights with /valheim plan.",),
+    "bots": ("Ask Muninn: /valheim stats, top, titles, link, notify, map and more.",
+             "Ask Muninn: /muninn stats, top, titles and online. /valheim join, link, notify and map "
+             "work in any channel."),
+    "plans": ("Plan raids and game nights with /valheim plan.",
+              "Plan raids and game nights with /warcouncil plan."),
+    "welcome": ("New here? /valheim join shows the join code and address. /valheim request-access <character> "
+                "asks the admins to let you in.",),
+    "feed": ("Huginn reports from the server: logins, deaths, raids, achievements and titles.",),
+    "admin": ("Refused joins with Permit/Ban, update checks and restarts. Only admins see this.",),
 }
+
+
+def template_plan() -> dict:
+    """The template's categories and channels in the shape /odin setup's plan uses, for
+    refreshing topics and the channel guide without re-planning the whole server."""
+    cats, chans = [], []
+    for c in TEMPLATE:
+        cats.append({"key": c["key"], "name": c["name"], "private": bool(c.get("private"))})
+        for key, kind, name, topic, _aliases, flags in c["channels"]:
+            chans.append({"key": key, "kind": kind, "name": name, "topic": topic, "flags": set(flags),
+                          "category": c["key"]})
+    return {"categories": cats, "channels": chans}
 
 
 def norm(name: str) -> str:

@@ -344,9 +344,11 @@ def away_users(conn, cutoff: int) -> dict:
 
 
 def render_titles(holders: dict, changed: set = frozenset(), period: str = "all",
-                  away: Optional[list] = None, away_days: float = 14) -> dict:
+                  away: Optional[list] = None, away_days: float = 14,
+                  hunters: Optional[tuple] = None) -> dict:
     """holders: category -> {"player", "v", "user_id"} or None; away: user ids holding
-    the away role (None leaves that line out)."""
+    the away role; hunters: (role name, [user ids]) holding the bounty role (None leaves
+    those lines out)."""
     lines = []
     for cat, (role, why, _) in TITLES.items():
         h = holders.get(cat)
@@ -362,6 +364,10 @@ def render_titles(holders: dict, changed: set = frozenset(), period: str = "all"
         name, why, _ = AWAY_ROLE
         who = ", ".join(f"<@{u}>" for u in sorted(away)[:20]) or "nobody, everyone's been around"
         lines.append(f"**{name}**: {who}\n*{why.split(':')[0]}: away {away_days:g}+ days*")
+    if hunters is not None:
+        role, uids = hunters
+        who = ", ".join(f"<@{u}>" for u in uids[:20]) or "nobody this week"
+        lines.append(f"**{role}**: {who}\n*goddess of the hunt: claimed a bounty this week (/warcouncil bounties)*")
     return {"title": "🏆 Titles of the realm", "color": 0xF1C40F,
             "description": "\n".join(lines),
             "footer": {"text": "Reassigned weekly · " + ("last 7 days" if period == "week" else "all time")

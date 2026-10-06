@@ -47,6 +47,8 @@ GROUPS = [
         "title_longest": "Thor: longest single session",
         "title_achievements": "Bragi: most Steam achievements",
         "title_least": "Hœnir: least time played (of players seen this month)",
+        "away": "Óðr: how many linked players haven't been on for a while",
+        "bounty_hunter": "Skadi: who holds the bounty hunter role this week",
     }),
 ]
 STATS = {k: v for _, _, keys in GROUPS for k, v in keys.items()}
@@ -186,6 +188,16 @@ def name_for(key: str, snap: Optional[dict], conn=None, now: Optional[_dt.dateti
         raid, at = snap["last_raid"]
         raid = raid.split(" (")[0]                      # "The Elder's army (greydwarves)" -> "The Elder's army"
         return f"⚔️ Last raid: {raid} ({when(at, now).split(' ')[0]})"
+    if key == "away":
+        name, n, days = (titles or {}).get("away", (None, None, None))
+        if not name:
+            return None
+        return f"🛶 {name} (away {days:g}+ days): {n}"[:100]
+    if key == "bounty_hunter":
+        name, holders = (titles or {}).get("bounty_hunter", (None, None))
+        if not name:
+            return None
+        return names_list(holders, f"🎯 {name} (bounty hunter): ") if holders else f"🎯 {name} (bounty hunter): —"
     if key.startswith("title_"):
         emoji, what = TITLE_LABELS[key]
         role, holder = (titles or {}).get(key, (None, None))
