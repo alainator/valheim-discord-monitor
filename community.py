@@ -226,10 +226,13 @@ TOP = {
     "achievements": ("Most achievements (Steam)",
                      "SELECT player, COUNT(*) AS v FROM (" + _STEAM_UNLOCKS.format(since="0") + ") "
                      "WHERE player IS NOT NULL GROUP BY player ORDER BY v DESC LIMIT ?"),
+    "streak": ("Longest play streak (days in a row)", None),     # worked out in Python: streak_board()
 }
 
 
 def top(conn, category: str, limit: int = 10) -> list:
+    if category == "streak":
+        return streak_board(conn, log_clock_offset(conn), limit)
     return _rows(conn, TOP[category][1], (limit,))
 
 
@@ -391,6 +394,9 @@ def player_stats(conn, player: str) -> Optional[dict]:
                                "GROUP BY player) WHERE t > ?", (s["seconds"],))["c"]
     s["players"] = _one(conn, "SELECT COUNT(DISTINCT player) AS c FROM play_sessions")["c"]
     s["steam"] = steam_achievements(conn, player)
+    days = play_days(conn, player, log_clock_offset(conn))
+    s["streak"] = current_streak(days, _dt.date.today())
+    s["best_streak"] = best_streak(days)
     return s
 
 
@@ -452,6 +458,40 @@ def streak(conn, player: str, today: _dt.date, offset: int = 0) -> int:
     while today - _dt.timedelta(days=n) in days:
         n += 1
     return n
+
+
+def current_streak(days: set, today: _dt.date) -> int:
+    """Days in a row ending today, or yesterday if they haven't played yet today (the
+    streak is still alive until the day ends)."""
+    day = today if today in days else today - _dt.timedelta(days=1)
+    n = 0
+    while day - _dt.timedelta(days=n) in days:
+        n += 1
+    return n
+
+
+def best_streak(days: set) -> int:
+    """The most days in a row ever played."""
+    best = 0
+    for d in days:
+        if d - _dt.timedelta(days=1) in days:
+            continue                          # not the start of a run
+        n = 1
+        while d + _dt.timedelta(days=n) in days:
+            n += 1
+        best = max(best, n)
+    return best
+
+
+def streak_board(conn, offset: int = 0, limit: int = 10) -> list:
+    """[{"player", "v"}] by longest streak ever (days in a row), best first."""
+    days: dict = {}
+    for r in _rows(conn, "SELECT player, login_at FROM play_sessions"):
+        days.setdefault(r["player"], set()).add(
+            _dt.datetime.fromtimestamp(r["login_at"] + offset).astimezone().date())
+    rows = [{"player": p, "v": best_streak(d)} for p, d in days.items()]
+    rows.sort(key=lambda r: (-r["v"], r["player"].lower()))
+    return rows[:limit]
 
 
 def anniversary(first_seen: _dt.date, today: _dt.date) -> Optional[str]:
@@ -1030,6 +1070,10 @@ def map_url(seed: str) -> str:
 # ---------------------------------------------------------------------------
 # Rendering (plain dicts for discord.Embed.from_dict, so they're testable)
 # ---------------------------------------------------------------------------
+def _days(n: int) -> str:
+    return f"{n} day{'s' if n != 1 else ''}"
+
+
 def _dur(seconds) -> str:
     from extras import fmt_duration
     return fmt_duration(seconds or 0)
@@ -1054,6 +1098,10 @@ def render_stats(s: dict, offset: int, linked: Optional[str] = None) -> dict:
         {"name": "Deaths per hour", "value": f"{s['deaths'] / max(s['seconds'] / 3600, 1e-9):.1f}"
                                               if s["seconds"] >= 600 else "-", "inline": True},
     ]
+    if s.get("best_streak"):
+        best = f"best {_days(s['best_streak'])}"
+        fields.append({"name": "🔥 Play streak", "inline": True,
+                       "value": f"{_days(s['streak'])} now · {best}" if s.get("streak") else best})
     st = s.get("steam")
     if st:
         if st.get("total"):
@@ -1083,7 +1131,8 @@ def render_top(category: str, rows: list) -> dict:
     medals = ("🥇", "🥈", "🥉")
     lines = []
     for i, r in enumerate(rows):
-        value = str(r["v"]) if category in ("deaths", "sessions", "achievements") else _dur(r["v"])
+        value = str(r["v"]) if category in ("deaths", "sessions", "achievements") else \
+            _days(r["v"]) if category == "streak" else _dur(r["v"])
         lines.append(f"{medals[i] if i < 3 else f'`{i + 1:>2}.`'} **{r['player']}**: {value}")
     return {"title": f"🏆 {title}", "color": 0xF1C40F, "description": "\n".join(lines) or "No data yet."}
 

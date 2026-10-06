@@ -265,6 +265,38 @@ BACKUP_RE = re.compile(r"_backup_")
 LEGACY_EXTS = (".db", ".fwl")
 
 
+def server_birthday(conn, now: _dt.datetime, offset: int, server_name: str) -> Optional[dict]:
+    """On the day the server turns 100 days or a whole number of years old (counted from the
+    first visit in the stats database), an embed looking back on everything so far; None on
+    other days. now is local time; log times + offset = real time."""
+    import community
+    import stats_db
+    first = conn.execute("SELECT MIN(login_at) FROM play_sessions").fetchone()[0]
+    if not first:
+        return None
+    born = _dt.datetime.fromtimestamp(first + offset).astimezone()
+    when = community.anniversary(born.date(), now.date())
+    if not when:
+        return None
+    s = stats_db.period_summary(conn, 0, int(now.timestamp()) - offset + 1)
+    first_viking = conn.execute("SELECT player FROM play_sessions ORDER BY login_at LIMIT 1").fetchone()[0]
+    fields = [{"name": "Vikings", "value": str(len(s["players"])), "inline": True},
+              {"name": "Time played", "value": fmt_duration(s["total_seconds"]), "inline": True},
+              {"name": "Deaths", "value": str(s["total_deaths"]), "inline": True},
+              {"name": "First to set sail", "value": f"**{first_viking}**, <t:{first + offset}:D>", "inline": False}]
+    if s["top_players"]:
+        r = s["top_players"][0]
+        fields.append({"name": "Most time in-game", "value": f"**{r['player']}**: {fmt_duration(r['seconds'])}",
+                       "inline": True})
+    best = community.streak_board(conn, offset, 1)
+    if best and best[0]["v"] > 1:
+        fields.append({"name": "Longest streak", "value": f"**{best[0]['player']}**: {best[0]['v']} days in a row",
+                       "inline": True})
+    title = f"🎂 {server_name} is {when} old today!" if "year" in when else f"🎂 {when} of {server_name}!"
+    return {"title": title, "description": "Skål to everyone who's set sail here. Here's the saga so far:",
+            "fields": fields}
+
+
 def _tree_size(path: str) -> int:
     total = 0
     for root, _, files in os.walk(path):
