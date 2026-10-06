@@ -978,7 +978,7 @@ and channels, in one command. Admins only.
 
 ```
 🚪 THE GATES
-  # 📜┃runestone        rules & announcements (only admins post)
+  # 📜┃runestone        rules, announcements & patch notes (only admins post)
   # 🚪┃the-gates        welcome, how to join, and a guide to every channel
 🍺 THE MEAD HALL
   # 🍺┃mead-hall        general chat                          ← your "general"
@@ -1041,7 +1041,8 @@ The [stat channels](#stat-channels) stay on top.
   `/odin setup action:guides` posts them without running the rest of setup (or again, if
   one was deleted).
 - **#runestone** is left for your rules and announcements: fill it with `/odin rules` and
-  `/odin announce` ([the rules channel](#the-rules-channel-runestone)).
+  `/odin announce` ([the rules channel](#the-rules-channel-runestone)). Valheim
+  [patch notes](#valheim-patch-notes) appear there by themselves.
 - **It posts a "📖 A guide to the realm" message** in #the-gates listing every channel and
   what it's for, and pins it. Running setup again updates that message instead of posting
   a new one.
@@ -1088,6 +1089,23 @@ notes turned into Discord formatting (headings, bullets, links), cut to fit with
 **Read the full patch notes on Steam** link. Anyone can run `/valheim patch-notes` to see the
 latest patch privately, in any channel.
 
+A post looks like this:
+
+```
+🛠️ Patch 1.0.16
+Further tweaks for you today, vikings! …
+
+Patch Notes:
+• Fixed a bug that caused terrain modifications to revert in Deep North …
+• Fixed Child of Odin achievement not unlocking correctly
+• …
+
+Read the full patch notes on Steam
+```
+
+- **When:** within an hour of Iron Gate posting the notes on Steam. That's often before
+  your server installs the update ([auto-updates](#auto-updates-and-restarts-from-discord)),
+  so players can read what's coming.
 - **Where it comes from:** Steam's public news feed for Valheim, checked every hour. Iron
   Gate tags its patch posts as patch notes; other news (dev blogs, merch) is skipped. No API
   key or mod needed, but the bot needs to reach `api.steampowered.com`.
@@ -1098,6 +1116,8 @@ latest patch privately, in any channel.
 - **Public test patches** are skipped, since they don't reach a server on the normal
   branch. `"public_test": true` posts them too, marked 🧪.
 - **Turn it off** with `"patch_notes": false` in the `admin_bot` block.
+- **Check it works:** after a restart the log says `patch notes: the latest is Patch …`,
+  which means the bot reached Steam. `/valheim patch-notes` should show that patch.
 
 ```json
 "patch_notes": { "enabled": true, "channel_id": "", "public_test": false }
@@ -1842,7 +1862,8 @@ restarts when nobody is on; the unit's `ExecStartPre` runs `steamcmd app_update`
 small helper on the host lets the monitor:
 
 - **post the updater's decisions:** "🆕 update available: installs once everyone has
-  left", "🔄 installing now", and checker errors to the admin channel;
+  left", "🔄 installing now", and checker errors to the admin channel. What changed in the
+  update is posted separately, from Steam ([patch notes](#valheim-patch-notes));
 - **give the updater a reliable player count:** it writes `status.json`, because the
   script's own guess from the console log reads 0 right after a log rotation;
 - **take admin commands:**
@@ -2211,7 +2232,7 @@ or run it in a terminal.
 | `discord.show_player_count` | true | Footer with the current online count. |
 | `discord.quiet_hours` | — | `{"from": "23:00", "to": "08:00", "timezone": …, "events": […]}`: hold those posts and summarise them when it ends ([quiet hours](#quiet-hours-and-digests)). |
 | `discord.digest_seconds` | 0 | Group joins and leaves within this many seconds into one post. |
-| `admin_bot.announce_channel_id` | #runestone | The [rules channel](#the-rules-channel-runestone) for `/odin rules`, `/odin announce` and news. |
+| `admin_bot.announce_channel_id` | #runestone | The [rules channel](#the-rules-channel-runestone) for `/odin rules`, `/odin announce`, news and [patch notes](#valheim-patch-notes). |
 | `admin_bot.runestone_news` | false | Also post Valheim updates, restores and boss kills in the rules channel. |
 | `admin_bot.patch_notes` | `{"enabled": true}` | Post Valheim [patch notes](#valheim-patch-notes) from Steam. `channel_id`: another channel than #runestone. `public_test`: public test patches too. `false` turns it off. |
 | `admin_bot.voice_lobby` | — | `true` or `{"name", "template", "limit"}`: [join-to-create voice](#join-to-create-voice-channels). |
