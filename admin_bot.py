@@ -1980,8 +1980,15 @@ class AdminBot:
             found = world_objects.scan(self.lists.save_dir, self.bosses_world)
             self._objects_read = (path, mtime, found)
             if found is not None and self.db_path:          # for the Völundr title
+                # This runs in a worker thread, and SQLite connections belong to the thread
+                # that opened them: use a connection of its own, not self.db.
                 import community
-                community.save_builders(self.db, world_objects.builder_counts(found)[0])
+                import stats_db
+                conn = stats_db.connect(self.db_path)
+                try:
+                    community.save_builders(conn, world_objects.builder_counts(found)[0])
+                finally:
+                    conn.close()
         return self._objects_read[2]
 
     def _meta(self, key: str, value=None):
@@ -2310,6 +2317,22 @@ class AdminBot:
                         ephemeral=True)
                     return False
                 return True
+
+            async def on_error(self, it: discord.Interaction, error) -> None:
+                """A command that fails still answers, instead of leaving "thinking…" up."""
+                original = getattr(error, "original", error)
+                if isinstance(error, app_commands.CheckFailure):
+                    return
+                log.warning("admin_bot: /%s failed: %r", getattr(it.command, "qualified_name", "?"), original,
+                            exc_info=original)
+                text = "Something went wrong with that command. The admins can check the bot's log."
+                try:
+                    if it.response.is_done():
+                        await it.followup.send(text, ephemeral=True)
+                    else:
+                        await it.response.send_message(text, ephemeral=True)
+                except discord.HTTPException:
+                    pass
 
         class Client(discord.Client):
             def __init__(self):
