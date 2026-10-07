@@ -88,7 +88,7 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
-- **A review of everything added lately**, with fixes:
+- **Fixes from a third code audit**, of everything added lately ([details](#about-this-fork)):
   - **Progress board:** a character linked to someone is theirs. Nobody else can put it on
     the board by renaming a file, its player can take over an entry someone else made, and
     admins can remove any entry. A list added in an update is no longer announced as
@@ -2864,7 +2864,8 @@ python valheim_discord_monitor.py --config config.example.json --replay sample_c
 
 - **Tests** (`tests/`) cover the log parser, the list-file editing, the status channel's
   naming and rate limiting, the extras (live state, board, milestones, recap, backups),
-  and the audit fixes. They run offline, with no Discord or
+  every feature, and the audit fixes (`test_audit_fixes.py`, `test_audit_recent.py`: one
+  test per bug, each checked to fail without its fix). They run offline, with no Discord or
   Valheim needed.
 - **Consistency:** `tests/test_consistency.py` fails when a command, role, honor or stat
   channel isn't reflected everywhere that describes it (README, channel topics, home
@@ -3008,6 +3009,26 @@ Added here:
     baseline;
   - join-to-create ignores mute and deafen in the lobby; `/odin announce` reports a failed
     post; an expired bounty role the bot can't remove no longer errors every 30 seconds.
+- **Fixes from a third audit**, of patch notes, the wiki, the progress board, streaks,
+  `/muninn when` and everything read from the world save:
+  - the progress board: a character linked with `/valheim link` is its player's, so a
+    renamed `.fch` can't put someone else's character on the board; its player or an admin
+    can take over or remove an entry; a list added in an update isn't announced as finished;
+  - patch notes: an empty reply from Steam on the very first check no longer makes the next
+    check repost old patches;
+  - the wiki: pages cached by their exact title and "not found" not cached, so a
+    miscapitalised lookup can't hide the page; suggestions and lookups no longer share a
+    cache entry; `share:True` keeps errors private;
+  - the world save: one scan at a time; a scan whose results couldn't be stored (database
+    busy) is stored again on the next call; a save Valheim removes while it's being looked
+    at is skipped;
+  - the death map: a drifting tombstone is counted once;
+  - the weekly digest: ships paired closest first, carts not counted as ships, tombstones
+    without a time of death told apart, and the snapshot kept only once the recap is posted;
+  - a 29 February first visit has its birthday on the 28th in other years; no Bosses stat
+    channel when boss progress is off;
+  - and a command that fails now always answers, instead of staying on "thinking…".
+  Each fix has a regression test (`tests/test_audit_recent.py`) that fails on the old code.
 - **Tests and CI.**
 
 ## License
