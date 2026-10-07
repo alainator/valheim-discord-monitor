@@ -69,6 +69,9 @@ list every time.
 
 ### Tests
 - [ ] Tests for the feature itself.
+- [ ] **A bug fix gets a regression test** that fails without the fix (check it: stash the
+      fix, run the test, see it fail). Anything run with `asyncio.to_thread` should be tested
+      from a worker thread too: SQLite connections belong to the thread that opened them.
 - [ ] `python3 -m unittest discover -s tests` passes, including `test_consistency.py`.
 
 ## What the bot keeps in step by itself
