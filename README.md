@@ -88,6 +88,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Error messages are private everywhere:** when a command that answers in public (like
+  `/muninn builders` or `/muninn when`) fails or can't find the world save, only the person
+  who ran it sees the message; the channel doesn't get a stray "Something went wrong".
 - **`/odin progress-remove <character>`:** admins take a character off the progress board
   without needing its file; the characters on the board are suggested as you type
   ([the progress board](#the-progress-board-muninn-progress)).

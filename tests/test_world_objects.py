@@ -323,35 +323,51 @@ class ThreadTest(unittest.TestCase):
 
 @unittest.skipIf(discord is None, "discord.py not installed")
 class CommandErrorTest(unittest.TestCase):
-    def test_a_failing_command_still_answers(self):
+    """A failing command answers privately, whatever state its reply was in."""
+
+    def run_error(self, done, loading=None):
         import asyncio
         import admin_bot
         from types import SimpleNamespace
         from discord import app_commands
-        with tempfile.TemporaryDirectory() as d:
-            b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "S")
-            sent = []
+        log = []
 
-            async def followup(text, ephemeral=False):
-                sent.append(("followup", text, ephemeral))
+        async def followup(text, ephemeral=False):
+            log.append(("followup", ephemeral))
 
-            async def send_message(text, ephemeral=False):
-                sent.append(("response", text, ephemeral))
+        async def send_message(text, ephemeral=False):
+            log.append(("response", ephemeral))
 
-            async def run(done):
+        async def delete():
+            log.append(("deleted thinking", None))
+
+        async def original_response():
+            return SimpleNamespace(flags=SimpleNamespace(loading=loading), delete=delete)
+
+        async def run():
+            with tempfile.TemporaryDirectory() as d:
+                b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "S")
                 tree = b._build_client().tree
-                it = SimpleNamespace(command=SimpleNamespace(qualified_name="muninn builders"),
-                                     response=SimpleNamespace(is_done=lambda: done, send_message=send_message),
-                                     followup=SimpleNamespace(send=followup))
-                err = app_commands.CommandInvokeError(SimpleNamespace(name="builders", qualified_name="x"),
-                                                     RuntimeError("boom"))
-                with self.assertLogs("valheim-monitor.bot", "WARNING"):
-                    await tree.on_error(it, err)
-            asyncio.run(run(True))                                 # deferred ("thinking…"): a follow-up
-            asyncio.run(run(False))
-        self.assertEqual([s[0] for s in sent], ["followup", "response"])
-        self.assertTrue(all(s[2] for s in sent))                   # only the user sees it
-        self.assertIn("Something went wrong", sent[0][1])
+            it = SimpleNamespace(command=SimpleNamespace(qualified_name="muninn builders"),
+                                 response=SimpleNamespace(is_done=lambda: done, send_message=send_message),
+                                 followup=SimpleNamespace(send=followup), original_response=original_response)
+            err = app_commands.CommandInvokeError(SimpleNamespace(name="builders", qualified_name="x"),
+                                                  RuntimeError("boom"))
+            with self.assertLogs("valheim-monitor.bot", "WARNING"):
+                await tree.on_error(it, err)
+        asyncio.run(run())
+        return log
+
+    def test_still_thinking_publicly(self):
+        """After a public defer, Discord would show the first follow-up publicly: the
+        "thinking…" reply goes first, then the private note."""
+        self.assertEqual(self.run_error(True, loading=True), [("deleted thinking", None), ("followup", True)])
+
+    def test_already_answered(self):
+        self.assertEqual(self.run_error(True, loading=False), [("followup", True)])
+
+    def test_not_answered_yet(self):
+        self.assertEqual(self.run_error(False), [("response", True)])
 
 
 class DeathMapTest(unittest.TestCase):
