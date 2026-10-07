@@ -302,25 +302,32 @@ BACKUP_RE = re.compile(r"_backup_")
 LEGACY_EXTS = (".db", ".fwl")
 
 
-def world_digest(store, save_dir: str, world: Optional[str] = None) -> Optional[str]:
-    """What changed in the world since the last recap (world_objects.digest), from the save.
-    Remembers this week's world for next time; None without a save or on the first run."""
+def world_digest(store, save_dir: str, world: Optional[str] = None) -> tuple:
+    """(what changed in the world since the last recap or None, this week's snapshot to
+    keep): the caller stores the snapshot (keep_world_snapshot) once the recap is posted,
+    so a recap that fails and is retried still compares with last week. (None, None)
+    without a save; no text on the first run."""
     import json
     import world_objects
     found = world_objects.scan(save_dir, world)
     if found is None:
-        return None
+        return None, None
     new = world_objects.snapshot(found)
     raw = store.get_meta("world_snapshot")
-    store.set_meta("world_snapshot", json.dumps(new))
     try:
         old = json.loads(raw) if raw else None
     except ValueError:
         old = None
     if not old:
-        return None
+        return None, new
     lines = world_objects.digest(old, new)
-    return "\n".join(lines)[:1024] if lines else "A quiet week: nothing built, sailed, tamed or lost."
+    return ("\n".join(lines)[:1024] if lines else "A quiet week: nothing built, sailed, tamed or lost."), new
+
+
+def keep_world_snapshot(store, snapshot: Optional[dict]) -> None:
+    import json
+    if snapshot is not None:
+        store.set_meta("world_snapshot", json.dumps(snapshot))
 
 
 def server_birthday(conn, now: _dt.datetime, offset: int, server_name: str) -> Optional[dict]:

@@ -1981,10 +1981,11 @@ def main():
                         off = int(store.get_meta("log_clock_offset") or 0)
                         embed = extras.WeeklyRecap.build(store.conn, int(now) - off, server_name)
                         acfg = cfg.get("admin_bot") or {}
+                        snapshot = None
                         if embed and recap.world and acfg.get("save_dir"):
                             try:
-                                world = extras.world_digest(store, acfg["save_dir"],
-                                                            ((acfg.get("bosses") or {}).get("world") or None))
+                                world, snapshot = extras.world_digest(store, acfg["save_dir"],
+                                                                      ((acfg.get("bosses") or {}).get("world") or None))
                                 if world:
                                     embed.setdefault("fields", []).append(
                                         {"name": "🌍 This week in the world", "value": world, "inline": False})
@@ -1998,6 +1999,7 @@ def main():
                             discord.post_embed("weekly_recap", embed, events,
                                                file=("activity.png", png) if png else None)
                         store.set_meta("weekly_recap_week", week)
+                        extras.keep_world_snapshot(store, snapshot)
                 except Exception as e:
                     log.warning("Weekly recap failed: %s", e)
             if store and "milestone" in events and now - last_birthday_check >= 600:

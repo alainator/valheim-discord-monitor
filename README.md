@@ -36,7 +36,7 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   server before anything is written ([world settings](#auto-updates-and-restarts-from-discord)).
 - **Community:** `/muninn stats` and `/muninn top`, DMs when friends come online, an
   "In Valheim" role, weekly **title roles** for the leaderboard leaders (Heimdall, Hel,
-  Sleipnir, Thor, Bragi), an **Odin** role for the server owner, game nights with a
+  Sleipnir, Thor, Bragi, Hœnir, Mímir, Völundr), an **Odin** role for the server owner, game nights with a
   planning thread, reminders and **time polls**, a "when do people play" heatmap, a world
   map link, play streaks, a yearly
   **server birthday** post, and a smoother first join
@@ -88,6 +88,24 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **A review of everything added lately**, with fixes:
+  - **Progress board:** a character linked to someone is theirs. Nobody else can put it on
+    the board by renaming a file, its player can take over an entry someone else made, and
+    admins can remove any entry. A list added in an update is no longer announced as
+    "finished".
+  - **Patch notes:** an empty reply from Steam on the very first check no longer makes the
+    next check repost old patches.
+  - **Wiki:** a wrongly capitalised lookup no longer hides the right page for hours, the
+    suggestions no longer get stuck at one entry, and errors stay private with `share:True`.
+  - **World save:** tombstones and builders are no longer lost if the database is busy for
+    a moment, two commands at once no longer scan twice, and a command run during a save no
+    longer fails.
+  - **Death map:** a tombstone floating in water is counted once.
+  - **Weekly digest:** ships that stayed put aren't reported as moved, carts don't count as
+    ships, several tombstones of one player are told apart, and a recap that's retried
+    still compares with last week.
+  - **Smaller things:** a server first visited on 29 February gets its birthday on the 28th
+    in other years, and there's no 🏆 Bosses channel when boss progress is off.
 - **`/muninn deathmap`:** a map of where people die, built up from every tombstone the world
   saves show, with your portals for bearings and the worst spots circled and listed with
   coordinates. `player:` for one character ([death map](#death-map-muninn-deathmap)).
@@ -282,6 +300,7 @@ And without the bot:
   [Testing](#testing-it) ·
   [Troubleshooting](#troubleshooting)
 - **Extras:** [Raids, summaries, milestones, recap](#extras-raids-summaries-milestones-recap-board-backups) ·
+  [This week in the world](#this-week-in-the-world) ·
   [Streaks & the server's birthday](#streaks-anniversaries-and-the-servers-birthday) ·
   [Status board](#status-board) · [Backup copies](#world-backup-copies) ·
   [Restoring a backup](#restoring-a-backup-odin-restore) ·
@@ -434,7 +453,7 @@ The old one keeps working until you do:
 4. `python valheim_discord_monitor.py --test-webhook`, then
    `python valheim_discord_monitor.py`.
 
-The monitor polls every `poll_interval_seconds` (15 s default), posts when the
+The monitor polls every `poll_interval_seconds` (10 s by default; the example configs use 15), posts when the
 count changes, and marks the server offline after `offline_after` consecutive
 failed queries (3 default) so a single dropped packet doesn't cause a false
 alarm. Nothing is posted on start-up. Messages use `{who}` ("A viking" / "2
@@ -726,12 +745,12 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 |---|---|---|---|
 | `/valheim join` | Anyone | Join code, address, password (spoiler) and how to connect; only the asker sees it | The bot; `admin_bot.join` for the address |
 | `/muninn online` | Anyone | Who's on right now, and since when | The bot |
-| `/muninn stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen, Steam achievements. No name = your linked character | Stats database |
+| `/muninn stats [player]` | Anyone | Play time, rank, visits, longest session, deaths, first/last seen, current and best play streak, Steam achievements. No name = your linked character | Stats database |
 | `/muninn top [category]` | Anyone | Leaderboard: time played, deaths, visits, longest session, Steam achievements, or longest play streak (days in a row) | Stats database |
 | `/muninn compare <player> [other]` | Anyone | Two characters side by side: time played, visits, longest session, deaths, achievements, with the leader of each marked. No `other` = your linked character | Stats database |
 | `/muninn bosses` | Anyone | Every boss with ✅ or ⬜, when it fell, and which is next ([boss progress](#boss-progress)) | `save_dir` |
 | `/muninn portals` | Anyone | Portals that go nowhere, names used 3+ times, portals without a name, and the connected pairs ([portals](#portals-and-tombstones)) | `save_dir` |
-| `/muninn when [player] [weeks]` | Anyone | Heatmap of when people usually play, by weekday and hour, with the best time for a game night; `player` for one character ([details](#when-people-play-muninn-when)) | Stats database |
+| `/muninn when [player] [weeks]` | Anyone | Heatmap of when people usually play, by weekday and hour, with the best time for a game night; `player` for one character; `weeks` 1–12, default 4 ([details](#when-people-play-muninn-when)) | Stats database |
 | `/muninn builders` | Anyone | Who built the most: pieces still standing in the world, per builder ([builders](#builders-muninn-builders)) | `save_dir` |
 | `/muninn deathmap [player]` | Anyone | A map of where people die, from every tombstone seen in a world save, with the worst spots listed ([death map](#death-map-muninn-deathmap)) | `save_dir`, stats database |
 | `/muninn ships` | Anyone | Every raft, karve, longship and drakkar, furthest from the start first, and the carts ([ships](#ships-and-tames)) | `save_dir` |
@@ -1041,7 +1060,8 @@ within a minute.
   a change by up to 5 minutes. Values are kept coarse (hours, days) so they don't hit the
   limit.
 - The live channels (`players`, `server`, `join_code`, `uptime`, `day`, `saved`, `backup`,
-  `disk`, `last_raid`) and Odin don't need the stats database; the rest do.
+  `disk`, `last_raid`), `bosses` and Odin don't need the stats database; the rest do.
+  `bosses` is left out of the default list when boss progress is off.
 
 ### Server setup: `/odin setup`
 
@@ -1118,8 +1138,8 @@ The [stat channels](#stat-channels) stay on top.
 - **It posts a "📖 A guide to the realm" message** in #the-gates listing every channel and
   what it's for, and pins it. Running setup again updates that message instead of posting
   a new one.
-- **It gives commands a home.** From then on `stats`, `top`, `titles` and `online` belong
-  in #🪶┃muninns-roost and `plan` in #🗺️┃war-council; used elsewhere, the member gets a
+- **It gives commands a home.** From then on every `/muninn` command belongs in
+  #🪶┃muninns-roost and `/warcouncil plan` and `bounties` in #🗺️┃war-council; used elsewhere, the member gets a
   private pointer instead of a post ([command channels](#discord-commands)).
 - **It makes 🎣 Fishing Hut the AFK channel** if the server has none: Discord itself then
   moves anyone idle in voice for 15 minutes there. Undo clears it again.
@@ -1178,8 +1198,9 @@ Read the full patch notes on Steam
 - **When:** within an hour of Iron Gate posting the notes on Steam. That's often before
   your server installs the update ([auto-updates](#auto-updates-and-restarts-from-discord)),
   so players can read what's coming.
-- **Where it comes from:** Steam's public news feed for Valheim, checked every hour. Iron
-  Gate tags its patch posts as patch notes; other news (dev blogs, merch) is skipped. No API
+- **Where it comes from:** Steam's public news feed for Valheim, checked every hour. Posts
+  tagged as patch notes, or titled Patch or Hotfix, are used; other news (dev blogs, merch)
+  is skipped. No API
   key or mod needed, but the bot needs to reach `api.steampowered.com`.
 - **Nothing old is reposted:** the first check only remembers the patches already out, so
   the first post is the next patch.
@@ -1188,8 +1209,10 @@ Read the full patch notes on Steam
 - **Public test patches** are skipped, since they don't reach a server on the normal
   branch. `"public_test": true` posts them too, marked 🧪.
 - **Turn it off** with `"patch_notes": false` in the `admin_bot` block.
-- **Check it works:** after a restart the log says `patch notes: the latest is Patch …`,
-  which means the bot reached Steam. `/valheim patch-notes` should show that patch.
+- **Check it works:** the first time the bot starts with patch notes on, the log says
+  `patch notes: the latest is Patch …`, which means it reached Steam. After that,
+  `/valheim patch-notes` should show the latest patch. Without the stats database the bot
+  can't remember which patches it has seen, so one released while it was down is skipped.
 
 ```json
 "patch_notes": { "enabled": true, "channel_id": "", "public_test": false }
@@ -1205,7 +1228,8 @@ in any channel, so nobody has to alt-tab mid-fight:
 Draugr are aggressive creatures found in Swamps or in Draugr Villages, Sunken Crypts, and
 sometimes towers in the Mountain. …
 🗺️ Found in: Swamp        ❤️ Health: 100 / 200 / 300 (0–2★)
-⚔️ Weaknesses: Resistant to: Fire · Immune to: Poison
+⚔️ Weaknesses: Resistant to: Fire
+               Immune to: Poison
 🎁 Drops: Draugr trophy, Entrails
 Read more on the Valheim Wiki
 ```
@@ -1224,11 +1248,13 @@ page, so it depends on the kind of page:
 
 Pages without an infobox get the summary, the picture and the link.
 
-- **Suggestions as you type** come from the wiki's search. Pick one, or type a name and the
-  best match is used.
-- **Only you see it.** `share:True` posts it in the channel.
+- **Suggestions as you type** come from the wiki's search, once two letters are typed. Pick
+  one, or type a name and the best match is used.
+- **Only you see it.** `share:True` posts the card in the channel; if the wiki can't be
+  reached, that message still only goes to you.
 - **Live, not built in:** nothing goes stale when the game is patched, but the bot needs to
-  reach `valheim.fandom.com`. Answers are kept for 6 hours.
+  reach `valheim.fandom.com`. Answers are kept for 6 hours (in memory, so a restart clears
+  them); "nothing found" isn't kept, so a fixed spelling works right away.
 - **Credit:** the wiki's text is CC BY-SA, so every card names the Valheim Wiki and links
   the page.
 - **Turn it off** with `"wiki": false` in the `admin_bot` block.
@@ -1460,7 +1486,7 @@ Connected (13): Black Forest, Bonemass, Mountain, …
 ```
 
 **`/muninn tombstones`**: a tombstone stays until its owner empties it, so every one in the
-save is gear still lying out there:
+save is gear still lying out there (the 25 most recent are listed, with a count of the rest):
 
 ```
 🪦 Tombstones still out there in Alheim: 2
@@ -1543,9 +1569,10 @@ bed or leave a tombstone.
 - **Names come from what's in the world now.** If a player's only bed is torn down and they
   have no tombstone lying around, their pieces go back to "can't name yet" until they sleep
   in a bed again. Keeping a bed somewhere is enough.
-- **When the counts update:** whenever someone runs `/muninn builders` (or `portals`,
-  `tombstones`, `ships`, `tames`) after a new save, and before each weekly title run, so
-  Völundr always goes by the latest save.
+- **When the counts update:** within 10 minutes of each world save (the bot checks every
+  10 minutes), when someone runs `/muninn builders` (or `portals`, `tombstones`, `ships`,
+  `tames`, `deathmap`), and before each weekly title run, so Völundr always goes by the
+  latest save.
 - **Check it on your server:** `docker compose exec valheim-discord-monitor python3
   world_objects.py /valheim_save_data` lists the builders along with everything else:
   ```
@@ -1564,7 +1591,8 @@ and stays recorded after it's emptied. `/muninn deathmap` draws them:
 
 *(Example with made-up deaths.)* Red dots are tombstones, red circles the worst spots with
 how many died there, purple diamonds your portals and green the start, so you can find your
-way. The map zooms to where the deaths are. Underneath, the worst spots:
+way. The map zooms to fit the deaths and the start (at least 800 m across). Underneath,
+the worst spots:
 
 ```
 💀 Where we die in Alheim
@@ -1590,7 +1618,7 @@ way. The map zooms to where the deaths are. Underneath, the worst spots:
 | Mark | Means |
 |---|---|
 | 🔴 Red dot | One tombstone |
-| ⭕ Red circle with a number | One of the 5 worst 250 m squares, and how many died there; bigger means more |
+| ⭕ Red circle with a number | One of the 5 worst 250 m squares with 2 or more deaths, and how many; bigger means more |
 | 🟣 Purple diamond | A portal, with its name (names that would overlap are left off) |
 | 🟢 Green ring | The start (the middle of the world) |
 | Grid | Map coordinates every 500, 1000 or 2000 m depending on the zoom; x goes east, z north |
@@ -1612,7 +1640,8 @@ way. The map zooms to where the deaths are. Underneath, the worst spots:
 Two more things read from the same world save, with no setup:
 
 **`/muninn ships`**: every raft, karve, longship and drakkar, furthest from the start first,
-which is usually the one somebody sailed off in and left behind. Carts are listed too.
+which is usually the one somebody sailed off in and left behind (the first 20, with a count of
+the rest). Carts are listed too, the first 5 with where they are.
 
 ```
 ⛵ Ships in Alheim: 4
@@ -1637,6 +1666,7 @@ stars and where they are:
 
 - **Tames only.** The save keeps wild animals in explored areas too; only the ones marked
   tamed are counted. Cubs and piglets born to tames count as tamed.
+- **Up to 25 named tames** are listed, then how many more.
 - **Names** are the ones given in game (hover a tame and press E). Unnamed ones are only
   counted.
 - **Stars** come from the animal's level: a 2-star wolf shows ★★.
@@ -1744,8 +1774,11 @@ Players who want to compare can put their counts on a shared board:
 - **Mímir**, the wisest of the gods, is a [title role](#title-roles) for whoever has done
   the most, handed out with the other titles each week. As with every title, the role goes
   to the Discord account [linked](#players--community) to the character.
-- **One uploader per character:** the character is matched to the name in the server log,
-  and only the person who put it on the board can update it or take it off.
+- **Whose character it is:** the file's name gives the character, matched to the name in
+  the server log. A character linked with `/valheim link` is its player's: nobody else can
+  put it on the board, and its player can upload over an entry someone else made. An
+  unlinked character can only be updated or removed by whoever put it on the board.
+  Admins can remove any entry by uploading the character's file with `board:False`.
 - The counts are only as fresh as the last upload. Each line shows when that was.
 
 What `/muninn progress` looks like:
@@ -1829,7 +1862,7 @@ own role so it can hand them out.
 ### Title roles
 
 The leader of each `/muninn top` board (except streaks), of the `/muninn progress` board
-and of `/muninn builders` gets a role named after a figure from Norse mythology:
+and of `/muninn builders`, plus the player with the least time (Hœnir), gets a role named after a figure from Norse mythology:
 
 | Role | Leaderboard | Why |
 |---|---|---|
@@ -2001,6 +2034,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | ☀️ Day is behind the game by a day | The save is up to 30 minutes old | It catches up at the next save or the next sleep |
 | No "This week in the world" in the recap | The first recap after updating only takes the snapshot; or `admin_bot.save_dir` isn't set | Wait for the next recap; set `save_dir` |
 | `/muninn when`'s hours are shifted | The container's time zone isn't yours | Set `TZ` in `.env` (e.g. `TZ=America/Los_Angeles`) and recreate the container |
+| "… is linked to @someone, so only they can put it on the progress board" | The character is linked to another Discord account | If it's yours, an admin can `/valheim unlink` it so you can link it; otherwise it's theirs to upload |
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
 | A `/muninn` world command (builders, portals, tombstones, ships, tames) never answered | A bug in versions before this one: the first run after each save failed | Update; a failing command now always answers, and the error is in the bot's log |
@@ -2111,7 +2145,7 @@ switched on by adding their name to `events` in `config.json`:
 
 **Reactions:** with the admin bot on, it reacts to some of Huginn's posts so people can join
 in: ⚔️ raids, 👋 welcomes, 🏆 milestones (birthdays too) and boss kills, 🏅 achievements, 👑 titles,
-📜 the weekly recap, 🎉 honors and finished achievement lists, 🛠️ patch notes, ⚠️ version mismatches. It needs Add Reactions in that channel.
+📜 the weekly recap, 🎉 honors and finished achievement lists, 🛠️ patch notes (when they go to Huginn's feed; in #runestone the bot posts them itself), ⚠️ version mismatches. It needs Add Reactions in that channel.
 
 **The weekly recap has a chart:** a bar chart of hours played per day, drawn with Pillow
 (included in the Docker image). Without Pillow, the recap is posted without it.
@@ -2172,7 +2206,8 @@ the last recap, read from the world save like [builders](#builders-muninn-builde
   `world_snapshot`). Deleting that row makes the next recap take a fresh snapshot, e.g.
   after switching worlds.
 - **Needs** `admin_bot.save_dir`, the same folder the bot reads for bosses and portals. The
-  monitor reads it, so the bot doesn't have to be running at recap time.
+  monitor reads it, so the bot doesn't have to be running at recap time. With several
+  worlds it follows `admin_bot.bosses.world`.
 
 ### Streaks, anniversaries and the server's birthday
 
@@ -2667,7 +2702,7 @@ or run it in a terminal.
 | Config key | Default | Meaning |
 |---|---|---|
 | `events` | mode default | Log mode: `login`, `logout`, `death`, `respawn`, `server_up`, `join_refused`, and the [extras](#extras-raids-summaries-milestones-recap-board-backups) `raid`, `version_mismatch`, `session_summary`, `welcome`, `milestone`, `weekly_recap`, `update`, `achievement` (Steam unlock posts). Count mode: `player_joined`, `player_left`, `server_online`, `server_offline`. |
-| `poll_interval_seconds` | 15 | How often to poll. |
+| `poll_interval_seconds` | 10 | How often to poll (the example configs set 15). |
 | `discord.username` | Valheim | Name the webhook posts under (the examples use **Huginn**, see [roles & names](#roles--names)). |
 | `source.offline_after` | 3 | Count mode: failed queries in a row before "offline". |
 | `source.api_key` | — | `steamapi` only; or `STEAM_API_KEY` env var. |
@@ -2707,7 +2742,7 @@ or run it in a terminal.
 | `backups.keep` | 30 | Backup copies to keep. |
 | `backups.alert_after_hours` | 48 | Warn the admin channel if Valheim makes no backup for this long. |
 | `weekly_recap.day` / `hour` | sunday / 18 | When to post the weekly recap (container time zone). |
-| `weekly_recap.world` | true | End the recap with [what changed in the world](#this-week-in-the-world), from `admin_bot.save_dir`. |
+| `weekly_recap.world` | true | End the recap with [what changed in the world](#this-week-in-the-world), from `admin_bot.save_dir` (and `admin_bot.bosses.world`). |
 | `updater.log` | — | The host updater's log (`update_check.log`), for update posts. |
 | `updater.bot_dir` | — | Folder shared with the host: `status.json` out, `request` for restart/check/settings. |
 | `admin_bot.online_role` | — | `true` (or a role name): the bot creates the "In Valheim" role, given to linked players while they're in-game. |
@@ -2721,17 +2756,17 @@ or run it in a terminal.
 | `admin_bot.lfg.reminder_minutes` | 15 | Ping game-night signups this long before the start. |
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
 | `admin_bot.bosses.enabled` / `announce` | true / true | [Boss progress](#boss-progress) from the world save; `announce` posts each new kill. |
-| `admin_bot.bosses.world` | the newest | Which world in `worlds_local`, if there are several (for boss progress and the ☀️ Day channel). |
+| `admin_bot.bosses.world` | the newest | Which world in `worlds_local`, if there are several: for everything read from the world save (boss progress, the ☀️ Day channel, portals, tombstones, ships, tames, builders, the death map and the weekly world digest). |
 | `admin_bot.map.enabled` | true | Allow `/valheim map` (seed + map link). |
 | `admin_bot.map.seed` | "" | Use this seed instead of reading it from the world file. |
 | `admin_bot.link_nickname` | false | `/valheim link` sets the member's server nickname to their character, if they have no nickname yet (needs Manage Nicknames; the server owner's can't be changed). |
-| `admin_bot.command_channels` | true | Send `stats`, `top`, `titles`, `online`, `compare`, `uptime`, `bosses`, `plan` and `bounties` to their home channel (from `/odin setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
+| `admin_bot.command_channels` | true | Send every `/muninn` and `/warcouncil` command to its home channel (from `/odin setup`) with a private reply. `false` turns it off; `{"stats": "<id>", …}` overrides. |
 | `admin_bot.tidy_notices_hours` | 24 | Delete refused-join notices this long after someone pressed Permit, Ban or Ignore (needs Manage Messages). `0` keeps them. |
-| `admin_bot.titles.enabled` | false | Weekly title roles for the `/muninn top` leaders. |
+| `admin_bot.titles.enabled` | false | Weekly title roles for the `/muninn top`, `/muninn progress` and `/muninn builders` leaders, and Hœnir. |
 | `admin_bot.titles.period` | all | `all` (all-time numbers) or `week` (last 7 days). |
 | `admin_bot.titles.day` / `hour` | sunday / 18 | When to reassign the titles (container time zone). |
 | `admin_bot.titles.channel_id` | — | Where to post title changes; empty = the webhook channel. |
-| `admin_bot.titles.roles` | — | Existing role IDs per category (`time`, `deaths`, `sessions`, `longest`, `achievements`, `least`, `progress`); otherwise the bot creates them. |
+| `admin_bot.titles.roles` | — | Existing role IDs per category (`time`, `deaths`, `sessions`, `longest`, `achievements`, `least`, `progress`, `builder`); otherwise the bot creates them. |
 | `admin_bot.titles.away_days` / `away_role` / `away_dm` | 14 / Óðr / false | The [away role](#title-roles) for linked players not seen for that long; `away_role: false` turns it off; `away_dm` sends one "come back" DM. |
 | `health.low_disk_gb` | 10 | Warn when the save disk has less free space than this. |
 | `health.slow_save_seconds` | 5 | Warn when a world save takes longer than this. |

@@ -167,7 +167,7 @@ class LookupTest(unittest.TestCase):
         with mock.patch.object(wiki, "_get", self.fake):
             self.assertEqual(wiki.lookup("draugr")["title"], "Draugr")
             self.assertEqual(self.calls, ["parse", "query"])
-            wiki.lookup("Draugr")                                   # cached
+            wiki.lookup("draugr")                                   # cached (same title)
             self.assertEqual(len(self.calls), 2)
             found = wiki.lookup("drau")                             # no such page: the search's best match
             self.assertEqual(found["title"], "Draugr")

@@ -164,6 +164,7 @@ WELCOME_DM = ("👋 Welcome to **{guild}**, {member}! We play Valheim on **{serv
               "uses a permitted list\n"
               "• `/valheim link`: link your character, for the In Valheim role and your stats\n"
               "• `/valheim progress`: see which achievements your character is still missing\n"
+              "• `/valheim wiki`: look anything up on the Valheim Wiki\n"
               "See you in the tenth world.")
 
 # Huginn's posts the bot reacts to, so people can react along.
@@ -483,6 +484,7 @@ class AdminBot:
         self._boss_read = (None, 0.0)           # (path, mtime) of the last save read
         self._day_read = (None, 0.0, None)      # (path, mtime, in-game day) from the save
         self._objects_read = (None, 0.0, None)  # (path, mtime, portals and tombstones) from the save
+        self._objects_lock = threading.Lock()   # one scan at a time; the others wait for its result
         self._world_task = None
         # /valheim link sets a member's server nickname to the character (only if they have none).
         self.link_nickname = bool(cfg.get("link_nickname", False))
@@ -679,7 +681,8 @@ class AdminBot:
                 show = [k for k in stat_channels.STATS
                         if not (k.startswith("title_") and k != "title_owner" and not self.titles_on)
                         and not (k == "away" and not (self.titles_on and self.away_role_name))
-                        and not (k == "bounty_hunter" and not self.bounty_role_name)]
+                        and not (k == "bounty_hunter" and not self.bounty_role_name)
+                        and not (k == "bosses" and not self.bosses_on)]
             unknown = [k for k in show if k not in stat_channels.STATS and k not in stat_channels.ALIASES]
             if unknown:
                 log.warning("admin_bot: unknown stat_channels.show entries %s; known: %s",
@@ -1979,21 +1982,28 @@ class AdminBot:
             mtime = os.path.getmtime(path)
         except OSError:
             return None
-        if self._objects_read[:2] != (path, mtime):
+        with self._objects_lock:
+            if self._objects_read[:2] == (path, mtime):
+                return self._objects_read[2]
             found = world_objects.scan(self.lists.save_dir, self.bosses_world)
-            self._objects_read = (path, mtime, found)
-            if found is not None and self.db_path:          # for the Völundr title
+            if found is not None and self.db_path:          # builders (Völundr) and the death map
                 # This runs in a worker thread, and SQLite connections belong to the thread
                 # that opened them: use a connection of its own, not self.db.
                 import community
                 import stats_db
-                conn = stats_db.connect(self.db_path)
                 try:
-                    community.save_builders(conn, world_objects.builder_counts(found)[0])
-                    community.record_death_spots(conn, found["tombstones"])     # for the death map
-                finally:
-                    conn.close()
-        return self._objects_read[2]
+                    conn = stats_db.connect(self.db_path)
+                    try:
+                        community.save_builders(conn, world_objects.builder_counts(found)[0])
+                        community.record_death_spots(conn, found["tombstones"])
+                    finally:
+                        conn.close()
+                except Exception as e:  # noqa: BLE001  (e.g. database locked)
+                    # Not remembered as read, so the next call stores this save again.
+                    log.warning("admin_bot: couldn't store the world save's builders and tombstones: %s", e)
+                    return found
+            self._objects_read = (path, mtime, found)
+            return found
 
     def _meta(self, key: str, value=None):
         import community
@@ -2425,10 +2435,16 @@ class AdminBot:
             await asyncio.sleep(600)
 
     # -- the progress board (/valheim progress board:True, /muninn progress) ----------
-    async def _progress_board(self, user_id, name: str, parsed: dict, board: Optional[bool]) -> str:
+    async def _progress_board(self, user_id, name: str, parsed: dict, board: Optional[bool],
+                              admin: bool = False) -> str:
         """Keep the uploader's counts on the board when they asked for it (board True, or
         None while they're already on it), take them off with False. Announces lists
-        finished since the last upload in Huginn's feed. Returns a line for the reply."""
+        finished since the last upload in Huginn's feed. Returns a line for the reply.
+
+        A character linked to someone (/valheim link) is theirs: nobody else can put it on
+        the board, and they (or an admin) can take over or remove an entry someone else made.
+        The file's name is all that says whose character it is, so this is what stops a
+        renamed file from standing in for someone."""
         import community
         import fch_progress
         if board is None and not self.db_path:
@@ -2438,15 +2454,20 @@ class AdminBot:
         player = community.known_player(self.db, name) or name
         entry = community.progress_entry(self.db, player)
         mine = bool(entry and entry["user_id"] == str(user_id))
+        linked = community.linked_user(self.db, player)
+        owner = admin or linked == str(user_id)            # may override someone else's entry
+        if linked and not owner:
+            return (f"\n**{player}** is linked to <@{linked}>, so only they can put it on the progress board."
+                    if board else "")
         if board is False:
-            if community.drop_progress(self.db, player, user_id):
+            if community.drop_progress(self.db, player, user_id, force=owner):
                 return f"\n**{player}** is off the progress board."
             return ""
         if board is None and not mine:
             return ("\nWant your counts (not the lists) on `/muninn progress`? Upload again with "
-                    "`board:True`.")
+                    "`board:True`." if not entry else "")
         counts = community.progress_counts(fch_progress.report(parsed))
-        err, finished = community.save_progress(self.db, player, user_id, counts)
+        err, finished = community.save_progress(self.db, player, user_id, counts, force=owner)
         if err:
             return "\n" + err
         for key in finished:
@@ -2471,6 +2492,8 @@ class AdminBot:
         if items is None:
             items = await asyncio.to_thread(patch_notes.fetch)
         raw = self._meta("patch:seen")
+        if raw is None and not items:
+            return []                         # nothing to remember yet (Steam hiccup): try again later
         try:
             seen = set(json.loads(raw)) if raw else set()
         except ValueError:
@@ -3608,7 +3631,7 @@ class AdminBot:
                         f"v{fch_progress.SUPPORTED_VERSION}, so some counts may be off.")
             text = fch_progress.render_text(parsed, sections, full=True, name=name)
             try:
-                note += await bot._progress_board(it.user.id, name, parsed, board)
+                note += await bot._progress_board(it.user.id, name, parsed, board, admin=bot._is_admin(it.user))
             except Exception as e:  # noqa: BLE001  (the board is extra: the answer still goes out)
                 log.warning("admin_bot: progress board update for %s failed: %s", name, e)
                 note += "\nCouldn't update the progress board just now; try again later."
@@ -3655,7 +3678,7 @@ class AdminBot:
             if not bot.wiki_enabled:
                 await it.response.send_message("The wiki lookup is turned off on this server.", ephemeral=True)
                 return
-            await it.response.defer(ephemeral=not share)
+            await it.response.defer(ephemeral=True)          # errors stay private, even with share
             try:
                 found = await asyncio.to_thread(wiki.lookup, page)
             except Exception as e:  # noqa: BLE001  (no internet, wiki down)
@@ -3667,8 +3690,16 @@ class AdminBot:
                                        "Try another spelling, or pick one of the suggestions as you type.",
                                        ephemeral=True)
                 return
-            await it.followup.send(embed=discord.Embed.from_dict(wiki.card(found)),
-                                   allowed_mentions=discord.AllowedMentions.none())
+            card = discord.Embed.from_dict(wiki.card(found))
+            if share and it.channel is not None:
+                try:
+                    await it.channel.send(embed=card, allowed_mentions=discord.AllowedMentions.none())
+                    await it.followup.send(f"Posted **{discord.utils.escape_markdown(found['title'])}** here.",
+                                           ephemeral=True)
+                    return
+                except discord.HTTPException as e:
+                    log.info("admin_bot: couldn't share a wiki card: %s", e)
+            await it.followup.send(embed=card, ephemeral=True)
 
         @wiki_.autocomplete("page")
         async def wiki_choices(it: discord.Interaction, current: str):

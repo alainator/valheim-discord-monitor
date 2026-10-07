@@ -16,6 +16,7 @@ bot thread can each use their own.
 
 from __future__ import annotations
 
+import calendar
 import datetime as _dt
 import glob
 import os
@@ -502,7 +503,10 @@ def anniversary(first_seen: _dt.date, today: _dt.date) -> Optional[str]:
     if (today - first_seen).days == 100:
         return "100 days"
     years = today.year - first_seen.year
-    if years >= 1 and (today.month, today.day) == (first_seen.month, first_seen.day):
+    month_day = (first_seen.month, first_seen.day)
+    if month_day == (2, 29) and not calendar.isleap(today.year):
+        month_day = (2, 28)                   # a 29 February start is celebrated on the 28th
+    if years >= 1 and (today.month, today.day) == month_day:
         return f"{years} year{'s' if years > 1 else ''}"
     return None
 
@@ -655,8 +659,14 @@ def record_death_spots(conn, tombstones: list, now: Optional[float] = None) -> i
     how many were new."""
     when = int(now if now is not None else time.time())
     before = conn.total_changes
-    conn.executemany("INSERT OR IGNORE INTO death_spots(owner, died, x, z, seen_at) VALUES (?,?,?,?,?)",
-                     [(t["owner"], round(t["died"] or 0), round(t["x"]), round(t["z"]), when) for t in tombstones])
+    for t in tombstones:
+        died = round(t["died"] or 0)
+        # A tombstone can drift (floating in water, dug ground): with a time of death, that
+        # time says it's the same one, wherever it lies now.
+        if died and _one(conn, "SELECT 1 AS x FROM death_spots WHERE owner = ? AND died = ?", (t["owner"], died)):
+            continue
+        conn.execute("INSERT OR IGNORE INTO death_spots(owner, died, x, z, seen_at) VALUES (?,?,?,?,?)",
+                     (t["owner"], died, round(t["x"]), round(t["z"]), when))
     conn.commit()
     return conn.total_changes - before
 
@@ -681,16 +691,20 @@ def progress_entry(conn, player: str) -> Optional[dict]:
     return r
 
 
-def save_progress(conn, player: str, user_id, counts: dict, now: Optional[float] = None) -> tuple:
+def save_progress(conn, player: str, user_id, counts: dict, now: Optional[float] = None,
+                  force: bool = False) -> tuple:
     """Put a character's counts on the board, or update them. Returns (error or None, the
     list keys finished since the last upload). A first upload finishes nothing, so joining
-    the board doesn't announce lists done long ago."""
+    the board doesn't announce lists done long ago; nor does a list the last upload didn't
+    have (one added in an update). force: take over an entry someone else uploaded (the
+    character's linked player, or an admin)."""
     import json
     old = progress_entry(conn, player)
-    if old and old["user_id"] != str(user_id):
-        return f"**{old['player']}** is on the board for <@{old['user_id']}>. Ask an admin if that's wrong.", []
+    if old and old["user_id"] != str(user_id) and not force:
+        return (f"**{old['player']}** is on the board for <@{old['user_id']}>. If it's your character, link it "
+                f"with `/valheim link` and upload again, or ask an admin."), []
     finished = [k for k, (done, total) in counts.items()
-                if old and total and done >= total and (old["sections"].get(k) or [0, 1])[0] < total]
+                if old and total and done >= total and k in old["sections"] and old["sections"][k][0] < total]
     done, total = sum(c[0] for c in counts.values()), sum(c[1] for c in counts.values())
     conn.execute("INSERT INTO fch_progress(player, user_id, done, total, sections, updated_at) VALUES (?,?,?,?,?,?) "
                  "ON CONFLICT(player) DO UPDATE SET user_id=excluded.user_id, done=excluded.done, "
@@ -701,10 +715,14 @@ def save_progress(conn, player: str, user_id, counts: dict, now: Optional[float]
     return None, finished
 
 
-def drop_progress(conn, player: str, user_id) -> bool:
-    """Take a character off the board (only its uploader can)."""
-    n = conn.execute("DELETE FROM fch_progress WHERE player = ? COLLATE NOCASE AND user_id = ?",
-                     (player, str(user_id))).rowcount
+def drop_progress(conn, player: str, user_id, force: bool = False) -> bool:
+    """Take a character off the board: its uploader can, and with force (the character's
+    linked player, or an admin) anyone's entry."""
+    if force:
+        n = conn.execute("DELETE FROM fch_progress WHERE player = ? COLLATE NOCASE", (player,)).rowcount
+    else:
+        n = conn.execute("DELETE FROM fch_progress WHERE player = ? COLLATE NOCASE AND user_id = ?",
+                         (player, str(user_id))).rowcount
     conn.commit()
     return n > 0
 
