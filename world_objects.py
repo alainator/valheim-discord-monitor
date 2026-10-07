@@ -430,7 +430,10 @@ def snapshot(found: dict) -> dict:
     return {"pieces": sum(found["builders"].values()), "builders": dict(named), "unnamed": unnamed_pieces,
             "portals": sorted(p["tag"] for p in found["portals"]),
             "ships": [[s["kind"], round(s["x"]), round(s["z"])] for s in found["ships"]],
-            "tombstones": [[t["owner"], round(t["died"] or 0)] for t in found["tombstones"]],
+            # With a time of death, owner and time say which tombstone it is (it may drift);
+            # without one, its spot does.
+            "tombstones": [[t["owner"], round(t["died"])] if t["died"] else [t["owner"], 0, round(t["x"]), round(t["z"])]
+                           for t in found["tombstones"]],
             "tames": [[a["kind"], a["name"]] for a in found["tames"]]}
 
 
@@ -439,20 +442,22 @@ def _plural(n: int, word: str) -> str:
 
 
 def _match_ships(old: list, new: list, moved_m: float = 200) -> tuple:
-    """(new ships, gone ships, moved count): each ship is matched to the nearest one of the
-    same kind from last week; further than moved_m means it sailed somewhere."""
-    left = [list(s) for s in old]
-    added, moved = [], 0
-    for kind, x, z in new:
-        same = [s for s in left if s[0] == kind]
-        if not same:
-            added.append(kind)
+    """(new ships, gone ships, moved count). Ships of a kind are paired with last week's
+    closest pairs first, so a ship that stayed put keeps its match; a pair further apart
+    than moved_m means it sailed somewhere."""
+    pairs = sorted((math.hypot(o[1] - n[1], o[2] - n[2]), i, j)
+                   for i, o in enumerate(old) for j, n in enumerate(new) if o[0] == n[0])
+    used_old, used_new, moved = set(), set(), 0
+    for dist, i, j in pairs:
+        if i in used_old or j in used_new:
             continue
-        near = min(same, key=lambda s: math.hypot(s[1] - x, s[2] - z))
-        left.remove(near)
-        if math.hypot(near[1] - x, near[2] - z) > moved_m:
+        used_old.add(i)
+        used_new.add(j)
+        if dist > moved_m:
             moved += 1
-    return added, [s[0] for s in left], moved
+    added = [n[0] for j, n in enumerate(new) if j not in used_new]
+    gone = [o[0] for i, o in enumerate(old) if i not in used_old]
+    return added, gone, moved
 
 
 def digest(old: dict, new: dict) -> list:
@@ -477,21 +482,25 @@ def digest(old: dict, new: dict) -> list:
         lines.append("🌀 New portals: " + ", ".join(sorted({t or "(no name)" for t in added})))
     if old_tags:
         lines.append("🌀 Portals taken down: " + ", ".join(sorted({t or "(no name)" for t in old_tags})))
-    ship_new, ship_gone, moved = _match_ships(old.get("ships", []), new["ships"])
+    # Carts are kept with the ships for /muninn ships, but a cart isn't a ship that sailed.
+    ship_new, ship_gone, moved = _match_ships([s for s in old.get("ships", []) if s[0] != "cart"],
+                                              [s for s in new["ships"] if s[0] != "cart"])
     bits = [f"{_plural(ship_new.count(k), k)} built" for k in sorted(set(ship_new))]
     bits += [f"{_plural(ship_gone.count(k), k)} gone" for k in sorted(set(ship_gone))]
     if moved:
         bits.append(f"{moved} {'ship' if moved == 1 else 'ships'} sailed somewhere new")
     if bits:
         lines.append("⛵ " + " · ".join(bits))
-    old_graves = {tuple(g) for g in old.get("tombstones", [])}
-    new_graves = {tuple(g) for g in new["tombstones"]}
-    recovered, fresh = len(old_graves - new_graves), sorted(new_graves - old_graves)
+    from collections import Counter
+    old_graves = Counter(tuple(g) for g in old.get("tombstones", []))
+    new_graves = Counter(tuple(g) for g in new["tombstones"])
+    recovered = sum((old_graves - new_graves).values())
+    fresh = list((new_graves - old_graves).elements())
     if recovered or fresh:
         parts = [f"{recovered} recovered"] if recovered else []
         if fresh:
-            parts.append(f"{len(fresh)} new ({', '.join(sorted({o for o, _ in fresh}))})")
-        still = len(new_graves & old_graves)
+            parts.append(f"{len(fresh)} new ({', '.join(sorted({g[0] for g in fresh}))})")
+        still = sum((new_graves & old_graves).values())
         lines.append("🪦 Tombstones: " + ", ".join(parts) + (f", {still} still out there" if still else ""))
     old_kinds: dict = {}
     for kind, _ in old.get("tames", []):

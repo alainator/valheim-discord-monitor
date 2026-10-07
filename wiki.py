@@ -54,7 +54,9 @@ def _get(params: dict, timeout: float = 10.0):
         return json.loads(r.read().decode("utf-8", errors="replace"))
 
 
-def _cached(kind: str, key: str, fetch):
+def _cached(kind: str, key, fetch):
+    """fetch() once per CACHE_SECONDS. "Not found" (None) isn't kept, so a page created or
+    a title corrected later is found right away."""
     now = time.time()
     hit = _cache.get((kind, key))
     if hit and now - hit[0] < CACHE_SECONDS:
@@ -62,7 +64,8 @@ def _cached(kind: str, key: str, fetch):
     value = fetch()
     if len(_cache) > 500:
         _cache.clear()
-    _cache[(kind, key)] = (now, value)
+    if value is not None:
+        _cache[(kind, key)] = (now, value)
     return value
 
 
@@ -71,7 +74,7 @@ def search(text: str, limit: int = 10, timeout: float = 2.5) -> list:
     text = text.strip()
     if not text:
         return []
-    data = _cached("search", text.lower(), lambda: _get(
+    data = _cached("search", (text.lower(), limit), lambda: _get(
         {"action": "opensearch", "search": text, "limit": limit, "namespace": 0}, timeout))
     return list(data[1]) if isinstance(data, list) and len(data) > 1 else []
 
@@ -89,7 +92,9 @@ def page(title: str) -> Optional[dict]:
         pg = next(iter(((info.get("query") or {}).get("pages") or {}).values()), {})
         return {"title": real, "url": pg.get("fullurl") or f"https://valheim.fandom.com/wiki/{urllib.parse.quote(real)}",
                 "image": (pg.get("thumbnail") or {}).get("source"), "wikitext": parsed["parse"]["wikitext"]["*"]}
-    return _cached("page", title.strip().lower(), fetch)
+    # Exact title: wiki titles are case-sensitive after the first letter ("Deer trophy" is a
+    # page, "Deer Trophy" isn't), so they mustn't share a cache entry.
+    return _cached("page", title.strip(), fetch)
 
 
 def lookup(text: str) -> Optional[dict]:

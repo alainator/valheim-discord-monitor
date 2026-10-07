@@ -83,12 +83,18 @@ def world_save(save_dir: str, world: Optional[str] = None) -> Optional[str]:
         folder = os.path.basename(os.path.dirname(path))
         if "_backup_" in folder or (world and folder != world):
             continue
-        found.append((os.path.getmtime(path), _save_number(path), path))
+        try:                                  # Valheim may remove an older save meanwhile
+            found.append((os.path.getmtime(path), _save_number(path), path))
+        except OSError:
+            continue
     for path in glob.glob(os.path.join(base, "*.db")):
         name = os.path.splitext(os.path.basename(path))[0]
         if "_backup_" in name or (world and name != world):
             continue
-        found.append((os.path.getmtime(path), 0, path))
+        try:
+            found.append((os.path.getmtime(path), 0, path))
+        except OSError:
+            continue
     if not found:
         return None
     if world:                                 # one world: its highest save number

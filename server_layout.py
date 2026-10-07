@@ -53,7 +53,8 @@ TEMPLATE = [
     {"key": "wilds", "name": "⚔️ The Wilds", "aliases": ["Gaming", "Valheim", "Game", "Games"],
      "channels": [
          ("feed", "text", "🐦┃huginns-watch",
-          "Huginn reports from the server: logins, deaths, raids, boss kills, achievements, titles and honors.",
+          "Huginn reports from the server: logins, deaths, raids, boss kills, milestones, achievements, finished "
+          "lists, titles, honors and the weekly recap.",
           ["valheim", "server-feed", "server-status", "status", "game-feed", "valheim-feed", "server-log",
            "activity"], {"feed"}),
          ("plans", "text", "🗺️┃war-council",
@@ -112,7 +113,8 @@ OLD_TOPICS = {
               "Plan raids and game nights with /warcouncil plan."),
     "welcome": ("New here? /valheim join shows the join code and address. /valheim request-access <character> "
                 "asks the admins to let you in.",),
-    "feed": ("Huginn reports from the server: logins, deaths, raids, achievements and titles.",),
+    "feed": ("Huginn reports from the server: logins, deaths, raids, achievements and titles.",
+             "Huginn reports from the server: logins, deaths, raids, boss kills, achievements, titles and honors."),
     "admin": ("Refused joins with Permit/Ban, update checks and restarts. Only admins see this.",),
 }
 

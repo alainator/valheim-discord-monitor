@@ -276,14 +276,20 @@ class DigestTest(unittest.TestCase):
             with open(chunk, "wb") as f:
                 f.write(b"\x29\x00" + piece(111) * 3 + bed(111, "Ingrid"))
             st = stats_db.Store(os.path.join(d, "s.db"))
-            self.assertIsNone(extras.world_digest(st, d))                         # first week: just remembers
-            self.assertEqual(extras.world_digest(st, d), "A quiet week: nothing built, sailed, tamed or lost.")
+
+            def recap():                                                       # digest, post, then keep
+                text, snap = extras.world_digest(st, d)
+                extras.keep_world_snapshot(st, snap)
+                return text
+            self.assertIsNone(recap())                                         # first week: just remembers
+            self.assertEqual(recap(), "A quiet week: nothing built, sailed, tamed or lost.")
             with open(chunk, "wb") as f:
                 f.write(b"\x29\x00" + piece(111) * 5 + bed(111, "Ingrid") + portal(1, 1, "Home"))
-            text = extras.world_digest(st, d)
+            extras.world_digest(st, d)                                         # a recap that failed to post…
+            text, _ = extras.world_digest(st, d)                               # …retried: still against last week
             self.assertIn("🔨 **+3 pieces** (now 6) · most building: Ingrid +2", text)      # the portal is a piece too
             self.assertIn("🌀 New portals: Home", text)
-            self.assertIsNone(extras.world_digest(st, tempfile.mkdtemp()))       # no save: nothing
+            self.assertEqual(extras.world_digest(st, tempfile.mkdtemp()), (None, None))      # no save: nothing
             st.close()
         self.assertTrue(extras.WeeklyRecap({}).world)
         self.assertFalse(extras.WeeklyRecap({"world": False}).world)
