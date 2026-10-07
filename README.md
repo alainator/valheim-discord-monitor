@@ -88,6 +88,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/odin progress-remove <character>`:** admins take a character off the progress board
+  without needing its file; the characters on the board are suggested as you type
+  ([the progress board](#the-progress-board-muninn-progress)).
 - **Fixes from a third code audit**, of everything added lately ([details](#about-this-fork)):
   - **Progress board:** a character linked to someone is theirs. Nobody else can put it on
     the board by renaming a file, its player can take over an entry someone else made, and
@@ -700,7 +703,7 @@ The commands are in four groups, one per place they're used:
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
 | **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
-| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
+| **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `progress-remove`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
 **Pinned command guides.** So members know what's there, each group's home channel has a
 pinned message listing that group's commands, with their options and what they do:
@@ -780,6 +783,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/odin restore <backup>` | Admin | Put the world back to one of Valheim's backups (newest first), after a confirmation. The current world is kept as a backup | [host helper](host/README.md#restoring-a-world-backup-from-discord) |
 | `/odin bounty <challenge> [reward] [days]` | Admin | Post a [bounty](#bounties) with an **I did it** button; open 7 days by default | Stats database |
 | `/odin bounty-close <bounty>` | Admin | Close an open bounty without a winner | Stats database |
+| `/odin progress-remove <character>` | Admin | Take a character off the [progress board](#the-progress-board-muninn-progress); the characters on it are suggested as you type | Stats database |
 | `/odin announce <message> [title] [ping] [where]` | Admin | Post an announcement in #runestone (default), Huginn's feed, or both; `ping` adds @everyone. `\n` starts a new line ([rules channel](#the-rules-channel-runestone)) | #runestone, or Huginn's webhook |
 | `/odin honor give / take / create / delete / vote` | Admin | Hand out [honors](#honors) for deeds the log can't see, make your own, or let everyone vote | Stats database, Manage Roles |
 | `/odin rules [text] [show]` | Admin | Post or edit the one pinned rules message in #runestone; no text = a starter set; `show` gives the current text to copy and edit | #runestone |
@@ -1778,7 +1782,7 @@ Players who want to compare can put their counts on a shared board:
   the server log. A character linked with `/valheim link` is its player's: nobody else can
   put it on the board, and its player can upload over an entry someone else made. An
   unlinked character can only be updated or removed by whoever put it on the board.
-  Admins can remove any entry by uploading the character's file with `board:False`.
+  Admins can remove any entry with `/odin progress-remove <character>`, no file needed.
 - The counts are only as fresh as the last upload. Each line shows when that was.
 
 What `/muninn progress` looks like:
@@ -2036,7 +2040,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn when`'s hours are shifted | The container's time zone isn't yours | Set `TZ` in `.env` (e.g. `TZ=America/Los_Angeles`) and recreate the container |
 | "… is linked to @someone, so only they can put it on the progress board" | The character is linked to another Discord account | If it's yours, an admin can `/valheim unlink` it so you can link it; otherwise it's theirs to upload |
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
-| "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, or an admin can delete the row from `fch_progress` in the stats database |
+| "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, its linked player can upload over it, or an admin can run `/odin progress-remove` |
 | A `/muninn` world command (builders, portals, tombstones, ships, tames) never answered | A bug in versions before this one: the first run after each save failed | Update; a failing command now always answers, and the error is in the bot's log |
 | A death is missing from `/muninn deathmap` | The tombstone was emptied before the world was next saved (every 30 minutes) | Nothing to fix: only tombstones that last until a save are seen |
 | A builder shows as "can't name yet" | They've never slept in a bed or left a tombstone in this world | Have them sleep in a bed once; the name shows after the next save |

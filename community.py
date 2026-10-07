@@ -727,6 +727,12 @@ def drop_progress(conn, player: str, user_id, force: bool = False) -> bool:
     return n > 0
 
 
+def progress_players(conn, prefix: str = "", limit: int = 25) -> list:
+    """Characters on the progress board, for autocomplete."""
+    return [r["player"] for r in _rows(conn, "SELECT player FROM fch_progress WHERE player LIKE ? "
+                                             "ORDER BY player COLLATE NOCASE LIMIT ?", (f"%{prefix.strip()}%", limit))]
+
+
 def progress_board(conn, key: str = "", limit: int = 15) -> list:
     """[{"player", "user_id", "done", "total", "updated_at"}], best first: by everything,
     or by one list (key)."""

@@ -124,3 +124,39 @@ class BoardBotTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(discord is None, "discord.py not installed")
+class AdminRemoveTest(unittest.TestCase):
+    def test_odin_progress_remove(self):
+        import admin_bot
+        with tempfile.TemporaryDirectory() as d:
+            b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "S")
+            b.attach(db_path=os.path.join(d, "s.db"))
+            community.save_progress(b.db, "Ingrid", 111, counts())
+            community.save_progress(b.db, "Bjorn", 222, counts())
+            replies = []
+
+            async def send_message(text, **kw):
+                replies.append((text, kw.get("ephemeral")))
+
+            def it(user):
+                return SimpleNamespace(user=SimpleNamespace(id=user, roles=[]),
+                                       response=SimpleNamespace(send_message=send_message))
+
+            async def run():
+                tree = b._build_client().tree
+                b._register_commands(tree)
+                cmd = tree.get_command("odin").get_command("progress-remove")
+                choices = await cmd._params["character"].autocomplete(it(5), "ing")
+                await cmd.callback(it(9), "Ingrid")                       # not an admin
+                await cmd.callback(it(5), "ingrid")
+                await cmd.callback(it(5), "Nobody")
+                return [c.value for c in choices]
+            self.assertEqual(asyncio.run(run()), ["Ingrid"])
+            self.assertEqual(replies[0], ("Only the server admins can do that.", True))
+            self.assertIn("Took **Ingrid** off the progress board (it was <@111>'s upload)", replies[1][0])
+            self.assertTrue(replies[1][1])
+            self.assertIn("isn't on the progress board", replies[2][0])
+            self.assertIsNone(community.progress_entry(b.db, "Ingrid"))
+            self.assertIsNotNone(community.progress_entry(b.db, "Bjorn"))
