@@ -245,3 +245,38 @@ class BossChannelTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(discord is None, "discord.py not installed")
+class PrivateErrorTest(unittest.TestCase):
+    def test_a_world_command_without_a_save_answers_privately(self):
+        """/muninn portals defers publicly ("thinking…" for everyone); its "can't find the
+        world save" must still only reach the user who asked."""
+        import admin_bot
+        from types import SimpleNamespace
+        log = []
+
+        async def defer(**kw):
+            log.append(("defer", kw.get("ephemeral", False)))
+
+        async def followup(text, ephemeral=False, **kw):
+            log.append(("followup", ephemeral))
+
+        async def delete():
+            log.append(("deleted thinking", None))
+
+        async def original_response():
+            return SimpleNamespace(flags=SimpleNamespace(loading=True), delete=delete)
+
+        with tempfile.TemporaryDirectory() as d:
+            b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d}, "S")
+            it = SimpleNamespace(user=SimpleNamespace(id=9, roles=[]), original_response=original_response,
+                                 response=SimpleNamespace(defer=defer, is_done=lambda: True),
+                                 followup=SimpleNamespace(send=followup))
+
+            async def run():
+                tree = b._build_client().tree
+                b._register_commands(tree)
+                await tree.get_command("muninn").get_command("portals").callback(it)
+            asyncio.run(run())
+        self.assertEqual(log, [("defer", False), ("deleted thinking", None), ("followup", True)])

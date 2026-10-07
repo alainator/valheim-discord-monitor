@@ -66,6 +66,27 @@ GUIDES = [
 ]
 
 
+async def private_followup(it, text: str) -> None:
+    """Tell the user something only they see, wherever the command got to. Discord shows
+    the first follow-up of a public "thinking…" (a public defer) publicly whatever it asks
+    for, so a still-thinking reply is removed first; a command that already answered keeps
+    its answer and gets a separate private note."""
+    import discord
+    try:
+        if not it.response.is_done():
+            await it.response.send_message(text, ephemeral=True)
+            return
+        try:
+            original = await it.original_response()
+            if original.flags.loading:                    # still "thinking…"
+                await original.delete()
+        except discord.HTTPException:
+            pass
+        await it.followup.send(text, ephemeral=True)
+    except discord.HTTPException:
+        pass
+
+
 def progress_embed(name: str, sections: list, worlds: list, full_summary: bool = True) -> dict:
     """/valheim progress: one field per achievement list, with the count and (privately) the first few
     things still missing."""
@@ -2339,14 +2360,7 @@ class AdminBot:
                     return
                 log.warning("admin_bot: /%s failed: %r", getattr(it.command, "qualified_name", "?"), original,
                             exc_info=original)
-                text = "Something went wrong with that command. The admins can check the bot's log."
-                try:
-                    if it.response.is_done():
-                        await it.followup.send(text, ephemeral=True)
-                    else:
-                        await it.response.send_message(text, ephemeral=True)
-                except discord.HTTPException:
-                    pass
+                await private_followup(it, "Something went wrong with that command. The admins can check the bot's log.")
 
         class Client(discord.Client):
             def __init__(self):
@@ -3248,7 +3262,7 @@ class AdminBot:
                 else:
                     holders, changed = (await bot._sync_titles(recompute=False))[0], set()
             except discord.HTTPException as e:
-                await it.followup.send(f"Couldn't update the title roles: {e}", ephemeral=True)
+                await private_followup(it, f"Couldn't update the title roles: {e}")
                 return
             away = sorted(bot._away_holders()) if bot.away_role_name else None
             hunters = (bot.bounty_role_name, sorted(u for u, t in bot._bounty_holders().items() if t > time.time())) \
@@ -3298,7 +3312,7 @@ class AdminBot:
             await it.response.defer()
             found = await asyncio.to_thread(bot.world_objects)
             if found is None:
-                await it.followup.send("I can't find the world save (`save_dir`/worlds_local).")
+                await private_followup(it, "I can't find the world save (`save_dir`/worlds_local).")
                 return
             await it.followup.send(embed=discord.Embed.from_dict(
                 world_objects.render_portals(found["portals"], bot.server_name)),
@@ -3311,7 +3325,7 @@ class AdminBot:
             await it.response.defer()
             found = await asyncio.to_thread(bot.world_objects)
             if found is None:
-                await it.followup.send("I can't find the world save (`save_dir`/worlds_local).")
+                await private_followup(it, "I can't find the world save (`save_dir`/worlds_local).")
                 return
             await it.followup.send(embed=discord.Embed.from_dict(
                 world_objects.render_tombstones(found["tombstones"], bosses.day_of, bot.server_name)),
@@ -3350,7 +3364,7 @@ class AdminBot:
             await it.response.defer()
             found = await asyncio.to_thread(bot.world_objects)
             if found is None:
-                await it.followup.send("I can't find the world save (`save_dir`/worlds_local).")
+                await private_followup(it, "I can't find the world save (`save_dir`/worlds_local).")
                 return
             await it.followup.send(embed=discord.Embed.from_dict(
                 world_objects.render_builders(found, bot.server_name)),
@@ -3386,7 +3400,7 @@ class AdminBot:
             await it.response.defer()
             found = await asyncio.to_thread(bot.world_objects)
             if found is None:
-                await it.followup.send("I can't find the world save (`save_dir`/worlds_local).")
+                await private_followup(it, "I can't find the world save (`save_dir`/worlds_local).")
                 return
             await it.followup.send(embed=discord.Embed.from_dict(
                 world_objects.render_ships(found["ships"], bot.server_name)),
@@ -3398,7 +3412,7 @@ class AdminBot:
             await it.response.defer()
             found = await asyncio.to_thread(bot.world_objects)
             if found is None:
-                await it.followup.send("I can't find the world save (`save_dir`/worlds_local).")
+                await private_followup(it, "I can't find the world save (`save_dir`/worlds_local).")
                 return
             await it.followup.send(embed=discord.Embed.from_dict(
                 world_objects.render_tames(found["tames"], bot.server_name)),
