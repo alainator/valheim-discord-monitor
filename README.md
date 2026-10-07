@@ -90,7 +90,8 @@ And without the bot:
 **What's new** (already running it? `git pull && docker compose up -d --build`):
 - **Error messages are private everywhere:** when a command that answers in public (like
   `/muninn builders` or `/muninn when`) fails or can't find the world save, only the person
-  who ran it sees the message; the channel doesn't get a stray "Something went wrong".
+  who ran it sees the message; the channel doesn't get a stray "Something went wrong"
+  ([when a command fails](#discord-commands)).
 - **`/odin progress-remove <character>`:** admins take a character off the progress board
   without needing its file; the characters on the board are suggested as you type
   ([the progress board](#the-progress-board-muninn-progress)).
@@ -725,6 +726,18 @@ pinned message listing that group's commands, with their options and what they d
   its guide after an update with nothing to do.
 - Pinning needs **Pin Messages** in those channels. Without it the guides are still
   posted, just not pinned, and the log says `couldn't pin the … guide`.
+
+**When a command fails**, it always answers, and only the person who ran it sees the
+message:
+- "Something went wrong with that command. The admins can check the bot's log." means
+  something unexpected happened; the reason is in the bot's log:
+  `docker compose logs valheim-discord-monitor | grep "failed:"`.
+- Expected problems say what's wrong instead, e.g. "I can't find the world save" or "This
+  needs the stats database".
+- This holds for the commands that answer in public too (`/muninn builders`, `when`,
+  `deathmap`…). They show "thinking…" to everyone while they work; if they fail, the
+  thinking message is removed and the error goes only to you. Nothing is left in the
+  channel.
 
 **Admins:** `/odin` only works for the users and roles in `admin_user_ids` /
 `admin_role_ids`. Discord also hides it from anyone without **Manage Server**. If one of
@@ -2044,6 +2057,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | "… is linked to @someone, so only they can put it on the progress board" | The character is linked to another Discord account | If it's yours, an admin can `/valheim unlink` it so you can link it; otherwise it's theirs to upload |
 | `/muninn progress` is empty | Nobody has joined the board yet | Players upload with `/valheim progress save:… board:True` |
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, its linked player can upload over it, or an admin can run `/odin progress-remove` |
+| "Something went wrong with that command" | An unexpected error in the bot; only the person who ran the command sees this | `docker compose logs valheim-discord-monitor \| grep "failed:"` shows the command and the error; please report it |
 | A `/muninn` world command (builders, portals, tombstones, ships, tames) never answered | A bug in versions before this one: the first run after each save failed | Update; a failing command now always answers, and the error is in the bot's log |
 | A death is missing from `/muninn deathmap` | The tombstone was emptied before the world was next saved (every 30 minutes) | Nothing to fix: only tombstones that last until a save are seen |
 | A builder shows as "can't name yet" | They've never slept in a bed or left a tombstone in this world | Have them sleep in a bed once; the name shows after the next save |
