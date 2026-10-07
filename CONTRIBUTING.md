@@ -27,6 +27,11 @@ list every time.
 - [ ] **Discord's limits:** names up to 32 characters, descriptions (commands and options) up
       to 100, at most 25 options or choices. The consistency test checks; a description that's
       too long is cut short in Discord.
+- [ ] **Errors go only to the user:** send them with `private_followup(it, text)` (in
+      `admin_bot.py`), not `it.followup.send`. After a public `defer()`, Discord shows the
+      first follow-up publicly whatever it asks for; the helper removes the "thinking…"
+      first. Unexpected exceptions are caught by the command tree's `on_error`, which does
+      the same.
 - [ ] **A name another group already uses** (`/valheim progress` and `/muninn progress`): the
       home-channel check skips `/valheim`, so that's fine, but say which one you mean in docs.
 - [ ] **Texts that point people to it:** the welcome DM (`WELCOME_DM`), the starter rules
