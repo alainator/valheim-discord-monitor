@@ -3900,6 +3900,29 @@ class AdminBot:
             await it.response.send_message(f"Closed bounty #{bid}.", ephemeral=True)
         bounty_close.autocomplete("bounty")(bounty_choices)
 
+        @odin.command(name="progress-remove", description="Take a character off the progress board (/muninn progress)")
+        @app_commands.describe(character="The character to remove; only its counts are deleted")
+        async def progress_remove(it: discord.Interaction, character: str):
+            if not await guard(it) or not await need_db(it):
+                return
+            entry = community.progress_entry(bot.db, character.strip())
+            if not entry or not community.drop_progress(bot.db, entry["player"], it.user.id, force=True):
+                await it.response.send_message(f"**{discord.utils.escape_markdown(character)}** isn't on the "
+                                                "progress board.", ephemeral=True)
+                return
+            log.info("admin_bot: %s took %s off the progress board", it.user, entry["player"])
+            await it.response.send_message(
+                f"Took **{discord.utils.escape_markdown(entry['player'])}** off the progress board (it was "
+                f"<@{entry['user_id']}>'s upload). They can join again with `/valheim progress board:True`.",
+                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+        @progress_remove.autocomplete("character")
+        async def progress_remove_choices(it: discord.Interaction, current: str):
+            if not bot.db_path:
+                return []
+            return [app_commands.Choice(name=p[:100], value=p[:100])
+                    for p in community.progress_players(bot.db, current)]
+
         @odin.command(name="announce", description="Post an announcement in #runestone (or Huginn's feed)")
         @app_commands.describe(message="What to announce (use \\n for a new line)", title="An optional headline",
                                ping="Also ping @everyone", where="Where to post it (default: #runestone)")
