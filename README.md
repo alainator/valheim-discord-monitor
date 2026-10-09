@@ -1836,7 +1836,8 @@ the map is being read the wrong way round: please report it.
 ### Stations: `/muninn stations`
 
 Smelters, kilns and fermenters keep what's in them in the world save, so the bot can tell
-you what needs doing before you log in:
+you what needs doing before you log in. Huginn also posts when something becomes ready or
+runs dry ([station alerts](#station-alerts)).
 
 ```
 🏭 Stations in Alheim
@@ -1921,6 +1922,29 @@ Huginn tells #huginns-watch when something needs doing, without anyone asking:
   ```
   in `admin_bot`, or `"station_alerts": false` for none. Needs `admin_bot.save_dir` and the
   stats database (where it remembers what it already said).
+
+**Each alert, in detail:**
+
+| Alert | Comes from | Posted when | Posted again when |
+|---|---|---|---|
+| 🍺 Mead ready | Fermenters | A batch has fermented for 2,400 s of game time | A new batch is ready (tapped and refilled) |
+| 🍯 Hives full | Beehives | A hive reaches 4 honey, the most it holds | It was emptied and filled up again |
+| ⚠️ Out of coal (or sap) | Smelters, blast furnaces (coal), eitr refineries (sap) | Something's waiting and there's less than one fuel | It got fuel or was emptied, then ran dry again |
+
+**Good to know:**
+- **Where:** Huginn's feed (#huginns-watch), like boss kills and the weekly recap. There's
+  no ping: it's there for whoever looks, and `/muninn stations` has the full picture.
+- **One post per save** at most: everything new goes in the same post, by base (named like
+  in [`/muninn bases`](#bases-and-signs-muninn-bases-muninn-signs)).
+- **Not alerted:** kilns, windmills and spinning wheels (no fuel to run out of), and sap
+  collectors.
+- **A failed post** (Discord down, no webhook yet) isn't remembered as said, so it comes
+  at the next check instead.
+- **A smelter that someone's using** can show up as out of coal between two refills, if a
+  save lands in between. Turn `fuel` off if that's too chatty for your group.
+- **Starting over:** what's been said is kept in the stats database (`meta`, key
+  `stations:alerted`). Deleting that row makes the next check take a fresh baseline, e.g.
+  after switching worlds.
 
 ### Death map: `/muninn deathmap`
 
