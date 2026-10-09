@@ -502,6 +502,10 @@ class AdminBot:
         self.bosses_world = str(bc.get("world") or "").strip() or None
         self.bosses_announce = bool(bc.get("announce", True))
         self.boss_keys: Optional[set] = None   # last read from the save
+        # Huginn posts when mead is ready, hives are full or a smelter runs out of coal.
+        sa = cfg.get("station_alerts", True)
+        sa = {"mead": sa, "honey": sa, "fuel": sa} if isinstance(sa, bool) else sa if isinstance(sa, dict) else {}
+        self.station_alerts = tuple(k for k in ("mead", "honey", "fuel") if sa.get(k, True) is not False)
         self._boss_task = None
         self._boss_read = (None, 0.0)           # (path, mtime) of the last save read
         self._day_read = (None, 0.0, None)      # (path, mtime, in-game day) from the save
@@ -2444,10 +2448,30 @@ class AdminBot:
         await asyncio.sleep(90)
         while True:
             try:
-                await asyncio.to_thread(self.world_objects)
+                found = await asyncio.to_thread(self.world_objects)
+                if found is not None:
+                    await self._station_alerts(found)
             except Exception as e:  # noqa: BLE001
                 log.info("admin_bot: world save check failed: %s", e)
             await asyncio.sleep(600)
+
+    async def _station_alerts(self, found: dict) -> None:
+        """Post what became ready or stuck at the stations since the last save (once each).
+        The first time only takes a baseline, so updating doesn't announce old news."""
+        import world_objects
+        if not self.station_alerts or not self.post_embed:
+            return
+        try:
+            before = json.loads(self._meta("stations:alerted") or "null")
+        except ValueError:
+            before = None
+        embed, now = world_objects.station_alerts(found, before, self.station_alerts)
+        if embed:
+            ok = await asyncio.get_running_loop().run_in_executor(None, lambda: self.post_embed(embed, "stations"))
+            if not ok:
+                return                         # not remembered: tried again after the next check
+        if now != before:
+            self._meta("stations:alerted", json.dumps(now))
 
     # -- the progress board (/valheim progress board:True, /muninn progress) ----------
     async def _progress_board(self, user_id, name: str, parsed: dict, board: Optional[bool],

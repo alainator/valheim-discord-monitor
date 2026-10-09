@@ -150,5 +150,107 @@ class StationReportTest(unittest.TestCase):
         self.assertEqual(len(wo.station_report(found)["mead"]), 1)
 
 
+
+def read(data):
+    found = wo.scan_bytes(data)
+    found["clock"] = CLOCK
+    return found
+
+
+HOME = piece(580, 460, "bed", 111, (111, "Ingrid"))
+
+
+class StationAlertsTest(unittest.TestCase):
+    def test_the_first_read_is_a_baseline(self):
+        embed, state = wo.station_alerts(read(world()), None)
+        self.assertIsNone(embed)
+        self.assertEqual(len(state["fuel"]), 3)
+        self.assertIsNone(wo.station_alerts(read(world()), state)[0])        # nothing new: nothing posted
+
+    def test_new_things_are_posted_once(self):
+        quiet = HOME + smelter(592, 459, 4.0, []) + fermenter(585, 496) + hive(592, 498, 1)
+        _, state = wo.station_alerts(read(quiet), None)
+        busy = (HOME + smelter(592, 459, 0.0, ["CopperOre", "CopperOre"]) + fermenter(585, 496, "MeadBaseTasty", CLOCK - 2500)
+                + hive(592, 498, 4))
+        embed, state = wo.station_alerts(read(busy), state)
+        self.assertEqual(embed["title"], "🏭 The stations need you")
+        self.assertEqual(embed["description"].split("\n"), [
+            "🍺 **Mead ready** at Ingrid's base: 1 fermenter (mead base: tasty)",
+            "🍯 **Hives full** at Ingrid's base: 1 hive, 4 honey to collect",
+            "⚠️ **Out of coal** at Ingrid's base: a smelter with 2 copper ore waiting"])
+        self.assertIsNone(wo.station_alerts(read(busy), state)[0])
+
+    def test_again_after_it_was_dealt_with(self):
+        dry = HOME + smelter(592, 459, 0.0, ["TinOre"]) + fermenter(585, 496, "MeadBaseTasty", CLOCK - 2500) + hive(592, 498, 4)
+        _, state = wo.station_alerts(read(dry), None)
+        fixed = HOME + smelter(592, 459, 5.0, ["TinOre"]) + fermenter(585, 496) + hive(592, 498, 0)
+        self.assertIsNone(wo.station_alerts(read(fixed), state)[0])
+        _, state = wo.station_alerts(read(fixed), state)
+        embed, _ = wo.station_alerts(read(dry.replace(struct.pack("<q", int((CLOCK - 2500) * 1e7)),
+                                                      struct.pack("<q", int((CLOCK - 2600) * 1e7)))), state)
+        self.assertEqual(len(embed["description"].split("\n")), 3)                 # all three again
+
+    def test_a_new_batch_is_new(self):
+        first = HOME + fermenter(585, 496, "MeadBaseTasty", CLOCK - 2500)
+        _, state = wo.station_alerts(read(first), None)
+        second = HOME + fermenter(585, 496, "MeadBaseTasty", CLOCK - 2450)       # tapped and refilled between saves
+        self.assertIn("Mead ready", wo.station_alerts(read(second), state)[0]["description"])
+
+    def test_only_what_is_wanted(self):
+        _, state = wo.station_alerts(read(HOME), None)
+        embed, state2 = wo.station_alerts(read(world()), state, wanted=("honey",))
+        self.assertEqual([l.split("**")[1] for l in embed["description"].split("\n")], ["Hives full"])
+        self.assertEqual(len(state2["fuel"]), 3)                  # still tracked: turning it on later isn't a flood
+        self.assertIsNone(wo.station_alerts(read(world()), state, wanted=())[0])
+
+
+try:
+    import discord  # noqa: F401
+except ImportError:                      # the bot is optional; CI installs discord.py
+    discord = None
+
+
+@unittest.skipIf(discord is None, "discord.py not installed")
+class StationAlertsBotTest(unittest.TestCase):
+    def bot(self, d, cfg=None, ok=True):
+        import admin_bot
+        b = admin_bot.AdminBot({"token": "x", "channel_id": "1", "admin_user_ids": [5], "save_dir": d, **(cfg or {})}, "S")
+        self.posts = []
+        b.attach(db_path=os.path.join(d, "s.db"),
+                 post_embed=lambda e, kind="titles": self.posts.append((kind, e["description"])) or ok)
+        return b
+
+    def test_posts_once_after_a_baseline(self):
+        import asyncio
+        with tempfile.TemporaryDirectory() as d:
+            b = self.bot(d)
+            asyncio.run(b._station_alerts(read(HOME)))
+            asyncio.run(b._station_alerts(read(world())))
+            asyncio.run(b._station_alerts(read(world())))
+        self.assertEqual(len(self.posts), 1)
+        self.assertEqual(self.posts[0][0], "stations")
+        self.assertIn("Out of coal", self.posts[0][1])
+
+    def test_a_failed_post_is_tried_again(self):
+        import asyncio
+        with tempfile.TemporaryDirectory() as d:
+            b = self.bot(d, ok=False)
+            asyncio.run(b._station_alerts(read(HOME)))
+            asyncio.run(b._station_alerts(read(world())))
+            asyncio.run(b._station_alerts(read(world())))
+        self.assertEqual(len(self.posts), 2)
+
+    def test_turned_off(self):
+        import asyncio
+        with tempfile.TemporaryDirectory() as d:
+            b = self.bot(d, {"station_alerts": False})
+            self.assertEqual(b.station_alerts, ())
+            asyncio.run(b._station_alerts(read(HOME)))
+            asyncio.run(b._station_alerts(read(world())))
+            b2 = self.bot(d, {"station_alerts": {"fuel": False}})
+            self.assertEqual(b2.station_alerts, ("mead", "honey"))
+        self.assertEqual(self.posts, [])
+
+
 if __name__ == "__main__":
     unittest.main()

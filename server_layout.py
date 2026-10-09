@@ -54,7 +54,7 @@ TEMPLATE = [
      "channels": [
          ("feed", "text", "🐦┃huginns-watch",
           "Huginn reports from the server: logins, deaths, raids, boss kills, milestones, achievements, finished "
-          "lists, titles, honors and the weekly recap.",
+          "lists, titles, honors, the weekly recap, and when the stations need you.",
           ["valheim", "server-feed", "server-status", "status", "game-feed", "valheim-feed", "server-log",
            "activity"], {"feed"}),
          ("plans", "text", "🗺️┃war-council",
@@ -126,7 +126,9 @@ OLD_TOPICS = {
     "welcome": ("New here? /valheim join shows the join code and address. /valheim request-access <character> "
                 "asks the admins to let you in.",),
     "feed": ("Huginn reports from the server: logins, deaths, raids, achievements and titles.",
-             "Huginn reports from the server: logins, deaths, raids, boss kills, achievements, titles and honors."),
+             "Huginn reports from the server: logins, deaths, raids, boss kills, achievements, titles and honors.",
+             "Huginn reports from the server: logins, deaths, raids, boss kills, milestones, achievements, finished "
+             "lists, titles, honors and the weekly recap."),
     "admin": ("Refused joins with Permit/Ban, update checks and restarts. Only admins see this.",),
 }
 

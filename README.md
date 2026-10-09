@@ -94,6 +94,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Station alerts:** Huginn posts when mead is ready to tap, the beehives are full, or a
+  smelter with ore waiting runs out of coal, once each, read from the world save after
+  every save. Turn any of them off with `admin_bot.station_alerts` ([alerts](#station-alerts)).
 - **`/muninn stations`:** what your smelters, kilns, blast furnaces, refineries, windmills,
   spinning wheels, fermenters and beehives are up to, base by base. It starts with what needs
   you: smelters with ore and no coal, honey to collect, mead ready to tap ([stations](#stations-muninn-stations)).
@@ -1893,6 +1896,32 @@ Sigrid's base
 **Check it on your server:** the `world_objects.py` check prints the same report under
 "Stations:".
 
+#### Station alerts
+
+Huginn tells #huginns-watch when something needs doing, without anyone asking:
+
+```
+🏭 The stations need you
+🍺 Mead ready at Longhouse: 2 fermenters (mead base: minor healing, mead base: tasty)
+🍯 Hives full at Longhouse: 11 hives, 44 honey to collect
+⚠️ Out of coal at Sigrid's base: a smelter with 8 copper ore, 1 tin ore waiting
+```
+
+- **When:** the bot reads the world save after each save (it checks every 10 minutes;
+  Valheim saves every 30), and posts what's new since the last one, all in one post.
+- **Once each:** a fermenter is announced when its batch is ready, and again only for a new
+  batch. Full hives are announced when they fill, again after they've been emptied and
+  filled up. A smelter is announced when it runs dry with something waiting, and again only
+  after it got coal (or was emptied) and ran dry again.
+- **Starting out:** the first check after updating only takes note of how things are, so
+  what was already ready or stuck isn't announced. `/muninn stations` shows it.
+- **Turn some or all off:**
+  ```json
+  "station_alerts": { "mead": true, "honey": true, "fuel": false }
+  ```
+  in `admin_bot`, or `"station_alerts": false` for none. Needs `admin_bot.save_dir` and the
+  stats database (where it remembers what it already said).
+
 ### Death map: `/muninn deathmap`
 
 Every tombstone that shows up in a world save is written down (whose, which day, where),
@@ -2355,6 +2384,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn bases` shows two bases where you have one | Its pieces are more than 40 m apart with nothing in between (a bed, a workbench, a chest…) | Nothing to fix; a workbench or chest in between joins them |
 | `/muninn bases` leaves out a place you built | Only a workbench is there (it's counted as a "lone workbench"), or it's never been saved | Add a bed, a ward, another station or 3 chests; or wait for the next save |
 | A base is "A base nobody's named" | No named house pin within 50 m on the cartography table, no bed owner, and its builders have never slept in a bed or left a tombstone | Put a house pin with a name on the map and record it at a cartography table |
+| No station alerts | It's the first check after updating (it only takes note), they're turned off (`admin_bot.station_alerts`), or `save_dir` or the stats database isn't set | Wait for the next save; check the config |
+| A station alert came late | Valheim saves every 30 minutes and the bot checks every 10 | Nothing to fix: up to 40 minutes behind |
 | `/muninn stations` says a smelter has ore but it's full of bars in-game | Nobody has been near it since it was filled: it catches up when someone comes back | Visit it; the next save shows it as it is |
 | A fermenter shows as fermenting but it's ready in-game | The save is up to 30 minutes old | Wait for the next save (every 30 minutes) |
 | `/muninn explored` says no map is shared | Nobody has recorded their map at a cartography table, or there's no table | Build one and interact with it to record your map |
@@ -2461,6 +2492,7 @@ switched on by adding their name to `events` in `config.json`:
 | `welcome` | Replaces the join message on someone's **first ever** visit: "🎉 **Ingrid** arrived for the first time. Welcome, viking!" | stats database |
 | `milestone` | 🏆 "**Ingrid** has now spent **50 hours** in Alheim!" at 10/25/50/100/250/500/1000 hours, and at the same numbers of deaths. At login: "**Ingrid** is on a **7-day streak** 🔥" (3, 5, 7, 10, 14, 21, 30… days in a row) or "first set sail here **1 year ago** today 🎂" (100 days, then yearly), at most once a day. The **server's birthday** (100 days after the first visit in the stats database, then yearly), from noon: "🎂 Alheim is 1 year old today!" with vikings, hours, deaths, who set sail first, who played most and the longest streak; also in #runestone with `runestone_news` ([details](#streaks-anniversaries-and-the-servers-birthday)) | stats database |
 | `weekly_recap` | 📜 A weekly embed with a **chart of hours played per day**: top players by time, most deaths, raids, new vikings, total hours, peak online, and exploration ("12 new areas discovered: 3 sunken crypts, 1 fuling village"), plus [what changed in the world](#this-week-in-the-world) | stats database, `Placed location` lines, `admin_bot.save_dir` for the world part |
+| `stations` | 🏭 "The stations need you": mead ready, hives full, a smelter out of coal ([station alerts](#station-alerts)). Turned on and off with `admin_bot.station_alerts`, not `events` | `admin_bot.save_dir`, stats database |
 | `update` | ✅ "Valheim updated: l-1.0.16 → l-1.0.17" when the server comes back on a new version, plus the [auto-updater](#auto-updates-and-restarts-from-discord)'s "update available" and "installing" posts | `Valheim version:` at boot |
 
 `welcome`, `milestone` and `weekly_recap` need the stats database (`database.path`).
@@ -3102,6 +3134,7 @@ or run it in a terminal.
 | `discord.digest_seconds` | 0 | Group joins and leaves within this many seconds into one post. |
 | `admin_bot.announce_channel_id` | #runestone | The [rules channel](#the-rules-channel-runestone) for `/odin rules`, `/odin announce`, news and [patch notes](#valheim-patch-notes). |
 | `admin_bot.runestone_news` | false | Also post Valheim updates, restores and boss kills in the rules channel. |
+| `admin_bot.station_alerts` | all on | [Station alerts](#station-alerts) in Huginn's feed: `{"mead": true, "honey": true, "fuel": true}`; `false` turns them all off. |
 | `admin_bot.wiki` | true | `/valheim wiki` lookups on the [Valheim Wiki](#wiki-lookup-valheim-wiki); `false` turns it off. |
 | `admin_bot.patch_notes` | `{"enabled": true}` | Post Valheim [patch notes](#valheim-patch-notes) from Steam. `channel_id`: another channel than #runestone. `public_test`: public test patches too. `false` turns it off. |
 | `admin_bot.voice_lobby` | — | `true` or `{"name", "template", "limit"}`: [join-to-create voice](#join-to-create-voice-channels). |
@@ -3300,7 +3333,8 @@ Added here:
 - **Explored map:** the explored map and pins shared on the cartography table, read from the
   world save and drawn with the bases and portals.
 - **Stations:** what's in the smelters, kilns, fermenters and beehives, from the world save:
-  what's waiting, what's out of coal, what's ready.
+  what's waiting, what's out of coal, what's ready, and a post in the feed when something
+  becomes ready or runs dry.
 - **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and
   lists what's missing for each achievement, with a per-platform guide to finding the file;
   `fch_progress.py` also runs on its own. An opt-in `/muninn progress` board, the Mímir
