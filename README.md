@@ -59,7 +59,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   hold it, next to which sign, and `/muninn stock` adds up everything
   ([find and stock](#find-and-stock-muninn-find-muninn-stock)). `/muninn bases` lists the bases, whose beds are there and which
   stations, and `/muninn signs` what players wrote on their signs ([bases and signs](#bases-and-signs-muninn-bases-muninn-signs)).
-  `/muninn explored` draws the map shared on the cartography table ([explored map](#explored-map-muninn-explored)).
+  `/muninn explored` draws the map shared on the cartography table ([explored map](#explored-map-muninn-explored)),
+  and `/muninn stations` says which smelters need coal and where honey and mead are ready ([stations](#stations-muninn-stations)).
 - **Achievement progress from a character file:** players upload their `.fch` with
   `/valheim progress` and see which achievements they're still missing. Those who opt in
   join a `/muninn progress` board, with the **Mímir** title for the leader and a post when
@@ -93,6 +94,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/muninn stations`:** what your smelters, kilns, blast furnaces, refineries, windmills,
+  spinning wheels, fermenters and beehives are up to, base by base. It starts with what needs
+  you: smelters with ore and no coal, honey to collect, mead ready to tap ([stations](#stations-muninn-stations)).
 - **`/muninn explored`:** a picture of the map shared on your cartography table, zoomed to
   what you've uncovered, with your bases (named by their house pins), portals and the start,
   and how much of the world that is. Record your map at the table to add to it. The weekly recap says how much the map grew ([explored map](#explored-map-muninn-explored)).
@@ -320,7 +324,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
-  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) · [Builders](#builders-muninn-builders) · [Find & stock](#find-and-stock-muninn-find-muninn-stock) · [Bases & signs](#bases-and-signs-muninn-bases-muninn-signs) · [Explored map](#explored-map-muninn-explored) · [Death map](#death-map-muninn-deathmap) ·
+  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) · [Builders](#builders-muninn-builders) · [Find & stock](#find-and-stock-muninn-find-muninn-stock) · [Bases & signs](#bases-and-signs-muninn-bases-muninn-signs) · [Explored map](#explored-map-muninn-explored) · [Stations](#stations-muninn-stations) · [Death map](#death-map-muninn-deathmap) ·
   [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [When people play](#when-people-play-muninn-when) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
@@ -725,7 +729,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `find`, `stock`, `bases`, `signs`, `explored`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `find`, `stock`, `bases`, `signs`, `explored`, `stations`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `progress-remove`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -795,6 +799,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn stock` | Anyone | Everything in the chests, barrels, carts and ships, added up ([stock](#find-and-stock-muninn-find-muninn-stock)) | `save_dir` |
 | `/muninn bases` | Anyone | Every base: its name (its house pin on the cartography table, or whose beds), its stations, wards and chests, who built it, and the nearest portal ([bases](#bases-and-signs-muninn-bases-muninn-signs)) | `save_dir` |
 | `/muninn explored` | Anyone | A picture of the map shared on the cartography table, zoomed to what's explored, with bases, portals and the start; how much of the world that is ([explored map](#explored-map-muninn-explored)) | `save_dir`; Pillow for the picture |
+| `/muninn stations` | Anyone | Smelters, kilns, blast furnaces, refineries, windmills, spinning wheels, fermenters and beehives, by base: what's waiting, what's out of fuel, what's ready ([stations](#stations-muninn-stations)) | `save_dir` |
 | `/muninn signs [search]` | Anyone | What's written on the signs in the world and where they are; `search` keeps the ones with that in them ([signs](#bases-and-signs-muninn-bases-muninn-signs)) | `save_dir` |
 | `/muninn deathmap [player]` | Anyone | A map of where people die, from every tombstone seen in a world save, with the worst spots listed ([death map](#death-map-muninn-deathmap)) | `save_dir`, stats database |
 | `/muninn ships` | Anyone | Every raft, karve, longship and drakkar, furthest from the start first, and the carts ([ships](#ships-and-tames)) | `save_dir` |
@@ -1719,7 +1724,8 @@ cartography table to name a base
 
 - **What a base is:** beds, workbenches, forges, wards, chests and the other stations
   (stonecutter, artisan table, black forge, galdr table, cauldron, fermenter, smelter,
-  kiln, blast furnace, eitr refinery, spinning wheel, windmill, cartography table). Pieces less than 40 m apart
+  kiln, blast furnace, eitr refinery, spinning wheel, windmill, cartography table, and
+  beehives and sap collectors, which don't make a base on their own). Pieces less than 40 m apart
   belong to the same base, even through a chain of them. A group with a bed, a ward, any
   station other than a workbench, or 3+ chests counts as a base. A workbench on its own (put
   down to build a portal or a bridge) doesn't, and is only counted in the footer.
@@ -1823,6 +1829,48 @@ Explored map: 118481 cells, 17.1 km², 4.9% of the world; 288 of 307 pins are on
 ```
 Most pins should be on explored ground (you put pins where you've been). If only a few are,
 the map is being read the wrong way round: please report it.
+
+### Stations: `/muninn stations`
+
+Smelters, kilns and fermenters keep what's in them in the world save, so the bot can tell
+you what needs doing before you log in:
+
+```
+🏭 Stations in Alheim
+⚠️ Needs coal: 3 with something waiting and no coal (Longhouse ×2, Sigrid's base)
+🍯 Ready to collect: 44 honey in 11 hives
+🍺 Ready to tap: 1 fermenter (Longhouse)
+
+Longhouse
+🔥 4 smelters: 15 waiting (10 scrap iron, 4 copper ore, 1 tin ore) · ⚠️ 2 with no coal · 7 coal loaded
+🔥 Blast furnace: empty · 6 coal loaded
+🔥 4 kilns: empty
+🍺 3 fermenters: 1 ready (mead base: minor healing) · 1 fermenting (mead base: minor
+   stamina), the first ready in about 20 min
+🐝 11 beehives: 44 honey to collect
+
+Sigrid's base
+🔥 Smelter: 9 waiting (8 copper ore, 1 tin ore) · ⚠️ no coal
+```
+
+- **What's read:** smelters, blast furnaces and eitr refineries (what's waiting and the coal
+  or sap loaded), kilns, windmills and spinning wheels (what's waiting), fermenters (what's
+  in them and since when), and beehives and sap collectors (what's ready to collect).
+- **Needs coal (or sap):** a station with something waiting and less than one coal loaded
+  is stuck until someone tops it up.
+- **Grouped by base**, named like in [`/muninn bases`](#bases-and-signs-muninn-bases-muninn-signs).
+  Two bases with the same name get their coordinates added. A station away from any base
+  is listed by where it is. The 8 places with the most stations are shown.
+- **Fermenters** take 2,400 seconds of game time (40 minutes of play). Ready is worked out
+  from when it started and the game clock in the save.
+- **A smelter only works while someone is nearby** (its area is loaded). When someone
+  comes back, it catches up on the time it was away, as long as it has coal. So "15 waiting"
+  can mean "15 bars ready" as soon as someone visits, if there's enough coal.
+- Like the other world commands: up to 30 minutes behind, no setup, public in
+  #🪶┃muninns-roost.
+
+**Check it on your server:** the `world_objects.py` check prints the same report under
+"Stations:".
 
 ### Death map: `/muninn deathmap`
 
@@ -2286,6 +2334,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn bases` shows two bases where you have one | Its pieces are more than 40 m apart with nothing in between (a bed, a workbench, a chest…) | Nothing to fix; a workbench or chest in between joins them |
 | `/muninn bases` leaves out a place you built | Only a workbench is there (it's counted as a "lone workbench"), or it's never been saved | Add a bed, a ward, another station or 3 chests; or wait for the next save |
 | A base is "A base nobody's named" | No named house pin within 50 m on the cartography table, no bed owner, and its builders have never slept in a bed or left a tombstone | Put a house pin with a name on the map and record it at a cartography table |
+| `/muninn stations` says a smelter has ore but it's full of bars in-game | Nobody has been near it since it was filled: it catches up when someone comes back | Visit it; the next save shows it as it is |
+| A fermenter shows as fermenting but it's ready in-game | The save is up to 30 minutes old | Wait for the next save (every 30 minutes) |
 | `/muninn explored` says no map is shared | Nobody has recorded their map at a cartography table, or there's no table | Build one and interact with it to record your map |
 | The explored map is missing places you've been | You haven't recorded your map at a cartography table since | Interact with the table; it shows after the next world save |
 | A base's house pin doesn't name it | The pin is only on your own map, it's another icon, it has no name, or it's more than 50 m from the base's beds, stations and chests | Record your map at a cartography table; use the house icon, give it a name, and put it on the base |
@@ -3096,7 +3146,7 @@ save; never written to):
 | `_main.<N>.fwl2` | World name and seed | `/valheim map` |
 | `_main.<N>.db2`, first 12 bytes | World version and the game clock | The ☀️ Day channel, tombstone days |
 | `_main.<N>.db2`, packed part | Global keys (`defeated_eikthyr`, …) | [Boss progress](#boss-progress) |
-| `*.chunk` | Every object in the world, and the map and pins shared on cartography tables | [Find and stock](#find-and-stock-muninn-find-muninn-stock), [the explored map](#explored-map-muninn-explored), [bases and signs](#bases-and-signs-muninn-bases-muninn-signs), [portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the death map](#death-map-muninn-deathmap), [the weekly world digest](#this-week-in-the-world) |
+| `*.chunk` | Every object in the world, and the map and pins shared on cartography tables | [Find and stock](#find-and-stock-muninn-find-muninn-stock), [stations](#stations-muninn-stations), [the explored map](#explored-map-muninn-explored), [bases and signs](#bases-and-signs-muninn-bases-muninn-signs), [portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the death map](#death-map-muninn-deathmap), [the weekly world digest](#this-week-in-the-world) |
 
 Valheim writes all of them at each save (every 30 minutes and at shutdown), so everything
 read from the save is up to half an hour behind the game. Before 1.0 a world was one
@@ -3228,6 +3278,8 @@ Added here:
   pieces and builders, portals, ships, tombstones, tames and the explored map.
 - **Explored map:** the explored map and pins shared on the cartography table, read from the
   world save and drawn with the bases and portals.
+- **Stations:** what's in the smelters, kilns, fermenters and beehives, from the world save:
+  what's waiting, what's out of coal, what's ready.
 - **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and
   lists what's missing for each achievement, with a per-platform guide to finding the file;
   `fch_progress.py` also runs on its own. An opt-in `/muninn progress` board, the Mímir

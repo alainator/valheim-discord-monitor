@@ -23,7 +23,11 @@ its position (3 floats), its prefab's hash, then its data, where strings are a k
     count, then per pin the player ID, name, position, icon, crossed out, and the author's
     platform ID, which isn't kept here);
   * workbenches, forges, beds, wards and the other crafting stations are just their prefab,
-    position and creator, and close together they make a base.
+    position and creator, and close together they make a base;
+  * a smelter, kiln, blast furnace, eitr refinery, windmill or spinning wheel keeps its
+    "fuel" (float), how many items are "queued" (int) and which ("item0", "item1"…), and
+    "bakeTimer" (seconds into the current one); a fermenter its "Content" and "StartTime"
+    (game time in 100 ns ticks); a beehive or sap collector its "level" (ready to collect).
 
 Run it on its own to check a save: python3 world_objects.py /path/to/valheim_save_data
 """
@@ -83,7 +87,16 @@ BASE_PIECES = {_key(p): kind for p, kind in (
     ("fermenter", ("fermenter", "🍺")), ("smelter", ("smelter", "🔥")), ("charcoal_kiln", ("kiln", "🔥")),
     ("blastfurnace", ("blast furnace", "🔥")), ("eitrrefinery", ("eitr refinery", "🔥")),
     ("piece_spinningwheel", ("spinning wheel", "🧶")), ("windmill", ("windmill", "🌾")),
-    ("piece_cartographytable", ("cartography table", "🗺️")))}
+    ("piece_cartographytable", ("cartography table", "🗺️")),
+    ("piece_beehive", ("beehive", "🐝")), ("piece_sapcollector", ("sap collector", "🌳")))}
+# Stations that work through a queue (Smelter in the game): what they burn, if anything.
+QUEUE_STATIONS = {"smelter": "coal", "blast furnace": "coal", "eitr refinery": "sap", "kiln": None,
+                  "windmill": None, "spinning wheel": None}
+COLLECTORS = {"beehive": "honey", "sap collector": "sap"}
+FERMENT_SECONDS = 2400            # a fermenter takes 2400 s of game time (Fermenter.m_fermentationDuration)
+FUEL, QUEUED, BAKE_TIMER, CONTENT, START_TIME = (_key("fuel"), _key("queued"), _key("bakeTimer"), _key("Content"),
+                                                 _key("StartTime"))
+QUEUE_ITEMS = [_key(f"item{n}") for n in range(60)]
 DATA = _key("data")
 # The map's pin icons, by number (Minimap.PinType). 14-16 are Hildir's quest pins.
 PIN_ICONS = {0: "fire", 1: "house", 2: "hammer", 3: "dot", 4: "death", 5: "bed", 6: "cave", 7: "shout",
@@ -262,6 +275,30 @@ def explored_share(explored: Optional[bytes]) -> Optional[dict]:
     return {"cells": cells, "km2": cells * MAP_CELL * MAP_CELL / 1e6, "percent": min(100.0, 100 * cells / world)}
 
 
+def _float(data: bytes, start: int, end: int, key: bytes) -> Optional[float]:
+    i = data.find(key, start, end)
+    if i < 0 or i + 8 > len(data):
+        return None
+    v = struct.unpack_from("<f", data, i + 4)[0]
+    return v if math.isfinite(v) else None
+
+
+def station_state(data: bytes, i: int, end: int, kind: str) -> dict:
+    """What a production station is doing, from its data (see the module's docstring)."""
+    if kind in QUEUE_STATIONS:
+        queued = max(0, min(_int(data, i + 4, end, QUEUED) or 0, len(QUEUE_ITEMS)))
+        items = [_string(data, i + 4, end, QUEUE_ITEMS[n]) or "" for n in range(queued)]
+        return {"fuel": _float(data, i + 4, end, FUEL) or 0.0, "queue": [x for x in items if x],
+                "busy": (_float(data, i + 4, end, BAKE_TIMER) or 0) > 0}
+    if kind == "fermenter":
+        content = (_string(data, i + 4, end, CONTENT) or "").strip()
+        ticks = _long(data, i + 4, end, START_TIME) if content else None
+        return {"content": content, "started": ticks / 1e7 if ticks and 0 < ticks < 10 ** 17 else None}
+    if kind in COLLECTORS:
+        return {"level": max(0, _int(data, i + 4, end, LEVEL) or 0)}
+    return {}
+
+
 def _int(data: bytes, start: int, end: int, key: bytes) -> Optional[int]:
     i = data.find(key, start, end)
     if i < 0 or i + 8 > len(data):
@@ -327,6 +364,9 @@ def scan_bytes(data: bytes) -> dict:
                 out["signs"].append({"text": text, **place})
         elif what == "piece":
             piece = {"kind": kind[0], "emoji": kind[1], "creator": _long(data, i + 4, end, CREATOR), **place}
+            if kind[0] in QUEUE_STATIONS or kind[0] in COLLECTORS or kind[0] == "fermenter":
+                # a windmill's queue of 50 names runs past WINDOW
+                piece.update(station_state(data, i, min(i + INVENTORY_WINDOW, next_hit), kind[0]))
             if kind[0] == "bed":
                 piece["owner"] = (_string(data, i + 4, end, OWNER_NAME) or "").strip()
             elif kind[0] == "cartography table":
@@ -395,6 +435,8 @@ def scan(save_dir: str, world: Optional[str] = None) -> Optional[dict]:
             seen.add(k)
             pins.append(pin)
     out["pins"] = pins
+    import bosses
+    out["clock"] = bosses.world_time(save_dir, world)
     return out
 
 
@@ -677,9 +719,9 @@ def _groups(points: list, link: float) -> list:
 
 def _is_base(pieces: list) -> bool:
     """A bed, a ward, a station beyond the workbench, or 3+ chests. A workbench alone (put
-    down to build a portal or a bridge) is an outpost, not a base."""
+    down to build a portal or a bridge) is an outpost, not a base; so is a beehive."""
     kinds = [p["kind"] for p in pieces]
-    return any(k not in ("workbench", "chest") for k in kinds) or kinds.count("chest") >= 3
+    return any(k not in ("workbench", "chest", *COLLECTORS) for k in kinds) or kinds.count("chest") >= 3
 
 
 def bases(found: dict) -> tuple:
@@ -709,7 +751,7 @@ def bases(found: dict) -> tuple:
                      key=lambda pt: math.hypot(pt["x"] - x, pt["z"] - z), default=None)
         if portal and math.hypot(portal["x"] - x, portal["z"] - z) > PORTAL_REACH:
             portal = None
-        out.append({"x": x, "z": z, "pieces": len(group), "beds": beds, "kinds": kinds,
+        out.append({"x": x, "z": z, "pieces": len(group), "beds": beds, "kinds": kinds, "members": group,
                     "builders": sorted(built.items(), key=lambda kv: (-kv[1], kv[0].lower())),
                     "pin": house["name"] if house else None, "portal": portal["tag"] if portal else None})
     out.sort(key=lambda b: (-b["pieces"], b["x"], b["z"]))
@@ -737,6 +779,8 @@ def _count(kind: str, n: int) -> str:
     """ "workbench", "3 workbenches"."""
     if n == 1:
         return kind
+    if kind.endswith("y") and kind[-2:-1] not in "aeiou":
+        return f"{n} {kind[:-1]}ies"
     return f"{n} {kind}es" if kind.endswith(("ch", "sh")) else f"{n} {kind}s"
 
 
@@ -886,6 +930,132 @@ def death_map(points: list, portals: list = (), title: str = "Where we die") -> 
     out = BytesIO()
     img.save(out, "PNG")
     return out.getvalue()
+
+
+# -- production stations (/muninn stations) ---------------------------------------------
+def _item_label(item_id: str) -> str:
+    import items
+    name = items.name_of(stable_hash(item_id))
+    return item_id if name.startswith("unknown item") else name
+
+
+def _kinds_of(names: list) -> str:
+    """ "mead base: minor healing, mead base: tasty" : each kind once."""
+    return ", ".join(_item_label(n).lower() for n in dict.fromkeys(names))
+
+
+def _tally(names: list) -> str:
+    """ "13 scrap iron, 4 copper ore" from a list of item IDs, most first."""
+    counts: dict = {}
+    for name in names:
+        counts[name] = counts.get(name, 0) + 1
+    return ", ".join(f"{n} {_item_label(i).lower()}" for i, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def station_report(found: dict) -> dict:
+    """{"places": [(place name, [station pieces])], "no_fuel": [(place, kind, fuel)], "collect":
+    {what: (amount, collectors)}, "mead": [(place, piece)] ready, "brewing": [(place, piece, seconds left)]}."""
+    working = [p for p in found.get("pieces", []) if p["kind"] in QUEUE_STATIONS or p["kind"] in COLLECTORS
+               or p["kind"] == "fermenter"]
+    places, placed = [], set()
+    wanted = {id(w) for w in working}
+    found_bases = [b for b in bases(found)[0] if any(id(p) in wanted for p in b["members"])]
+    names = [base_name(b) for b in found_bases]
+    for b, name in zip(found_bases, names):
+        here = [p for p in b["members"] if id(p) in wanted]
+        if names.count(name) > 1:                          # two "Ingrid's base": say which
+            name += f" (x {b['x']:.0f}, z {b['z']:.0f})"
+        places.append((name, here))
+        placed.update(id(p) for p in here)
+    for p in working:
+        if id(p) not in placed:
+            places.append((where(p["x"], p["z"]), [p]))
+    clock = found.get("clock")
+    out: dict = {"places": places, "no_fuel": [], "collect": {}, "mead": [], "brewing": []}
+    for place, here in places:
+        for p in here:
+            fuel = QUEUE_STATIONS.get(p["kind"])
+            if fuel and p.get("queue") and p.get("fuel", 0) < 1:
+                out["no_fuel"].append((place, p["kind"], fuel))
+            if p["kind"] in COLLECTORS and p.get("level"):
+                amount, hives = out["collect"].get(COLLECTORS[p["kind"]], (0, 0))
+                out["collect"][COLLECTORS[p["kind"]]] = (amount + p["level"], hives + 1)
+            if p["kind"] == "fermenter" and p.get("content"):
+                left = FERMENT_SECONDS - (clock - p["started"]) if clock and p.get("started") else None
+                if left is not None and left <= 0:
+                    out["mead"].append((place, p))
+                else:
+                    out["brewing"].append((place, p, left))
+    return out
+
+
+def _station_line(kind: str, here: list, clock: Optional[float]) -> str:
+    emoji = {k[0]: k[1] for k in BASE_PIECES.values()}.get(kind, "")
+    head = f"{emoji} {_count(kind, len(here)) if len(here) > 1 else kind[0].upper() + kind[1:]}"
+    if kind in QUEUE_STATIONS:
+        queue = [i for p in here for i in p.get("queue", [])]
+        bits = [f"{len(queue)} waiting ({_tally(queue)})" if queue else "empty"]
+        fuel = QUEUE_STATIONS[kind]
+        if fuel:
+            dry = sum(1 for p in here if p.get("queue") and p.get("fuel", 0) < 1)
+            loaded = sum(int(p.get("fuel", 0)) for p in here)
+            if dry:
+                bits.append(f"⚠️ {dry} with no {fuel}" if len(here) > 1 else f"⚠️ no {fuel}")
+            if loaded:
+                bits.append(f"{loaded} {fuel} loaded")
+        return f"{head}: " + " · ".join(bits)
+    if kind == "fermenter":
+        ready = [p for p in here if p.get("content") and clock and p.get("started")
+                 and clock - p["started"] >= FERMENT_SECONDS]
+        brewing = [p for p in here if p.get("content") and p not in ready]
+        bits = []
+        if ready:
+            bits.append(f"{len(ready)} ready ({_kinds_of([p['content'] for p in ready])})")
+        if brewing:
+            lefts = [FERMENT_SECONDS - (clock - p["started"]) for p in brewing if clock and p.get("started")]
+            soon = f", the first ready in about {max(1, round(min(lefts) / 60))} min" if lefts else ""
+            bits.append(f"{len(brewing)} fermenting ({_kinds_of([p['content'] for p in brewing])}){soon}")
+        return f"{head}: " + (" · ".join(bits) or "empty")
+    total = sum(p.get("level", 0) for p in here)
+    return f"{head}: " + (f"{total} {COLLECTORS[kind]} to collect" if total else "nothing yet")
+
+
+def render_stations(found: dict, server_name: str = "", limit: int = 8) -> dict:
+    report = station_report(found)
+    if not report["places"]:
+        return {"title": "🏭 Stations", "color": 0xE67E22,
+                "description": "No smelters, kilns, fermenters or beehives in the world yet."}
+    clock = found.get("clock")
+    top = []
+    if report["no_fuel"]:
+        by: dict = {}
+        for place, kind, fuel in report["no_fuel"]:
+            by.setdefault(fuel, []).append(place)
+        for fuel, where_ in by.items():
+            counted = ", ".join(f"{pl}{f' ×{where_.count(pl)}' if where_.count(pl) > 1 else ''}"
+                                for pl in dict.fromkeys(where_))
+            top.append(f"⚠️ **Needs {fuel}:** {len(where_)} with something waiting and no {fuel} ({counted})")
+    for what, (amount, n) in report["collect"].items():
+        top.append(f"🍯 **Ready to collect:** {amount} {what} in {n} {'hive' if what == 'honey' else 'collector'}"
+                   f"{'s' if n != 1 else ''}")
+    if report["mead"]:
+        top.append(f"🍺 **Ready to tap:** {len(report['mead'])} fermenter{'s' if len(report['mead']) != 1 else ''} "
+                   f"({', '.join(dict.fromkeys(pl for pl, _ in report['mead']))})")
+    lines = top + ([""] if top else [])
+    for place, here in report["places"][:limit]:
+        lines.append(f"**{place}**")                       # base names come escaped already
+        kinds: dict = {}
+        for p in here:
+            kinds.setdefault(p["kind"], []).append(p)
+        order = list(QUEUE_STATIONS) + ["fermenter"] + list(COLLECTORS)
+        lines += [_station_line(k, kinds[k], clock) for k in order if k in kinds]
+        lines.append("")
+    if len(report["places"]) > limit:
+        lines.append(f"…and {len(report['places']) - limit} more places with stations")
+    return {"title": f"🏭 Stations{' in ' + server_name if server_name else ''}", "color": 0xE67E22,
+            "description": "\n".join(lines).strip()[:4000],
+            "footer": {"text": "From the last world save (every 30 minutes) · a station only works while someone "
+                               "is nearby, and catches up when they come back"}}
 
 
 # -- the explored map (/muninn explored) -------------------------------------------------
@@ -1149,6 +1319,9 @@ def main(argv=None) -> int:
     for b in found_bases[:20]:
         name = b["pin"] or ", ".join(b["beds"]) or ", ".join(n for n, _ in b["builders"][:2]) or "(no name)"
         print(f"  {name[:30]:<30} {b['pieces']:>4} beds, stations and chests  {where(b['x'], b['z'])}")
+    print("Stations:")
+    for line in render_stations(found)["description"].replace("**", "").splitlines():
+        print(f"  {line}")
     print(f"{len(found['tames'])} tamed animals:")
     for a in sorted(found["tames"], key=lambda a: (a["kind"], a["name"].lower())):
         print(f"  {a['kind']:<12} {a['name'] or '(no name)':<16} {'*' * a['stars']:<3} {where(a['x'], a['z'])}")
