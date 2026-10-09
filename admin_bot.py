@@ -53,7 +53,8 @@ except ImportError:
 # replies are private) work anywhere; admins can run anything anywhere.
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
                   "uptime": "bots", "bosses": "bots", "honors": "bots", "progress": "bots", "portals": "bots",
-                  "tombstones": "bots", "ships": "bots", "tames": "bots", "when": "bots", "builders": "bots", "deathmap": "bots",
+                  "tombstones": "bots", "ships": "bots", "tames": "bots", "when": "bots", "builders": "bots", "deathmap": "bots", "find": "bots",
+                  "stock": "bots",
                   "plan": "plans",
                   "bounties": "plans"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
@@ -3393,6 +3394,39 @@ class AdminBot:
                 await it.followup.send(embed=discord.Embed.from_dict(embed),
                                        allowed_mentions=discord.AllowedMentions.none())
         deathmap_cmd.autocomplete("player")(player_choices)
+
+        @muninn.command(name="find", description="Which chests hold an item, and where they are")
+        @app_commands.describe(item="What to look for, e.g. Iron, Bronze nails, Queen's jam")
+        async def find_cmd(it: discord.Interaction, item: str):
+            import world_objects
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)
+            if found is None:
+                await private_followup(it, "I can't find the world save (`save_dir`/worlds_local).")
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(world_objects.render_find(found, item, bot.server_name)),
+                                   allowed_mentions=discord.AllowedMentions.none())
+
+        @find_cmd.autocomplete("item")
+        async def find_choices(it: discord.Interaction, current: str):
+            import world_objects
+            found = bot._objects_read[2]              # the last read; never scan here (3 s limit)
+            if not found:
+                return []
+            q = current.strip().lower()
+            names = [n for n in world_objects.item_names(found) if q in n.lower()]
+            return [app_commands.Choice(name=n[:100], value=n[:100]) for n in names[:25]]
+
+        @muninn.command(name="stock", description="Everything in the chests, barrels, carts and ships, added up")
+        async def stock_cmd(it: discord.Interaction):
+            import world_objects
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)
+            if found is None:
+                await private_followup(it, "I can't find the world save (`save_dir`/worlds_local).")
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(world_objects.render_stock(found, bot.server_name)),
+                                   allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="ships", description="Every ship and cart in the world, and where it is")
         async def ships_cmd(it: discord.Interaction):

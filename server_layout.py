@@ -46,8 +46,8 @@ TEMPLATE = [
           ["builds", "building", "bases", "base-tours", "creations"], set()),
          ("bots", "text", "🪶┃muninns-roost",
           "Ask Muninn: /muninn stats, top, titles, online, when, compare, uptime, bosses, honors, progress, "
-          "builders, deathmap, portals, tombstones, ships and tames. /valheim join, link, notify, map, progress, "
-          "patch-notes and wiki work in any channel.",
+          "builders, deathmap, find, stock, portals, tombstones, ships and tames. /valheim join, link, notify, map, "
+          "progress, patch-notes and wiki work in any channel.",
           ["bot-commands", "bots", "commands", "bot", "bot-spam", "botspam"], set()),
      ]},
     {"key": "wilds", "name": "⚔️ The Wilds", "aliases": ["Gaming", "Valheim", "Game", "Games"],
@@ -107,6 +107,9 @@ OLD_TOPICS = {
              "work in any channel.",
              "Ask Muninn: /muninn stats, top, titles, online, when, compare, uptime, bosses, honors, progress, "
              "builders, portals, tombstones, ships and tames. /valheim join, link, notify, map, progress, "
+             "patch-notes and wiki work in any channel.",
+             "Ask Muninn: /muninn stats, top, titles, online, when, compare, uptime, bosses, honors, progress, "
+             "builders, deathmap, portals, tombstones, ships and tames. /valheim join, link, notify, map, progress, "
              "patch-notes and wiki work in any channel."),
     "rules": ("Rules and announcements. Read before you set sail.",),
     "plans": ("Plan raids and game nights with /valheim plan.",

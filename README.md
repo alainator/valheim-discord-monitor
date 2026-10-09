@@ -88,6 +88,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/muninn find <item>` and `/muninn stock`:** where is the iron? `find` searches every
+  chest, barrel, cart, ship and tombstone in the world and says how many are where, next to
+  which sign or portal. `stock` adds up everything the server owns. Read from the world save;
+  personal chests stay private ([find and stock](#find-and-stock-muninn-find-muninn-stock)).
 - **Error messages are private everywhere:** when a command that answers in public (like
   `/muninn builders` or `/muninn when`) fails or can't find the world save, only the person
   who ran it sees the message; the channel doesn't get a stray "Something went wrong"
@@ -705,7 +709,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `find`, `stock`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `progress-remove`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -771,6 +775,8 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn portals` | Anyone | Portals that go nowhere, names used 3+ times, portals without a name, and the connected pairs ([portals](#portals-and-tombstones)) | `save_dir` |
 | `/muninn when [player] [weeks]` | Anyone | Heatmap of when people usually play, by weekday and hour, with the best time for a game night; `player` for one character; `weeks` 1–12, default 4 ([details](#when-people-play-muninn-when)) | Stats database |
 | `/muninn builders` | Anyone | Who built the most: pieces still standing in the world, per builder ([builders](#builders-muninn-builders)) | `save_dir` |
+| `/muninn find <item>` | Anyone | Which chests, barrels, carts, ships and tombstones hold an item, how many, and where (by the nearest sign and portal); items in the world are suggested as you type ([find](#find-and-stock-muninn-find-muninn-stock)) | `save_dir` |
+| `/muninn stock` | Anyone | Everything in the chests, barrels, carts and ships, added up ([stock](#find-and-stock-muninn-find-muninn-stock)) | `save_dir` |
 | `/muninn deathmap [player]` | Anyone | A map of where people die, from every tombstone seen in a world save, with the worst spots listed ([death map](#death-map-muninn-deathmap)) | `save_dir`, stats database |
 | `/muninn ships` | Anyone | Every raft, karve, longship and drakkar, furthest from the start first, and the carts ([ships](#ships-and-tames)) | `save_dir` |
 | `/muninn tames` | Anyone | Tamed animals: how many of each, and the named ones with stars and where they are ([tames](#ships-and-tames)) | `save_dir` |
@@ -1602,6 +1608,42 @@ bed or leave a tombstone.
     …
   ```
 
+### Find and stock: `/muninn find`, `/muninn stock`
+
+Every chest's contents are in the world save, so the bot can answer "where's the iron?":
+
+```
+🔎 Bronze nails
+Bronze nails: 80 in 1 place
+📦 80 in a chest · by the sign “Caterpillar House” · near the Longest portal ·
+   x -2511, z -1133 · 2.8 km SW of the start
+```
+
+`/muninn stock` adds up everything:
+
+```
+📦 What we have in Alheim
+` 3,412` Wood
+` 2,108` Stone
+`   412` Black metal scrap
+…
+612 kinds of item in 160 chests, barrels, carts and ships
+```
+
+- **What's searched:** chests (wood, reinforced, black metal), barrels, carts, ships' cargo,
+  and tombstones (in `find` only: "7 in Ingrid's tombstone").
+- **Personal chests are never shown.** The game only opens them for their owner, so the
+  bot keeps them private too.
+- **Where:** the nearest sign within 15 m (players label chests: "Ores", "Food"), the
+  nearest named portal within 100 m, and the coordinates.
+- **Suggestions as you type** come from the items actually in the chests. Partial names
+  work: `find iron` lists Iron, Iron ore, Iron nails, Scrap iron…
+- **Item names** come from `data/items.json`, Valheim's item IDs and their wiki names. An item
+  added in a newer game version than the list shows as "unknown item (1a2b3c4d)" until the
+  list is updated (`python3 tools/update_items.py`).
+- Like everything from the world save: up to 30 minutes behind, no setup, follows
+  `bosses.world`.
+
 ### Death map: `/muninn deathmap`
 
 Every tombstone that shows up in a world save is written down (whose, which day, where),
@@ -2059,6 +2101,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | "… is on the board for @someone" | Someone else already put that character on the board | They can take it off with `board:False`, its linked player can upload over it, or an admin can run `/odin progress-remove` |
 | "Something went wrong with that command" | An unexpected error in the bot; only the person who ran the command sees this | `docker compose logs valheim-discord-monitor \| grep "failed:"` shows the command and the error; please report it |
 | A `/muninn` world command (builders, portals, tombstones, ships, tames) never answered | A bug in versions before this one: the first run after each save failed | Update; a failing command now always answers, and the error is in the bot's log |
+| `/muninn find` shows "unknown item (…)" | An item newer than the bot's item list, or one the wiki lists without its ID | Update the list: `python3 tools/update_items.py`, then rebuild |
+| `/muninn find` doesn't list a chest you know about | It's a personal chest (kept private), or the world hasn't been saved since it was filled | Wait for the next save (every 30 minutes) |
 | A death is missing from `/muninn deathmap` | The tombstone was emptied before the world was next saved (every 30 minutes) | Nothing to fix: only tombstones that last until a save are seen |
 | A builder shows as "can't name yet" | They've never slept in a bed or left a tombstone in this world | Have them sleep in a bed once; the name shows after the next save |
 | Mímir has a holder but nobody got the role | The leading character isn't linked | `/valheim link <character>`; the role follows within a minute |
@@ -2864,7 +2908,7 @@ save; never written to):
 | `_main.<N>.fwl2` | World name and seed | `/valheim map` |
 | `_main.<N>.db2`, first 12 bytes | World version and the game clock | The ☀️ Day channel, tombstone days |
 | `_main.<N>.db2`, packed part | Global keys (`defeated_eikthyr`, …) | [Boss progress](#boss-progress) |
-| `*.chunk` | Every object in the world | [Portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the death map](#death-map-muninn-deathmap), [the weekly world digest](#this-week-in-the-world) |
+| `*.chunk` | Every object in the world | [Find and stock](#find-and-stock-muninn-find-muninn-stock), [portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the death map](#death-map-muninn-deathmap), [the weekly world digest](#this-week-in-the-world) |
 
 Valheim writes all of them at each save (every 30 minutes and at shutdown), so everything
 read from the save is up to half an hour behind the game. Before 1.0 a world was one
@@ -2894,6 +2938,8 @@ python valheim_discord_monitor.py --config config.example.json --replay sample_c
   ([keeping everything consistent](#keeping-everything-consistent)).
 - **CI:** `.github/workflows/tests.yml` runs the tests on Python 3.9 and 3.12, does the
   replay, and builds the Docker image, on every push to `main` and every pull request.
+- **Item names:** `data/items.json` maps Valheim's item IDs to their names, built from the
+  wiki's infoboxes by `tools/update_items.py`. Run it after a big game update.
 - **Sample log:** `sample_console.log` is a short example log with crossplay joins, a
   death, a timeout, a disconnect and a refused join. Add lines there when teaching the
   parser something new.
@@ -2983,6 +3029,8 @@ Added here:
   animals with their names.
 - **Builders board:** pieces standing in the world per builder, named through beds and
   tombstones, with the Völundr title.
+- **Find and stock:** chest, barrel, cart, ship and tombstone contents from the world save
+  (the inventory layout worked out from a real save), with item names from the wiki.
 - **Death map:** every tombstone seen in a world save is recorded and mapped, with the
   worst spots.
 - **Weekly world digest:** the recap compares this week's world save with last week's:
