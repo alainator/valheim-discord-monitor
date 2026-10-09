@@ -59,6 +59,12 @@ TAMEABLE = {_key(p): kind for p, kind in (
     ("Asksvin", ("asksvin", "🦎")), ("Asksvin_hatchling", ("asksvin hatchling", "🦎")))}
 TAMED, TAMED_NAME, LEVEL = _key("tamed"), _key("TamedName"), _key("level")
 CREATOR, OWNER = _key("creator"), _key("owner")
+# Containers whose "items" are worth searching (ships, carts and tombstones too, below).
+CHESTS = {_key(p): kind for p, kind in (
+    ("piece_chest_wood", "chest"), ("piece_chest", "reinforced chest"), ("piece_chest_private", "personal chest"),
+    ("piece_chest_blackmetal", "black metal chest"), ("piece_chest_barrel", "barrel"))}
+ITEMS, TEXT, SIGN = _key("items"), _key("text"), _key("sign")
+INVENTORY_WINDOW = 2048          # how far after the prefab a container's "items" may start
 WINDOW = 512                     # bytes after the prefab hash to look for an object's data
 
 
@@ -98,6 +104,70 @@ def _string_at(data: bytes, p: int) -> Optional[str]:
         return None
 
 
+def _read_string(data: bytes, p: int) -> tuple:
+    """(text or None, position after it) for a 7-bit length and UTF-8 at p."""
+    n, shift = 0, 0
+    while p < len(data) and shift < 35:
+        byte = data[p]
+        n |= (byte & 0x7F) << shift
+        p += 1
+        shift += 7
+        if not byte & 0x80:
+            break
+    if n > 200 or p + n > len(data):
+        return None, p
+    try:
+        return data[p:p + n].decode("utf-8"), p + n
+    except UnicodeDecodeError:
+        return None, p + n
+
+
+def inventory(data: bytes, at: int) -> Optional[list]:
+    """[(item hash, stack, crafter name or None)] from the byte array stored under the
+    "items" key at `at`, or None if it doesn't look like an inventory.
+
+    Valheim 1.0's layout (worked out from a real save): an int length; then the inventory:
+    int version, ushort count, and per item: int (durability), byte column, byte row, a
+    byte, a flags byte, ushort stack if flags & 0x08, crafter ID (long) and name if
+    flags & 0x20, the item's ID hash (uint), and an end byte. Flags we haven't seen stop
+    the read, rather than misread what follows."""
+    try:
+        size = struct.unpack_from("<i", data, at + 4)[0]
+        if not 6 <= size <= 1 << 16 or at + 8 + size > len(data):
+            return None
+        p, end = at + 8, at + 8 + size
+        version, count = struct.unpack_from("<iH", data, p)
+        if not 90 <= version <= 1000 or count > 500:
+            return None
+        p += 6
+        out = []
+        for _ in range(count):
+            flags = data[p + 7]
+            if flags & ~0x69:                   # a field we don't know the size of
+                break
+            p += 8
+            stack = 1
+            if flags & 0x08:
+                stack = struct.unpack_from("<H", data, p)[0]
+                p += 2
+            crafter = None
+            if flags & 0x20:
+                crafter, p = _read_string(data, p + 8)
+            item = struct.unpack_from("<I", data, p)[0]
+            p += 5
+            if p > end:
+                break
+            out.append((item, stack, crafter))
+        return out
+    except (struct.error, IndexError):
+        return None
+
+
+def _container(data: bytes, i: int, end: int) -> Optional[list]:
+    j = data.find(ITEMS, i + 4, end)
+    return inventory(data, j) if j >= 0 else None
+
+
 def _int(data: bytes, start: int, end: int, key: bytes) -> Optional[int]:
     i = data.find(key, start, end)
     if i < 0 or i + 8 > len(data):
@@ -120,18 +190,25 @@ def _hits(data: bytes, key: bytes):
 
 
 def scan_bytes(data: bytes) -> dict:
-    """{"portals", "tombstones", "ships", "tames": [...]} found in one file's bytes."""
-    kinds = [(PORTALS, "portal"), ({TOMBSTONE: None}, "tombstone"), (SHIPS, "ship"), (TAMEABLE, "animal")]
+    """{"portals", "tombstones", "ships", "tames", "containers", "signs": [...], "builders",
+    "names": {...}} found in one file's bytes."""
+    kinds = [(PORTALS, "portal"), ({TOMBSTONE: None}, "tombstone"), (SHIPS, "ship"), (TAMEABLE, "animal"),
+             (CHESTS, "chest"), ({SIGN: None}, "sign")]
     hits = sorted((i, what, kind) for table, what in kinds for key, kind in table.items() for i in _hits(data, key))
-    out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "builders": {}, "names": {}}
+    out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "containers": [], "signs": [],
+                 "builders": {}, "names": {}}
     for n, (i, what, kind) in enumerate(hits):
         pos = _position(data, i)
         if not pos:
             continue
         # An object's data ends where the next one we know starts, so a value is never
         # taken from a neighbour (a nameless portal from the next portal, say).
-        end = min(i + WINDOW, hits[n + 1][0] if n + 1 < len(hits) else len(data))
+        next_hit = hits[n + 1][0] if n + 1 < len(hits) else len(data)
+        end = min(i + WINDOW, next_hit)
         place = {"x": pos[0], "y": pos[1], "z": pos[2]}
+        stored = None
+        if what in ("chest", "ship", "tombstone"):
+            stored = _container(data, i, min(i + INVENTORY_WINDOW, next_hit))
         if what == "portal":
             out["portals"].append({"kind": kind, "tag": (_string(data, i + 4, end, TAG) or "").strip(), **place})
         elif what == "tombstone":
@@ -140,8 +217,19 @@ def scan_bytes(data: bytes) -> dict:
                 ticks = _long(data, i + 4, end, TIME_OF_DEATH)
                 died = ticks / 1e7 if ticks and 0 < ticks < 10 ** 17 else None
                 out["tombstones"].append({"owner": owner, "died": died, **place})
+                if stored:
+                    out["containers"].append({"kind": "tombstone", "owner": owner, "items": stored, **place})
         elif what == "ship":
             out["ships"].append({"kind": kind[0], "emoji": kind[1], **place})
+            if stored:
+                out["containers"].append({"kind": kind[0], "items": stored, **place})
+        elif what == "chest":
+            if stored is not None:
+                out["containers"].append({"kind": kind, "items": stored, **place})
+        elif what == "sign":
+            text = (_string(data, i + 4, end, TEXT) or "").strip()
+            if text:
+                out["signs"].append({"text": text, **place})
         elif _int(data, i + 4, end, TAMED) == 1:
             level = _int(data, i + 4, end, LEVEL)
             out["tames"].append({"kind": kind[0], "emoji": kind[1], "name": (_string(data, i + 4, end, TAMED_NAME)
@@ -179,14 +267,15 @@ def scan(save_dir: str, world: Optional[str] = None) -> Optional[dict]:
     files = object_files(save_dir, world)
     if not files:
         return None
-    out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "builders": {}, "names": {}}
+    out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "containers": [], "signs": [],
+                 "builders": {}, "names": {}}
     for path in files:
         try:
             with open(path, "rb") as f:
                 found = scan_bytes(f.read())
         except OSError:
             continue
-        for k in ("portals", "tombstones", "ships", "tames"):
+        for k in ("portals", "tombstones", "ships", "tames", "containers", "signs"):
             out[k] += found[k]
         for pid, n in found["builders"].items():
             out["builders"][pid] = out["builders"].get(pid, 0) + n
@@ -327,6 +416,107 @@ def render_builders(found: dict, server_name: str = "") -> dict:
     return {"title": f"🔨 Builders{' of ' + server_name if server_name else ''}: {total:,} pieces", "color": 0xA1887F,
             "description": "\n".join(lines) or "Nothing built yet.",
             "footer": {"text": "Pieces standing in the world now, by who placed them · from the last save"}}
+
+
+# -- what's in the chests (/muninn find, /muninn stock) -----------------------------------
+# Personal chests only open for their owner in the game, so their contents stay private here too.
+PRIVATE_KINDS = {"personal chest"}
+
+
+def searchable(found: dict, tombstones: bool = True) -> list:
+    """The containers whose contents can be shown: not personal chests; tombstones optional."""
+    return [c for c in found.get("containers", []) if c["kind"] not in PRIVATE_KINDS
+            and (tombstones or c["kind"] != "tombstone")]
+
+
+def stock(found: dict) -> dict:
+    """{item hash: total} over the chests, barrels, carts and ships (not tombstones)."""
+    totals: dict = {}
+    for c in searchable(found, tombstones=False):
+        for item, n, _ in c["items"]:
+            totals[item] = totals.get(item, 0) + n
+    return totals
+
+
+def landmark(x: float, z: float, found: dict) -> str:
+    """Where a container is, in words: the nearest sign within 15 m, the nearest portal
+    within 100 m, and the coordinates."""
+    bits = []
+    sign = min(found.get("signs", []), key=lambda s: math.hypot(s["x"] - x, s["z"] - z), default=None)
+    if sign and math.hypot(sign["x"] - x, sign["z"] - z) <= 15:
+        bits.append(f"by the sign “{sign['text'][:40]}”")
+    portal = min((p for p in found.get("portals", []) if p["tag"]),
+                 key=lambda p: math.hypot(p["x"] - x, p["z"] - z), default=None)
+    if portal and math.hypot(portal["x"] - x, portal["z"] - z) <= 100:
+        bits.append(f"near the {portal['tag']} portal")
+    bits.append(where(x, z))
+    return " · ".join(bits)
+
+
+def find_items(found: dict, query: str) -> list:
+    """[(item hash, total, [(count, container)])] for items whose name contains `query`
+    (an exact name first), most first; places most first."""
+    import items
+    q = query.strip().lower()
+    by_item: dict = {}
+    for c in searchable(found):
+        here: dict = {}
+        for item, n, _ in c["items"]:
+            here[item] = here.get(item, 0) + n
+        for item, n in here.items():
+            name = items.name_of(item).lower()
+            if q and (q in name or q == (items.id_of(item) or "").lower()):
+                by_item.setdefault(item, []).append((n, c))
+    out = [(item, sum(n for n, _ in places), sorted(places, key=lambda pc: -pc[0])) for item, places in by_item.items()]
+    return sorted(out, key=lambda r: (items.name_of(r[0]).lower() != q, -r[1]))
+
+
+def item_names(found: dict) -> list:
+    """Every item name found in the searchable containers, for autocomplete."""
+    import items
+    return sorted({items.name_of(item) for c in searchable(found) for item, _, _ in c["items"]
+                   if items.id_of(item)}, key=str.lower)
+
+
+def _container_label(c: dict) -> str:
+    if c["kind"] == "tombstone":
+        return f"{c.get('owner', 'someone')}'s tombstone"
+    return f"a {c['kind']}" if c["kind"] not in ("karve", "longship", "drakkar", "cart", "raft") else f"a {c['kind']}'s cargo"
+
+
+def render_find(found: dict, query: str, server_name: str = "") -> dict:
+    import items
+    results = find_items(found, query)
+    if not results:
+        return {"title": f"🔎 {query}", "color": 0x3BA55D,
+                "description": f"No **{query}** in any chest, barrel, cart or ship"
+                               f"{' in ' + server_name if server_name else ''} (personal chests aren't searched)."}
+    lines = []
+    for item, total, places in results[:4]:
+        lines.append(f"**{items.name_of(item)}**: {total:,} in {len(places)} place{'s' if len(places) != 1 else ''}")
+        for n, c in places[:6 if len(results) == 1 else 3]:
+            lines.append(f"📦 **{n:,}** in {_container_label(c)} · {landmark(c['x'], c['z'], found)}")
+        shown = 6 if len(results) == 1 else 3
+        if len(places) > shown:
+            lines.append(f"…and {len(places) - shown} more place{'s' if len(places) - shown != 1 else ''}")
+    if len(results) > 4:
+        lines.append(f"\nAlso matching: " + ", ".join(items.name_of(r[0]) for r in results[4:12]))
+    return {"title": f"🔎 {query}", "color": 0x3BA55D, "description": "\n".join(lines)[:4000],
+            "footer": {"text": "From the last world save (every 30 minutes) · personal chests aren't searched"}}
+
+
+def render_stock(found: dict, server_name: str = "", limit: int = 40) -> dict:
+    import items
+    totals = sorted(stock(found).items(), key=lambda kv: (-kv[1], items.name_of(kv[0]).lower()))
+    boxes = len(searchable(found, tombstones=False))
+    if not totals:
+        return {"title": "📦 What we have", "color": 0x3BA55D, "description": "The chests are empty, or there are none yet."}
+    lines = [f"`{n:>6,}` {items.name_of(item)}" for item, n in totals[:limit]]
+    more = len(totals) - limit
+    return {"title": f"📦 What we have{' in ' + server_name if server_name else ''}", "color": 0x3BA55D,
+            "description": "\n".join(lines) + (f"\n…and {more} more kinds of item" if more > 0 else ""),
+            "footer": {"text": f"{len(totals)} kinds of item in {boxes} chests, barrels, carts and ships · "
+                               "from the last world save · /muninn find <item> says where"}}
 
 
 # -- the death map ------------------------------------------------------------------------
@@ -544,6 +734,15 @@ def main(argv=None) -> int:
           f" ({others} without a name, {other_pieces} pieces):")
     for name, n in named:
         print(f"  {name:<24} {n}")
+    import items
+    totals = sorted(stock(found).items(), key=lambda kv: -kv[1])
+    print(f"{len(found['containers'])} containers ({len(searchable(found, tombstones=False))} searchable), "
+          f"{len(totals)} kinds of item; the most:")
+    for item, n in totals[:15]:
+        print(f"  {items.name_of(item):<24} {n}")
+    print(f"{len(found['signs'])} signs:")
+    for s in found["signs"][:20]:
+        print(f"  {s['text'][:40]:<40} {where(s['x'], s['z'])}")
     print(f"{len(found['tames'])} tamed animals:")
     for a in sorted(found["tames"], key=lambda a: (a["kind"], a["name"].lower())):
         print(f"  {a['kind']:<12} {a['name'] or '(no name)':<16} {'*' * a['stars']:<3} {where(a['x'], a['z'])}")
