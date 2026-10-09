@@ -18,6 +18,10 @@ its position (3 floats), its prefab's hash, then its data, where strings are a k
     names for those IDs, but beds and tombstones keep both "owner" (the ID) and
     "ownerName" (the character), which is how IDs get names;
   * a sign keeps what's written on it under "text";
+  * a cartography table keeps the shared map under "data", gzipped: an int version (3), the
+    explored map (an int count, then a byte per cell), then the pins shared on it (an int
+    count, then per pin the player ID, name, position, icon, crossed out, and the author's
+    platform ID, which isn't kept here);
   * workbenches, forges, beds, wards and the other crafting stations are just their prefab,
     position and creator, and close together they make a base.
 
@@ -27,11 +31,13 @@ Run it on its own to check a save: python3 world_objects.py /path/to/valheim_sav
 from __future__ import annotations
 
 import glob
+import gzip
 import math
 import os
 import re
 import struct
 import sys
+import zlib
 from typing import Optional
 
 
@@ -76,7 +82,13 @@ BASE_PIECES = {_key(p): kind for p, kind in (
     ("piece_magetable", ("galdr table", "🔮")), ("piece_cauldron", ("cauldron", "🍲")),
     ("fermenter", ("fermenter", "🍺")), ("smelter", ("smelter", "🔥")), ("charcoal_kiln", ("kiln", "🔥")),
     ("blastfurnace", ("blast furnace", "🔥")), ("eitrrefinery", ("eitr refinery", "🔥")),
-    ("piece_spinningwheel", ("spinning wheel", "🧶")), ("windmill", ("windmill", "🌾")))}
+    ("piece_spinningwheel", ("spinning wheel", "🧶")), ("windmill", ("windmill", "🌾")),
+    ("piece_cartographytable", ("cartography table", "🗺️")))}
+DATA = _key("data")
+# The map's pin icons, by number (Minimap.PinType). 14-16 are Hildir's quest pins.
+PIN_ICONS = {0: "fire", 1: "house", 2: "hammer", 3: "dot", 4: "death", 5: "bed", 6: "cave", 7: "shout",
+             8: "none", 9: "boss", 10: "player", 11: "event", 12: "ping", 13: "event area",
+             14: "hildir", 15: "hildir", 16: "hildir"}
 INVENTORY_WINDOW = 2048          # how far after the prefab a container's "items" may start
 WINDOW = 512                     # bytes after the prefab hash to look for an object's data
 
@@ -181,6 +193,40 @@ def _container(data: bytes, i: int, end: int) -> Optional[list]:
     return inventory(data, j) if j >= 0 else None
 
 
+def map_pins(data: bytes, i: int, end: int) -> list:
+    """The pins shared on the cartography table whose prefab hash is at `i`: [{"name", "icon",
+    "x", "z", "crossed", "owner"}]. [] when there's nothing shared yet, or anything doesn't
+    add up (every byte must be accounted for)."""
+    j = data.find(DATA, i + 4, end)
+    if j < 0 or j + 8 > len(data):
+        return []
+    n = struct.unpack_from("<i", data, j + 4)[0]
+    if not 0 < n <= len(data) - j - 8:
+        return []
+    try:
+        raw = gzip.decompress(data[j + 8:j + 8 + n])
+        version, cells = struct.unpack_from("<ii", raw, 0)
+        if version != 3 or not 0 < cells <= 1 << 24:
+            return []
+        p = 8 + cells
+        count = struct.unpack_from("<i", raw, p)[0]
+        if not 0 <= count <= 100000:
+            return []
+        p += 4
+        pins = []
+        for _ in range(count):
+            owner = struct.unpack_from("<q", raw, p)[0]
+            name, p = _read_string(raw, p + 8)
+            x, _, z = struct.unpack_from("<3f", raw, p)
+            icon, crossed = struct.unpack_from("<iB", raw, p + 12)
+            _, p = _read_string(raw, p + 17)                      # the author's platform ID: not kept
+            pins.append({"name": (name or "").strip(), "icon": PIN_ICONS.get(icon, str(icon)), "x": x, "z": z,
+                         "crossed": bool(crossed), "owner": owner})
+        return pins if p == len(raw) else []
+    except (OSError, EOFError, ValueError, struct.error, IndexError, zlib.error):
+        return []
+
+
 def _int(data: bytes, start: int, end: int, key: bytes) -> Optional[int]:
     i = data.find(key, start, end)
     if i < 0 or i + 8 > len(data):
@@ -209,7 +255,7 @@ def scan_bytes(data: bytes) -> dict:
              (CHESTS, "chest"), ({SIGN: None}, "sign"), (BASE_PIECES, "piece")]
     hits = sorted((i, what, kind) for table, what in kinds for key, kind in table.items() for i in _hits(data, key))
     out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "containers": [], "signs": [],
-                 "pieces": [], "builders": {}, "names": {}}
+                 "pieces": [], "pins": [], "builders": {}, "names": {}}
     for n, (i, what, kind) in enumerate(hits):
         pos = _position(data, i)
         if not pos:
@@ -248,6 +294,8 @@ def scan_bytes(data: bytes) -> dict:
             piece = {"kind": kind[0], "emoji": kind[1], "creator": _long(data, i + 4, end, CREATOR), **place}
             if kind[0] == "bed":
                 piece["owner"] = (_string(data, i + 4, end, OWNER_NAME) or "").strip()
+            elif kind[0] == "cartography table":
+                out["pins"] += map_pins(data, i, min(i + 4096, next_hit))     # as far as the check looked
             out["pieces"].append(piece)
         elif _int(data, i + 4, end, TAMED) == 1:
             level = _int(data, i + 4, end, LEVEL)
@@ -287,7 +335,7 @@ def scan(save_dir: str, world: Optional[str] = None) -> Optional[dict]:
     if not files:
         return None
     out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "containers": [], "signs": [],
-                 "pieces": [], "builders": {}, "names": {}}
+                 "pieces": [], "pins": [], "builders": {}, "names": {}}
     for path in files:
         try:
             with open(path, "rb") as f:
@@ -296,9 +344,19 @@ def scan(save_dir: str, world: Optional[str] = None) -> Optional[dict]:
             continue
         for k in ("portals", "tombstones", "ships", "tames", "containers", "signs", "pieces"):
             out[k] += found[k]
+        out["pins"] += found["pins"]
         for pid, n in found["builders"].items():
             out["builders"][pid] = out["builders"].get(pid, 0) + n
         out["names"].update(found["names"])
+    # Several tables share the same pins: keep each once.
+    seen: set = set()
+    pins = []
+    for pin in out["pins"]:
+        k = (pin["name"], pin["icon"], round(pin["x"]), round(pin["z"]))
+        if k not in seen:
+            seen.add(k)
+            pins.append(pin)
+    out["pins"] = pins
     return out
 
 
@@ -551,7 +609,7 @@ def render_stock(found: dict, server_name: str = "", limit: int = 40) -> dict:
 
 # -- bases and signs (/muninn bases, /muninn signs) --------------------------------------
 BASE_LINK = 40         # metres: pieces this close (or chained this close) are one base
-SIGN_REACH = 20        # a sign this close to a base's pieces can name it
+PIN_REACH = 50         # a named house pin this close to a base's pieces names it
 PORTAL_REACH = 150     # a named portal this close to a base's centre is "its" portal
 
 
@@ -588,7 +646,8 @@ def _is_base(pieces: list) -> bool:
 
 def bases(found: dict) -> tuple:
     """([base], outposts): each base is {"x", "z", "pieces", "beds": [owner], "kinds": {kind: n},
-    "builders": [(name, n)], "sign", "portal"}, biggest first."""
+    "builders": [(name, n)], "pin", "portal"}, biggest first. "pin" is the name of the house
+    pin on the cartography table nearest its middle, if one is close enough."""
     out, outposts = [], 0
     for group in _groups(found.get("pieces", []), BASE_LINK):
         if not _is_base(group):
@@ -605,16 +664,16 @@ def bases(found: dict) -> tuple:
             name = found.get("names", {}).get(p.get("creator"))
             if name:
                 built[name] = built.get(name, 0) + 1
-        signs = [sg for sg in found.get("signs", [])
-                 if any(math.hypot(sg["x"] - p["x"], sg["z"] - p["z"]) <= SIGN_REACH for p in group)]
-        sign = min(signs, key=lambda sg: math.hypot(sg["x"] - x, sg["z"] - z), default=None)
+        houses = [h for h in found.get("pins", []) if h["icon"] == "house" and h["name"]
+                  and any(math.hypot(h["x"] - p["x"], h["z"] - p["z"]) <= PIN_REACH for p in group)]
+        house = min(houses, key=lambda h: math.hypot(h["x"] - x, h["z"] - z), default=None)
         portal = min((pt for pt in found.get("portals", []) if pt["tag"]),
                      key=lambda pt: math.hypot(pt["x"] - x, pt["z"] - z), default=None)
         if portal and math.hypot(portal["x"] - x, portal["z"] - z) > PORTAL_REACH:
             portal = None
         out.append({"x": x, "z": z, "pieces": len(group), "beds": beds, "kinds": kinds,
                     "builders": sorted(built.items(), key=lambda kv: (-kv[1], kv[0].lower())),
-                    "sign": sign["text"] if sign else None, "portal": portal["tag"] if portal else None})
+                    "pin": house["name"] if house else None, "portal": portal["tag"] if portal else None})
     out.sort(key=lambda b: (-b["pieces"], b["x"], b["z"]))
     return out, outposts
 
@@ -629,8 +688,8 @@ def _names(names: list) -> str:
 
 
 def base_name(b: dict) -> str:
-    if b["sign"]:
-        return f"“{md(b['sign'][:40])}”"
+    if b["pin"]:
+        return md(b["pin"][:40])
     who = b["beds"] or [name for name, _ in b["builders"][:2]]
     return f"{_names(who)}'s base" if who else "A base nobody's named"
 
@@ -667,7 +726,7 @@ def render_bases(found: dict, server_name: str = "", limit: int = 12) -> dict:
     if len(found_bases) > limit:
         lines.append(f"…and {len(found_bases) - limit} smaller base{'s' if len(found_bases) - limit != 1 else ''}")
     footer = (f"{outposts} lone workbench{'es' if outposts != 1 else ''} not counted · " if outposts else "") + \
-        "from the last world save · put a sign up to name your base"
+        "from the last world save · put a house pin on the cartography table to name a base"
     return {"title": f"🏠 Bases{' in ' + server_name if server_name else ''}: {len(found_bases)}", "color": 0x8D6E63,
             "description": "\n".join(lines).strip()[:4000] or "No bases yet: a bed or a ward, a forge or a few chests "
                                                                   "makes one.",
@@ -920,6 +979,13 @@ def main(argv=None) -> int:
     print(f"{len(found['signs'])} signs:")
     for s in found["signs"][:20]:
         print(f"  {s['text'][:40]:<40} {where(s['x'], s['z'])}")
+    icons: dict = {}
+    for pin in found["pins"]:
+        icons[pin["icon"]] = icons.get(pin["icon"], 0) + 1
+    print(f"{len(found['pins'])} pins on the cartography tables: "
+          + ", ".join(f"{n} {k}" for k, n in sorted(icons.items(), key=lambda kv: -kv[1])) + "; the named houses:")
+    for pin in sorted((p for p in found["pins"] if p["icon"] == "house" and p["name"]), key=lambda p: p["name"].lower()):
+        print(f"  {pin['name'][:30]:<30} {where(pin['x'], pin['z'])}")
     kinds: dict = {}
     for piece in found["pieces"]:
         kinds[piece["kind"]] = kinds.get(piece["kind"], 0) + 1
@@ -927,7 +993,7 @@ def main(argv=None) -> int:
     print(f"{len(found_bases)} bases ({outposts} lone workbenches left out), from "
           + ", ".join(f"{n} {k}" for k, n in sorted(kinds.items(), key=lambda kv: -kv[1])) + ":")
     for b in found_bases[:20]:
-        name = b["sign"] or ", ".join(b["beds"]) or ", ".join(n for n, _ in b["builders"][:2]) or "(no name)"
+        name = b["pin"] or ", ".join(b["beds"]) or ", ".join(n for n, _ in b["builders"][:2]) or "(no name)"
         print(f"  {name[:30]:<30} {b['pieces']:>4} beds, stations and chests  {where(b['x'], b['z'])}")
     print(f"{len(found['tames'])} tamed animals:")
     for a in sorted(found["tames"], key=lambda a: (a["kind"], a["name"].lower())):
