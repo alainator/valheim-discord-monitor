@@ -54,7 +54,7 @@ except ImportError:
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
                   "uptime": "bots", "bosses": "bots", "honors": "bots", "progress": "bots", "portals": "bots",
                   "tombstones": "bots", "ships": "bots", "tames": "bots", "when": "bots", "builders": "bots", "deathmap": "bots", "find": "bots",
-                  "stock": "bots", "bases": "bots", "signs": "bots",
+                  "stock": "bots", "bases": "bots", "signs": "bots", "explored": "bots",
                   "plan": "plans",
                   "bounties": "plans"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
@@ -3438,6 +3438,25 @@ class AdminBot:
                 return
             await it.followup.send(embed=discord.Embed.from_dict(world_objects.render_bases(found, bot.server_name)),
                                    allowed_mentions=discord.AllowedMentions.none())
+
+        @muninn.command(name="explored", description="The map shared on the cartography table: how much we've explored")
+        async def explored_cmd(it: discord.Interaction):
+            import io
+            import world_objects
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)
+            if found is None:
+                await private_followup(it, "I can't find the world save (`save_dir`/worlds_local).")
+                return
+            embed = world_objects.render_explored(found, bot.server_name)
+            png = await asyncio.to_thread(world_objects.explored_map, found)
+            if png:
+                embed["image"] = {"url": "attachment://explored.png"}
+                await it.followup.send(embed=discord.Embed.from_dict(embed),
+                                       file=discord.File(io.BytesIO(png), filename="explored.png"),
+                                       allowed_mentions=discord.AllowedMentions.none())
+            else:
+                await it.followup.send(embed=discord.Embed.from_dict(embed), allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="signs", description="What's written on the signs in the world, and where they are")
         @app_commands.describe(search="Only signs with this in them, e.g. ores or road")

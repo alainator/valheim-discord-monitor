@@ -59,6 +59,7 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   hold it, next to which sign, and `/muninn stock` adds up everything
   ([find and stock](#find-and-stock-muninn-find-muninn-stock)). `/muninn bases` lists the bases, whose beds are there and which
   stations, and `/muninn signs` what players wrote on their signs ([bases and signs](#bases-and-signs-muninn-bases-muninn-signs)).
+  `/muninn explored` draws the map shared on the cartography table ([explored map](#explored-map-muninn-explored)).
 - **Achievement progress from a character file:** players upload their `.fch` with
   `/valheim progress` and see which achievements they're still missing. Those who opt in
   join a `/muninn progress` board, with the **Mímir** title for the leader and a post when
@@ -92,6 +93,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/muninn explored`:** a picture of the map shared on your cartography table, zoomed to
+  what you've uncovered, with your bases, portals and the start, and how much of the world
+  that is. The weekly recap says how much the map grew ([explored map](#explored-map-muninn-explored)).
 - **Bases are named by the house pins on your cartography table:** put a house pin with a
   name on the map, share it on the table, and `/muninn bases` calls the base by that name.
   Signs don't name bases any more; they still label chests in `/muninn find`
@@ -316,7 +320,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
-  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) · [Builders](#builders-muninn-builders) · [Find & stock](#find-and-stock-muninn-find-muninn-stock) · [Bases & signs](#bases-and-signs-muninn-bases-muninn-signs) · [Death map](#death-map-muninn-deathmap) ·
+  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) · [Builders](#builders-muninn-builders) · [Find & stock](#find-and-stock-muninn-find-muninn-stock) · [Bases & signs](#bases-and-signs-muninn-bases-muninn-signs) · [Explored map](#explored-map-muninn-explored) · [Death map](#death-map-muninn-deathmap) ·
   [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [When people play](#when-people-play-muninn-when) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
@@ -721,7 +725,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `find`, `stock`, `bases`, `signs`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `find`, `stock`, `bases`, `signs`, `explored`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `progress-remove`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -790,6 +794,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn find <item>` | Anyone | Which chests, barrels, carts, ships and tombstones hold an item, how many, and where (by the nearest sign and portal); items in the world are suggested as you type ([find](#find-and-stock-muninn-find-muninn-stock)) | `save_dir` |
 | `/muninn stock` | Anyone | Everything in the chests, barrels, carts and ships, added up ([stock](#find-and-stock-muninn-find-muninn-stock)) | `save_dir` |
 | `/muninn bases` | Anyone | Every base: its name (its house pin on the cartography table, or whose beds), its stations, wards and chests, who built it, and the nearest portal ([bases](#bases-and-signs-muninn-bases-muninn-signs)) | `save_dir` |
+| `/muninn explored` | Anyone | A picture of the map shared on the cartography table, zoomed to what's explored, with bases, portals and the start; how much of the world that is ([explored map](#explored-map-muninn-explored)) | `save_dir`; Pillow for the picture |
 | `/muninn signs [search]` | Anyone | What's written on the signs in the world and where they are; `search` keeps the ones with that in them ([signs](#bases-and-signs-muninn-bases-muninn-signs)) | `save_dir` |
 | `/muninn deathmap [player]` | Anyone | A map of where people die, from every tombstone seen in a world save, with the worst spots listed ([death map](#death-map-muninn-deathmap)) | `save_dir`, stats database |
 | `/muninn ships` | Anyone | Every raft, karve, longship and drakkar, furthest from the start first, and the carts ([ships](#ships-and-tames)) | `save_dir` |
@@ -1769,6 +1774,40 @@ named houses, then the bases and how many of each piece it found:
   …
 ```
 
+### Explored map: `/muninn explored`
+
+A cartography table keeps the map everyone has recorded on it: what's been explored and the
+pins. That's in the world save, so the bot can draw it:
+
+```
+🗺️ What we've explored in Alheim
+4.9% of the world explored: 17.1 km² of about 346 km².
+307 pins on the table (20 houses) · 8 bases, 7 named by their house pin.
+[a picture: the explored land in parchment on dark fog, zoomed to what's explored, with
+ the bases (orange squares, named), portals (purple) and the start (green)]
+```
+
+- **What's on it:** only what players have **recorded at a cartography table**. Someone who
+  explored a whole biome but never recorded their map isn't on it yet. Interact with any
+  table to add your map (and pick up everyone else's).
+- **The picture** is zoomed to the explored part, at least 2 km across, with north up. The
+  red circle is the edge of the world, when it's in view. The 12 biggest bases are marked
+  and named like in [`/muninn bases`](#bases-and-signs-muninn-bases-muninn-signs).
+- **How much of the world:** explored cells (12 × 12 m each, like the game's map) out of the
+  whole round world, 10.5 km to the edge.
+- **Several tables** each keep their own copy; the bot adds them together.
+- **The weekly recap** says how much the map grew: "🗺️ The map grew by 1.2 km²: 5.6% of the
+  world explored" ([this week in the world](#this-week-in-the-world)).
+- Like the other world commands: up to 30 minutes behind, no setup, public in
+  #🪶┃muninns-roost. Without Pillow you get the numbers without the picture.
+
+**Check it on your server:** the `world_objects.py` check prints a line about it:
+```
+Explored map: 118481 cells, 17.1 km², 4.9% of the world; 288 of 307 pins are on explored ground
+```
+Most pins should be on explored ground (you put pins where you've been). If only a few are,
+the map is being read the wrong way round: please report it.
+
 ### Death map: `/muninn deathmap`
 
 Every tombstone that shows up in a world save is written down (whose, which day, where),
@@ -2231,6 +2270,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn bases` shows two bases where you have one | Its pieces are more than 40 m apart with nothing in between (a bed, a workbench, a chest…) | Nothing to fix; a workbench or chest in between joins them |
 | `/muninn bases` leaves out a place you built | Only a workbench is there (it's counted as a "lone workbench"), or it's never been saved | Add a bed, a ward, another station or 3 chests; or wait for the next save |
 | A base is "A base nobody's named" | No named house pin within 50 m on the cartography table, no bed owner, and its builders have never slept in a bed or left a tombstone | Put a house pin with a name on the map and record it at a cartography table |
+| `/muninn explored` says no map is shared | Nobody has recorded their map at a cartography table, or there's no table | Build one and interact with it to record your map |
+| The explored map is missing places you've been | You haven't recorded your map at a cartography table since | Interact with the table; it shows after the next world save |
 | A base's house pin doesn't name it | The pin is only on your own map, it's another icon, it has no name, or it's more than 50 m from the base's beds, stations and chests | Record your map at a cartography table; use the house icon, give it a name, and put it on the base |
 | A death is missing from `/muninn deathmap` | The tombstone was emptied before the world was next saved (every 30 minutes) | Nothing to fix: only tombstones that last until a save are seen |
 | A builder shows as "can't name yet" | They've never slept in a bed or left a tombstone in this world | Have them sleep in a bed once; the name shows after the next save |
@@ -2368,6 +2409,7 @@ the last recap, read from the world save like [builders](#builders-muninn-builde
 ⛵ 1 karve built · 1 ship sailed somewhere new
 🪦 Tombstones: 2 recovered, 1 new (Bjorn)
 🐾 Tames: +3 boars · newly named: Fenrir
+🗺️ The map grew by 1.2 km²: 5.6% of the world explored
 ```
 
 - **Compared with last week:** each recap remembers the world as it was, and the next one
@@ -2390,6 +2432,7 @@ the last recap, read from the world save like [builders](#builders-muninn-builde
 | ⛵ Ships | Rafts, karves, longships, drakkars and carts, with positions | Built, gone, or sailed 200 m+ from where it was |
 | 🪦 Tombstones | Whose tombstone, and when they died | Recovered (gone since last week), new, and still out there |
 | 🐾 Tames | Tamed animals per kind, and their names | Gained or lost per kind, and names given this week |
+| 🗺️ Map | Explored cells on the cartography table | Only when it grew, and only once there was a map last week ([explored map](#explored-map-muninn-explored)) |
 
 **Good to know:**
 - **When:** at the recap's time (Sunday 18:00 by default), from the latest world save, which
@@ -3037,7 +3080,7 @@ save; never written to):
 | `_main.<N>.fwl2` | World name and seed | `/valheim map` |
 | `_main.<N>.db2`, first 12 bytes | World version and the game clock | The ☀️ Day channel, tombstone days |
 | `_main.<N>.db2`, packed part | Global keys (`defeated_eikthyr`, …) | [Boss progress](#boss-progress) |
-| `*.chunk` | Every object in the world, and the map pins shared on cartography tables | [Find and stock](#find-and-stock-muninn-find-muninn-stock), [bases and signs](#bases-and-signs-muninn-bases-muninn-signs), [portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the death map](#death-map-muninn-deathmap), [the weekly world digest](#this-week-in-the-world) |
+| `*.chunk` | Every object in the world, and the map and pins shared on cartography tables | [Find and stock](#find-and-stock-muninn-find-muninn-stock), [the explored map](#explored-map-muninn-explored), [bases and signs](#bases-and-signs-muninn-bases-muninn-signs), [portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the death map](#death-map-muninn-deathmap), [the weekly world digest](#this-week-in-the-world) |
 
 Valheim writes all of them at each save (every 30 minutes and at shutdown), so everything
 read from the save is up to half an hour behind the game. Before 1.0 a world was one
@@ -3166,7 +3209,9 @@ Added here:
 - **Death map:** every tombstone seen in a world save is recorded and mapped, with the
   worst spots.
 - **Weekly world digest:** the recap compares this week's world save with last week's:
-  pieces and builders, portals, ships, tombstones and tames.
+  pieces and builders, portals, ships, tombstones, tames and the explored map.
+- **Explored map:** the explored map and pins shared on the cartography table, read from the
+  world save and drawn with the bases and portals.
 - **Achievement progress:** `/valheim progress` reads an uploaded character file (`.fch`) and
   lists what's missing for each achievement, with a per-platform guide to finding the file;
   `fch_progress.py` also runs on its own. An opt-in `/muninn progress` board, the Mímir
