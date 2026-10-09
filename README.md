@@ -94,8 +94,8 @@ And without the bot:
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
 - **`/muninn explored`:** a picture of the map shared on your cartography table, zoomed to
-  what you've uncovered, with your bases, portals and the start, and how much of the world
-  that is. The weekly recap says how much the map grew ([explored map](#explored-map-muninn-explored)).
+  what you've uncovered, with your bases (named by their house pins), portals and the start,
+  and how much of the world that is. Record your map at the table to add to it. The weekly recap says how much the map grew ([explored map](#explored-map-muninn-explored)).
 - **Bases are named by the house pins on your cartography table:** put a house pin with a
   name on the map, share it on the table, and `/muninn bases` calls the base by that name.
   Signs don't name bases any more; they still label chests in `/muninn find`
@@ -1781,25 +1781,41 @@ pins. That's in the world save, so the bot can draw it:
 
 ```
 🗺️ What we've explored in Alheim
-4.9% of the world explored: 17.1 km² of about 346 km².
-307 pins on the table (20 houses) · 8 bases, 7 named by their house pin.
-[a picture: the explored land in parchment on dark fog, zoomed to what's explored, with
- the bases (orange squares, named), portals (purple) and the start (green)]
+2.2% of the world explored: 7.5 km² of about 346 km².
+5 pins on the table (5 houses) · 6 bases, 5 named by their house pin.
 ```
 
+![/muninn explored: the explored land in parchment on dark fog, with the bases named and the start](assets/explored.png)
+
+*(Example with a made-up map.)* Parchment is explored, dark is still fog. Orange squares
+are the bases, named by their house pins, purple diamonds the portals (under a base's square
+when they're at the base) and green the start. The scale is in the corner.
+
 - **What's on it:** only what players have **recorded at a cartography table**. Someone who
-  explored a whole biome but never recorded their map isn't on it yet. Interact with any
-  table to add your map (and pick up everyone else's).
+  explored a whole biome but never recorded their map isn't on it yet.
+- **Adding to it:** at a cartography table, *record* puts what you've explored and your
+  pins on the table, and *read* copies the table's map into yours. The bot sees what's been
+  recorded after the next world save (every 30 minutes). Recording often keeps the map,
+  `/muninn explored` and the recap's "the map grew" line up to date.
 - **The picture** is zoomed to the explored part, at least 2 km across, with north up. The
   red circle is the edge of the world, when it's in view. The 12 biggest bases are marked
   and named like in [`/muninn bases`](#bases-and-signs-muninn-bases-muninn-signs).
 - **How much of the world:** explored cells (12 × 12 m each, like the game's map) out of the
   whole round world, 10.5 km to the edge.
-- **Several tables** each keep their own copy; the bot adds them together.
+- **Several tables** each keep their own copy; the bot adds them together, and keeps a pin
+  shared on two tables once.
+- **What it can't show:** biomes and terrain. The save only says which cells are explored,
+  not what's there; the game draws the land itself, from the world seed. For the whole
+  world with biomes (spoilers), [`/valheim map`](#discord-commands) gives the seed and a link
+  to a seed map.
+- **Pins aren't drawn**, apart from the house pins that name bases: with hundreds of copper
+  and dungeon pins the picture would be unreadable. The save check lists them all.
 - **The weekly recap** says how much the map grew: "🗺️ The map grew by 1.2 km²: 5.6% of the
   world explored" ([this week in the world](#this-week-in-the-world)).
 - Like the other world commands: up to 30 minutes behind, no setup, public in
   #🪶┃muninns-roost. Without Pillow you get the numbers without the picture.
+- **Privacy:** each pin on the table also keeps who made it, as a platform account ID
+  (Steam, PlayStation, Nintendo…). The bot doesn't keep or show those.
 
 **Check it on your server:** the `world_objects.py` check prints a line about it:
 ```
