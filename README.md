@@ -1853,14 +1853,21 @@ Sigrid's base
 🔥 Smelter: 9 waiting (8 copper ore, 1 tin ore) · ⚠️ no coal
 ```
 
-- **What's read:** smelters, blast furnaces and eitr refineries (what's waiting and the coal
-  or sap loaded), kilns, windmills and spinning wheels (what's waiting), fermenters (what's
-  in them and since when), and beehives and sap collectors (what's ready to collect).
+**What each station shows:**
+
+| Station | Shows | Warns when |
+|---|---|---|
+| 🔥 Smelter, blast furnace | What's waiting (ore, scrap), the coal loaded | Something's waiting and there's no coal |
+| 🔥 Eitr refinery | What's waiting (soft tissue), the sap loaded | Something's waiting and there's no sap |
+| 🔥 Kiln, 🌾 windmill, 🧶 spinning wheel | What's waiting (wood, barley, flax) | Never: they need no fuel |
+| 🍺 Fermenter | What's in it, ready or how long to go | It's ready to tap |
+| 🐝 Beehive, 🌳 sap collector | Honey or sap ready | There's some to collect |
+
 - **Needs coal (or sap):** a station with something waiting and less than one coal loaded
   is stuck until someone tops it up.
-- **Grouped by base**, named like in [`/muninn bases`](#bases-and-signs-muninn-bases-muninn-signs).
-  Two bases with the same name get their coordinates added. A station away from any base
-  is listed by where it is. The 8 places with the most stations are shown.
+- **Grouped by base**, named like in [`/muninn bases`](#bases-and-signs-muninn-bases-muninn-signs),
+  biggest base first. Two bases with the same name get their coordinates added. A station
+  away from any base is listed by where it is. Up to 8 places are shown.
 - **Fermenters** take 2,400 seconds of game time (40 minutes of play). Ready is worked out
   from when it started and the game clock in the save.
 - **A smelter only works while someone is nearby** (its area is loaded). When someone
@@ -1868,6 +1875,20 @@ Sigrid's base
   can mean "15 bars ready" as soon as someone visits, if there's enough coal.
 - Like the other world commands: up to 30 minutes behind, no setup, public in
   #🪶┃muninns-roost.
+- **Not covered (yet):** cooking stations and ovens (what's on them is kept differently),
+  cauldrons, hot tubs and the obliterator. The cauldron still counts towards a
+  [base](#bases-and-signs-muninn-bases-muninn-signs).
+- **Checked on a real save** for smelters, kilns, blast furnaces, spinning wheels, beehives
+  and empty fermenters. Fermenters with a batch in them and sap collectors follow the same
+  layout but haven't been seen in a real save yet; if one looks wrong, please report it.
+
+**Tips:**
+- **Look before you log in:** `/muninn stations` answers "do the smelters need coal?" and
+  "is the mead ready?" without a trip to the base.
+- **Top up coal with the ore.** A smelter only uses coal while it works, so filling it with
+  both lets it catch up the next time someone passes by.
+- **Empty the hives:** a beehive stops at 4 honey, so "44 honey in 11 hives" means they're
+  all full.
 
 **Check it on your server:** the `world_objects.py` check prints the same report under
 "Stations:".
