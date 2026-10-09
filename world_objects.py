@@ -193,25 +193,31 @@ def _container(data: bytes, i: int, end: int) -> Optional[list]:
     return inventory(data, j) if j >= 0 else None
 
 
-def map_pins(data: bytes, i: int, end: int) -> list:
-    """The pins shared on the cartography table whose prefab hash is at `i`: [{"name", "icon",
-    "x", "z", "crossed", "owner"}]. [] when there's nothing shared yet, or anything doesn't
-    add up (every byte must be accounted for)."""
+MAP_SIZE = 2048        # the explored map is MAP_SIZE x MAP_SIZE cells...
+MAP_CELL = 12          # ...of 12 x 12 m, centred on the start (Valheim's Minimap)
+WORLD_RADIUS = 10500   # metres to the edge of the world
+
+
+def read_map(data: bytes, i: int, end: int) -> tuple:
+    """What's shared on the cartography table whose prefab hash is at `i`: (pins, explored).
+    pins is [{"name", "icon", "x", "z", "crossed", "owner"}]; explored is MAP_SIZE² bytes, 1
+    for each explored cell, row by row from the south (row = z, column = x). ([], None) when
+    nothing is shared yet, or anything doesn't add up (every byte must be accounted for)."""
     j = data.find(DATA, i + 4, end)
     if j < 0 or j + 8 > len(data):
-        return []
+        return [], None
     n = struct.unpack_from("<i", data, j + 4)[0]
     if not 0 < n <= len(data) - j - 8:
-        return []
+        return [], None
     try:
         raw = gzip.decompress(data[j + 8:j + 8 + n])
         version, cells = struct.unpack_from("<ii", raw, 0)
         if version != 3 or not 0 < cells <= 1 << 24:
-            return []
+            return [], None
         p = 8 + cells
         count = struct.unpack_from("<i", raw, p)[0]
         if not 0 <= count <= 100000:
-            return []
+            return [], None
         p += 4
         pins = []
         for _ in range(count):
@@ -222,9 +228,38 @@ def map_pins(data: bytes, i: int, end: int) -> list:
             _, p = _read_string(raw, p + 17)                      # the author's platform ID: not kept
             pins.append({"name": (name or "").strip(), "icon": PIN_ICONS.get(icon, str(icon)), "x": x, "z": z,
                          "crossed": bool(crossed), "owner": owner})
-        return pins if p == len(raw) else []
+        if p != len(raw):
+            return [], None
+        explored = raw[8:8 + cells] if cells == MAP_SIZE * MAP_SIZE else None
+        return pins, explored
     except (OSError, EOFError, ValueError, struct.error, IndexError, zlib.error):
-        return []
+        return [], None
+
+
+def merge_explored(a: Optional[bytes], b: Optional[bytes]) -> Optional[bytes]:
+    """Both tables' explored maps together (a cell either has explored counts)."""
+    if a is None or b is None:
+        return a if b is None else b
+    return (int.from_bytes(a, "big") | int.from_bytes(b, "big")).to_bytes(len(a), "big")
+
+
+def map_cell(x: float, z: float) -> tuple:
+    """(column, row) of the map cell a world position falls in."""
+    return round(x / MAP_CELL + MAP_SIZE / 2), round(z / MAP_CELL + MAP_SIZE / 2)
+
+
+def is_explored(explored: Optional[bytes], x: float, z: float) -> bool:
+    col, row = map_cell(x, z)
+    return bool(explored) and 0 <= col < MAP_SIZE and 0 <= row < MAP_SIZE and explored[row * MAP_SIZE + col] == 1
+
+
+def explored_share(explored: Optional[bytes]) -> Optional[dict]:
+    """{"cells", "km2", "percent"}: how much of the world the shared map has uncovered."""
+    if not explored:
+        return None
+    cells = explored.count(1)
+    world = math.pi * (WORLD_RADIUS / MAP_CELL) ** 2
+    return {"cells": cells, "km2": cells * MAP_CELL * MAP_CELL / 1e6, "percent": min(100.0, 100 * cells / world)}
 
 
 def _int(data: bytes, start: int, end: int, key: bytes) -> Optional[int]:
@@ -255,7 +290,7 @@ def scan_bytes(data: bytes) -> dict:
              (CHESTS, "chest"), ({SIGN: None}, "sign"), (BASE_PIECES, "piece")]
     hits = sorted((i, what, kind) for table, what in kinds for key, kind in table.items() for i in _hits(data, key))
     out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "containers": [], "signs": [],
-                 "pieces": [], "pins": [], "builders": {}, "names": {}}
+                 "pieces": [], "pins": [], "explored": None, "builders": {}, "names": {}}
     for n, (i, what, kind) in enumerate(hits):
         pos = _position(data, i)
         if not pos:
@@ -295,7 +330,9 @@ def scan_bytes(data: bytes) -> dict:
             if kind[0] == "bed":
                 piece["owner"] = (_string(data, i + 4, end, OWNER_NAME) or "").strip()
             elif kind[0] == "cartography table":
-                out["pins"] += map_pins(data, i, min(i + 4096, next_hit))     # as far as the check looked
+                pins, explored = read_map(data, i, min(i + 4096, next_hit))   # as far as the check looked
+                out["pins"] += pins
+                out["explored"] = merge_explored(out["explored"], explored)
             out["pieces"].append(piece)
         elif _int(data, i + 4, end, TAMED) == 1:
             level = _int(data, i + 4, end, LEVEL)
@@ -335,7 +372,7 @@ def scan(save_dir: str, world: Optional[str] = None) -> Optional[dict]:
     if not files:
         return None
     out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "containers": [], "signs": [],
-                 "pieces": [], "pins": [], "builders": {}, "names": {}}
+                 "pieces": [], "pins": [], "explored": None, "builders": {}, "names": {}}
     for path in files:
         try:
             with open(path, "rb") as f:
@@ -345,6 +382,7 @@ def scan(save_dir: str, world: Optional[str] = None) -> Optional[dict]:
         for k in ("portals", "tombstones", "ships", "tames", "containers", "signs", "pieces"):
             out[k] += found[k]
         out["pins"] += found["pins"]
+        out["explored"] = merge_explored(out["explored"], found["explored"])
         for pid, n in found["builders"].items():
             out["builders"][pid] = out["builders"].get(pid, 0) + n
         out["names"].update(found["names"])
@@ -678,8 +716,8 @@ def bases(found: dict) -> tuple:
     return out, outposts
 
 
-def _names(names: list) -> str:
-    names = [md(n) for n in names]
+def _names(names: list, escape=md) -> str:
+    names = [escape(n) for n in names]
     if len(names) <= 2:
         return " and ".join(names)
     if len(names) == 3:
@@ -687,11 +725,12 @@ def _names(names: list) -> str:
     return f"{names[0]}, {names[1]} and {len(names) - 2} more"
 
 
-def base_name(b: dict) -> str:
+def base_name(b: dict, escape=md) -> str:
+    """What to call a base: markdown-escaped for Discord, or as is (escape=str) for a picture."""
     if b["pin"]:
-        return md(b["pin"][:40])
+        return escape(b["pin"][:40])
     who = b["beds"] or [name for name, _ in b["builders"][:2]]
-    return f"{_names(who)}'s base" if who else "A base nobody's named"
+    return f"{_names(who, escape)}'s base" if who else "A base nobody's named"
 
 
 def _count(kind: str, n: int) -> str:
@@ -849,6 +888,108 @@ def death_map(points: list, portals: list = (), title: str = "Where we die") -> 
     return out.getvalue()
 
 
+# -- the explored map (/muninn explored) -------------------------------------------------
+def explored_bounds(explored: bytes, margin: int = 40) -> Optional[tuple]:
+    """(first col, first row, last col, last row) around the explored cells, with a margin."""
+    rows = [r for r in range(MAP_SIZE) if 1 in explored[r * MAP_SIZE:(r + 1) * MAP_SIZE]]
+    if not rows:
+        return None
+    cols = [explored.find(1, r * MAP_SIZE, (r + 1) * MAP_SIZE) - r * MAP_SIZE for r in rows]
+    ends = [explored.rfind(1, r * MAP_SIZE, (r + 1) * MAP_SIZE) - r * MAP_SIZE for r in rows]
+    return (max(0, min(cols) - margin), max(0, rows[0] - margin),
+            min(MAP_SIZE - 1, max(ends) + margin), min(MAP_SIZE - 1, rows[-1] + margin))
+
+
+def explored_map(found: dict, title: str = "What we've explored") -> Optional[bytes]:
+    """A PNG of the explored map shared on the cartography table, zoomed to the explored
+    part, with the bases, portals and the start. None without Pillow or a shared map."""
+    explored = found.get("explored")
+    if not explored:
+        return None
+    try:
+        from io import BytesIO
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return None
+    box = explored_bounds(explored)
+    if not box:
+        return None
+    c0, r0, c1, r1 = box
+    side = max(c1 - c0, r1 - r0, 170) + 1                      # at least ~2 km across
+    cc, rc = (c0 + c1) / 2, (r0 + r1) / 2
+    c0 = int(max(0, min(MAP_SIZE - side, cc - side / 2)))
+    r0 = int(max(0, min(MAP_SIZE - side, rc - side / 2)))
+    size, top = 800, 50
+    cells = Image.frombytes("L", (MAP_SIZE, MAP_SIZE), explored).crop((c0, r0, c0 + side, r0 + side))
+    fog, land = (30, 32, 36), (196, 182, 140)
+    mask = cells.point(lambda v: 255 if v else 0).transpose(Image.FLIP_TOP_BOTTOM).resize((size, size), Image.NEAREST)
+    picture = Image.composite(Image.new("RGB", (size, size), land), Image.new("RGB", (size, size), fog), mask)
+    img = Image.new("RGB", (size, size + top), (43, 45, 49))
+    img.paste(picture, (0, top))
+    draw = ImageDraw.Draw(img, "RGBA")
+    try:
+        font, small = ImageFont.load_default(size=20), ImageFont.load_default(size=13)
+    except TypeError:                                              # Pillow before 10.1
+        font = small = ImageFont.load_default()
+
+    def px(x, z):
+        col, row = x / MAP_CELL + MAP_SIZE / 2, z / MAP_CELL + MAP_SIZE / 2
+        return (col - c0) / side * size, top + size - (row - r0) / side * size
+
+    share = explored_share(explored)
+    draw.text((16, 14), f"{title} · {share['percent']:.1f}% of the world", fill=(242, 243, 245), font=font)
+    ex, ey = px(-WORLD_RADIUS, WORLD_RADIUS)
+    fx, fy = px(WORLD_RADIUS, -WORLD_RADIUS)
+    draw.ellipse([ex, ey, fx, fy], outline=(237, 66, 69, 120), width=2)          # the world's edge
+    inside = lambda x, y: 0 <= x <= size and top <= y <= top + size            # noqa: E731
+    labelled: list = []
+    for p in found.get("portals", []):
+        x, y = px(p["x"], p["z"])
+        if inside(x, y):
+            draw.polygon([(x, y - 4), (x + 4, y), (x, y + 4), (x - 4, y)], fill=(126, 87, 194))
+    sx, sy = px(0, 0)
+    if inside(sx, sy):
+        draw.ellipse([sx - 6, sy - 6, sx + 6, sy + 6], outline=(87, 242, 135), width=2)
+        draw.text((sx + 9, sy - 7), "start", fill=(87, 242, 135), font=small, stroke_width=2, stroke_fill=(30, 32, 36))
+        labelled.append((sx, sy))
+    for b in bases(found)[0][:12]:
+        x, y = px(b["x"], b["z"])
+        if not inside(x, y):
+            continue
+        draw.rectangle([x - 5, y - 5, x + 5, y + 5], fill=(250, 166, 26), outline=(30, 32, 36))
+        name = base_name(b, str)
+        if b["pin"] or b["beds"] or b["builders"]:              # "nobody's named" isn't worth a label
+            if all(math.hypot(x - a, y - c) > 40 for a, c in labelled):
+                labelled.append((x, y))
+                left = x > size - 170                            # near the right edge: write it to the left
+                draw.text((x - 8 if left else x + 8, y), name, fill=(255, 255, 255), font=small,
+                          anchor="rm" if left else "lm", stroke_width=2, stroke_fill=(30, 32, 36))
+    km = side * MAP_CELL / 1000
+    draw.text((size - 12, top + size - 10), f"{km:.1f} km across", fill=(242, 243, 245), font=small, anchor="rb",
+              stroke_width=2, stroke_fill=(30, 32, 36))
+    out = BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
+
+
+def render_explored(found: dict, server_name: str = "") -> dict:
+    share = explored_share(found.get("explored"))
+    if not share:
+        return {"title": "🗺️ The explored map", "color": 0xC4B68C,
+                "description": "No map shared on a cartography table yet. Build one (it needs a workbench "
+                               "nearby), then interact with it to record your map. Everyone who records "
+                               "adds what they've explored."}
+    named = [b for b in bases(found)[0] if b["pin"]]
+    lines = [f"**{share['percent']:.1f}%** of the world explored: {share['km2']:,.1f} km² of about "
+             f"{math.pi * (WORLD_RADIUS / 1000) ** 2:,.0f} km²."]
+    houses = sum(1 for p in found.get("pins", []) if p["icon"] == "house")
+    lines.append(f"{len(found.get('pins', []))} pins on the table ({houses} houses) · "
+                 f"{len(bases(found)[0])} bases, {len(named)} named by their house pin.")
+    return {"title": f"🗺️ What we've explored{' in ' + server_name if server_name else ''}", "color": 0xC4B68C,
+            "description": "\n".join(lines),
+            "footer": {"text": "The map shared on the cartography table · record yours there to add to it"}}
+
+
 # -- the weekly world digest ---------------------------------------------------------------
 def snapshot(found: dict) -> dict:
     """What to remember of the world for next week's comparison (JSON-friendly)."""
@@ -860,7 +1001,8 @@ def snapshot(found: dict) -> dict:
             # without one, its spot does.
             "tombstones": [[t["owner"], round(t["died"])] if t["died"] else [t["owner"], 0, round(t["x"]), round(t["z"])]
                            for t in found["tombstones"]],
-            "tames": [[a["kind"], a["name"]] for a in found["tames"]]}
+            "tames": [[a["kind"], a["name"]] for a in found["tames"]],
+            "explored": (explored_share(found.get("explored")) or {}).get("cells", 0)}
 
 
 def _plural(n: int, word: str) -> str:
@@ -941,6 +1083,11 @@ def digest(old: dict, new: dict) -> list:
     if changes or names:
         lines.append("🐾 Tames: " + ", ".join(changes) + (f"{' · ' if changes else ''}newly named: {', '.join(names)}"
                                                          if names else ""))
+    before, after = old.get("explored", 0), new.get("explored", 0)
+    if before and after > before:                      # only once there was a map to compare with
+        world = math.pi * (WORLD_RADIUS / MAP_CELL) ** 2
+        lines.append(f"🗺️ The map grew by **{(after - before) * MAP_CELL * MAP_CELL / 1e6:,.1f} km²**: "
+                     f"{100 * after / world:.1f}% of the world explored")
     return lines
 
 
@@ -986,6 +1133,13 @@ def main(argv=None) -> int:
           + ", ".join(f"{n} {k}" for k, n in sorted(icons.items(), key=lambda kv: -kv[1])) + "; the named houses:")
     for pin in sorted((p for p in found["pins"] if p["icon"] == "house" and p["name"]), key=lambda p: p["name"].lower()):
         print(f"  {pin['name'][:30]:<30} {where(pin['x'], pin['z'])}")
+    share = explored_share(found["explored"])
+    if share:
+        on_map = sum(1 for p in found["pins"] if is_explored(found["explored"], p["x"], p["z"]))
+        print(f"Explored map: {share['cells']} cells, {share['km2']:.1f} km², {share['percent']:.1f}% of the world; "
+              f"{on_map} of {len(found['pins'])} pins are on explored ground")
+    else:
+        print("No explored map shared on a cartography table")
     kinds: dict = {}
     for piece in found["pieces"]:
         kinds[piece["kind"]] = kinds.get(piece["kind"], 0) + 1
