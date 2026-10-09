@@ -113,6 +113,7 @@ RE_VERSION = re.compile(_TS + r"Valheim version: ?(?P<version>\S+)")
 # Printed when everyone sleeps through the night: "Time 25920.5, day:15    nextm:27000 …".
 RE_DAY = re.compile(_TS + r"Time [\d.]+, day:\s*(?P<day>\d+)")
 RE_REFUSED = re.compile(_TS + r"Player (?P<name>.+?) : (?P<id>\S+) is blacklisted or not in whitelist")
+RE_WRONG_PASSWORD = re.compile(_TS + r"Peer (?P<id>\S+) has wrong password")
 
 
 # Random events ("raids") by their internal name. Unknown ones fall back to a tidied name.
@@ -356,6 +357,16 @@ class ValheimLogParser:
             name, host_id = m.group("name").strip(), m.group("id")
             self._drop_pending(host_id)
             yield Event("join_refused", name, {"host_id": host_id})
+            return
+        m = RE_WRONG_PASSWORD.search(line)
+        if m:
+            # The password is checked before the character is known: all we have is the
+            # connection's id, a platform id ("Steam_…") or, in crossplay, a PlayFab id
+            # whose platform id the handshake gave us.
+            host_id = m.group("id")
+            self._drop_pending(host_id)
+            bare = host_id.split("/", 1)[1] if host_id.startswith("playfab/") else host_id
+            yield Event("wrong_password", None, {"host_id": self.s.id_to_platform.get(bare, host_id)})
             return
 
         m = RE_ZDOID.search(line)
@@ -1910,6 +1921,8 @@ def main():
                     changed = changed or bool(store)
                     if ev.kind == "join_refused" and admin:
                         admin.notify_refused(ev.player, ev.extra["host_id"], ev.extra.get("ts"))
+                    if ev.kind == "wrong_password" and admin:
+                        admin.notify_wrong_password(ev.extra["host_id"])
                     if ev.kind == "backup_saved" and backups:
                         backups.copy_in_background()
                     if maint:

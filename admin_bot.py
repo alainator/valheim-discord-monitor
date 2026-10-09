@@ -502,6 +502,13 @@ class AdminBot:
         self.bosses_world = str(bc.get("world") or "").strip() or None
         self.bosses_announce = bool(bc.get("announce", True))
         self.boss_keys: Optional[set] = None   # last read from the save
+        # Someone failing the server password again and again: tell the admins.
+        pa = cfg.get("password_alerts", True)
+        pa = {} if pa is True else pa if isinstance(pa, dict) else None
+        self.password_after = max(1, int(pa.get("after", 3))) if pa is not None else 0      # 0: off
+        self.password_minutes = max(1, int(pa.get("minutes", 10))) if pa is not None else 10
+        self._password_tries: dict = {}           # platform id -> [times]
+        self._password_posted: dict = {}          # platform id -> when we last told the admins
         # Huginn posts when mead is ready, hives are full or a smelter runs out of coal.
         sa = cfg.get("station_alerts", True)
         sa = {"mead": sa, "honey": sa, "fuel": sa} if isinstance(sa, bool) else sa if isinstance(sa, dict) else {}
@@ -646,6 +653,65 @@ class AdminBot:
         self.last_notice[pid] = now
         fut = asyncio.run_coroutine_threadsafe(self._post_refused(name, pid), self.loop)
         fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
+
+    def notify_wrong_password(self, pid: str, now: Optional[float] = None) -> bool:
+        """A failed password from `pid` (called from the monitor's thread). Tells the admins
+        once it's the `password_after`th within `password_minutes`, at most once an hour per
+        player. True when a notice was sent."""
+        now = time.time() if now is None else now
+        due = self._password_due(pid, now)
+        if not due:
+            return False
+        if not (self.loop and self.client and self.ready.is_set()):
+            log.warning("admin_bot: not connected; dropped the wrong-password notice for %s", pid)
+            return False
+        self._password_posted[pid] = now
+        fut = asyncio.run_coroutine_threadsafe(self._post_wrong_password(pid, *due), self.loop)
+        fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
+        return True
+
+    def _password_due(self, pid: str, now: float) -> Optional[tuple]:
+        """Count a failed password; (tries, minutes they took) when the admins should hear."""
+        if not self.password_after:
+            return None
+        window = self.password_minutes * 60
+        tries = [t for t in self._password_tries.get(pid, []) if now - t < window] + [now]
+        self._password_tries = {k: v for k, v in self._password_tries.items() if v and now - v[-1] < window}
+        self._password_tries[pid] = tries
+        if len(tries) < self.password_after or (pid in self._password_posted and now - self._password_posted[pid] < 3600):
+            return None
+        return len(tries), max(1, round((tries[-1] - tries[0]) / 60))
+
+    async def _post_wrong_password(self, pid: str, tries: int, minutes: int) -> None:
+        import discord
+        channel = self.client.get_channel(self.channel_id) or await self.client.fetch_channel(self.channel_id)
+        embed = discord.Embed(title="🔑 Wrong password, again and again", color=0xE67E22,
+                              description=f"Someone tried to join **{self.server_name}** with the wrong password "
+                                          f"**{tries} times** in {minutes} minute{'s' if minutes != 1 else ''}.")
+        link = steam_profile(pid)
+        embed.add_field(name="Platform ID", value=f"`{pid}`" + (f"\n[Steam profile]({link})" if link else ""))
+        who = {"characters": [], "users": []}
+        if self.db_path:
+            import community
+            who = community.who_is(self.db, pid)
+            lines = []
+            if who["users"]:
+                lines.append("Discord: " + ", ".join(f"<@{u}>" for u in who["users"]) + " (linked character)")
+            if who["characters"]:
+                lines.append("Played before as: " + ", ".join(f"**{discord.utils.escape_markdown(c)}**"
+                                                              for c in who["characters"][:5]))
+            embed.add_field(name="Who this is", value="\n".join(lines) or "Nobody the bot has seen before: "
+                            "a stranger guessing, or a new player who wasn't given the password.", inline=False)
+        if who["users"]:
+            where = ("`/valheim join` shows the address and the password." if self.join.get("password")
+                     else "Ask an admin for it.")
+            if await self._dm_once(who["users"][0], "password", (
+                    f"🔑 Your join to **{self.server_name}** failed: wrong password. {where} "
+                    "It's case-sensitive.")):
+                embed.set_footer(text="The player was told by DM where to find the password.")
+        embed.timestamp = discord.utils.utcnow()
+        await channel.send(embed=embed, view=self._buttons(pid, actions=("ban", "ignore")),
+                           allowed_mentions=discord.AllowedMentions.none())
 
     def attach(self, live=None, backups=None, updater=None, announce=None, db_path=None,
                post_embed=None, webhook_url: str = "", set_webhook=None) -> None:
@@ -874,12 +940,24 @@ class AdminBot:
             return True
         return bool(self.admin_roles & {r.id for r in getattr(user, "roles", [])})
 
-    def _buttons(self, pid: str, disabled: bool = False):
+    @staticmethod
+    def _shown_actions(message) -> tuple:
+        """The buttons a notice had (a wrong-password notice has no Permit), to redraw them."""
+        try:
+            shown = tuple(c.custom_id.split(":")[1] for row in message.components for c in row.children
+                          if (c.custom_id or "").startswith(BTN_PREFIX + ":"))
+        except (AttributeError, IndexError):
+            shown = ()
+        return shown or ("permit", "ban", "ignore")
+
+    def _buttons(self, pid: str, disabled: bool = False, actions=("permit", "ban", "ignore")):
         import discord
         view = discord.ui.View(timeout=None)
         for action, label, style in (("permit", "Permit", discord.ButtonStyle.success),
                                      ("ban", "Ban", discord.ButtonStyle.danger),
                                      ("ignore", "Ignore", discord.ButtonStyle.secondary)):
+            if action not in actions:
+                continue
             view.add_item(discord.ui.Button(label=label, style=style, disabled=disabled,
                                             custom_id=f"{BTN_PREFIX}:{action}:{pid}"[:100]))
         return view
@@ -2438,7 +2516,8 @@ class AdminBot:
         embed = it.message.embeds[0] if it.message and it.message.embeds else None
         if embed is not None:
             embed.add_field(name="Result", value=f"{outcome} by {it.user.mention}", inline=False)
-        await it.response.edit_message(embed=embed, view=self._buttons(pid, disabled=True))
+        await it.response.edit_message(embed=embed, view=self._buttons(pid, disabled=True,
+                                                                       actions=self._shown_actions(it.message)))
         if self.tidy_hours > 0 and it.message:
             self._queue_tidy(it.message.channel.id, it.message.id)
 
