@@ -1627,8 +1627,17 @@ Bronze nails: 80 in 1 place
 ` 2,108` Stone
 `   412` Black metal scrap
 …
-612 kinds of item in 160 chests, barrels, carts and ships
+212 kinds of item in 160 chests, barrels, carts and ships · from the last world save ·
+/muninn find <item> says where
 ```
+
+**What the answer shows:**
+- **`find`** lists up to 4 matching items, the biggest pile first. Each item gets its total and its
+  places, the most first: 6 places when only one item matches, 3 each otherwise, then "…and
+  N more places". Further matches are named at the end ("Also matching: …").
+- **`stock`** lists the 40 items you have most of, then "…and N more kinds of item".
+- **Both answers are posted in #🪶┃muninns-roost** for everyone to see. If the bot can't find the
+  world save, only you see that.
 
 - **What's searched:** chests (wood, reinforced, black metal), barrels, carts, ships' cargo,
   and tombstones (in `find` only: "7 in Ingrid's tombstone").
@@ -1641,8 +1650,35 @@ Bronze nails: 80 in 1 place
 - **Item names** come from `data/items.json`, Valheim's item IDs and their wiki names. An item
   added in a newer game version than the list shows as "unknown item (1a2b3c4d)" until the
   list is updated (`python3 tools/update_items.py`).
+- **Suggestions come from the last read.** Typing never makes the bot read the save, because
+  Discord only waits 3 seconds for suggestions. The bot reads the save about 90 seconds after
+  it starts and then after each world save, so for the first minute or two there are no
+  suggestions. You can still type the name yourself.
+- **Not counted:** what players carry, item and armor stands, smelters, kilns and fermenters,
+  and anything lying on the ground. Only what's inside a chest, barrel, cart, ship or
+  tombstone.
 - Like everything from the world save: up to 30 minutes behind, no setup, follows
   `bosses.world`.
+- **Check it on your server:** `docker compose exec valheim-discord-monitor python3
+  world_objects.py /valheim_save_data` prints the containers, what you have most of, and the
+  signs, after the portals and tombstones:
+  ```
+  162 containers (160 searchable), 212 kinds of item; the most:
+    Wood                     3412
+    Stone                    2108
+    …
+  17 signs:
+    Caterpillar House                        x -2509, z -1133 · 2.8 km SW of the start
+    …
+  ```
+  "Searchable" leaves out personal chests and tombstones.
+
+**Storage tips:**
+- **Put a sign next to your chests** ("Ores", "Food", "Caterpillar House"). `find` names the
+  nearest sign within 15 m, which is easier to follow than coordinates.
+- **Name your portals.** The nearest named portal within 100 m shows up too, so people know
+  which portal to take to get there.
+- **Keep secrets in personal chests.** They're the only ones `find` and `stock` leave out.
 
 ### Death map: `/muninn deathmap`
 
