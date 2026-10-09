@@ -534,7 +534,7 @@ Vanilla Valheim already prints everything needed to `valheim_console.log`
 | Respawn | next non-zero ZDOID for that name |
 | Logout  | `Destroying abandoned non persistent zdo … owner 1234567890` (owner id matches the player), or `Closing socket …` on direct-Steam servers, or `Player disconnected … now 0 player(s)` |
 | Refused join | `Player Stranger : V_7656… is blacklisted or not in whitelist.` (see [admin bot](#join-attempt-alerts--discord-admin-bot)) |
-| Wrong password | `Peer V_7656… has wrong password` (see [wrong passwords](#wrong-password-alerts)) |
+| Wrong password | `Peer V_7656… has wrong password` (see [wrong passwords](#wrong-password-alerts); not yet seen on a real server) |
 | Restart / online | `OnApplicationQuit` / `ZNet Shutdown` … then `Game server connected` |
 
 The monitor tails the log by byte offset, so its own restarts never re-post. It runs the
@@ -731,6 +731,19 @@ lists are doing their job. There are two ways to receive it:
     is checked before the character is), so there's no character name in the title.
   - **Change it or turn it off:** `"password_alerts": {"after": 3, "minutes": 10}` in
     `admin_bot`, or `false`.
+  - **No password on your server?** Then nobody can get it wrong, and this never posts.
+    Leaving it on costs nothing, and it starts working if you ever add a password.
+  - **Lower the count** to `"after": 1` to hear at the first failed try (still at most once
+    an hour per player), e.g. right after changing the password, so you can tell people the
+    new one.
+  - **Check it works:** try joining once with a wrong password, then run
+    `docker compose logs valheim-discord-monitor | grep wrong_password`. Each failed try
+    shows as an `EVENT wrong_password` line.
+
+  > **Not yet seen on a real server.** The log line (`Peer … has wrong password`) is taken
+  > from the game's code. If a failed password doesn't show as `EVENT wrong_password`,
+  > please [open an issue](https://github.com/alainator/valheim-discord-monitor/issues) with the line Valheim wrote to its log around that time
+  > (search it for "password"), and the pattern will be fixed.
 
   **Wrong game version.** When someone's game is older or newer than the server's, the
   public channel already gets a note (`version_mismatch` in `events`). If the bot knows who
@@ -2437,6 +2450,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn bases` leaves out a place you built | Only a workbench is there (it's counted as a "lone workbench"), or it's never been saved | Add a bed, a ward, another station or 3 chests; or wait for the next save |
 | A base is "A base nobody's named" | No named house pin within 50 m on the cartography table, no bed owner, and its builders have never slept in a bed or left a tombstone | Put a house pin with a name on the map and record it at a cartography table |
 | No wrong-password alert | Fewer than 3 tries in 10 minutes (`password_alerts`), one was already posted for that player this hour, or the server has no password | Check `admin_bot.password_alerts`; `docker compose logs valheim-discord-monitor \| grep wrong_password` shows each failed try |
+| A failed password doesn't show up as `EVENT wrong_password` at all | Valheim's log line differs from the one expected (`Peer … has wrong password`) | Please [open an issue](https://github.com/alainator/valheim-discord-monitor/issues) with the line from the Valheim log (search it for "password") |
 | No station alerts | It's the first check after updating (it only takes note), they're turned off (`admin_bot.station_alerts`), or `save_dir` or the stats database isn't set | Wait for the next save; check the config |
 | A station alert came late | Valheim saves every 30 minutes and the bot checks every 10 | Nothing to fix: up to 40 minutes behind |
 | `/muninn stations` says a smelter has ore but it's full of bars in-game | Nobody has been near it since it was filled: it catches up when someone comes back | Visit it; the next save shows it as it is |
