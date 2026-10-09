@@ -1058,6 +1058,59 @@ def render_stations(found: dict, server_name: str = "", limit: int = 8) -> dict:
                                "is nearby, and catches up when they come back"}}
 
 
+HIVE_FULL = 4                     # a beehive holds 4 honey at most (Beehive.m_maxHoney)
+
+
+def station_alerts(found: dict, before: Optional[dict], wanted=("mead", "honey", "fuel")) -> tuple:
+    """(embed or None, state) for what became ready or stuck since the last save read.
+    `before` is the last state (None the first time, which only takes a baseline: nothing
+    that was already ready gets announced). Each thing is announced once, and again only
+    after it was dealt with and happens anew (a new batch of mead, the hives refilled)."""
+    report = station_report(found)
+    spot = lambda p: f"{p['x']:.0f},{p['z']:.0f}"                         # noqa: E731
+    now = {"mead": [], "honey": [], "fuel": []}
+    events: dict = {"mead": {}, "honey": {}, "fuel": {}}
+    ready = {id(p) for _, p in report["mead"]}
+    for place, here in report["places"]:
+        for p in here:
+            if id(p) in ready:
+                key = f"{spot(p)},{p['started']:.0f}"
+                now["mead"].append(key)
+                events["mead"].setdefault(place, []).append((key, p))
+            elif p["kind"] == "beehive" and p.get("level", 0) >= HIVE_FULL:
+                now["honey"].append(spot(p))
+                events["honey"].setdefault(place, []).append((spot(p), p))
+            elif QUEUE_STATIONS.get(p["kind"]) and p.get("queue") and p.get("fuel", 0) < 1:
+                key = f"{spot(p)},{p['kind']}"
+                now["fuel"].append(key)
+                events["fuel"].setdefault(place, []).append((key, p))
+    if before is None:
+        return None, now
+    lines = []
+    for place, items in events["mead"].items():
+        new = [p for key, p in items if key not in before.get("mead", [])]
+        if new and "mead" in wanted:
+            lines.append(f"🍺 **Mead ready** at {place}: {len(new)} fermenter{'s' if len(new) != 1 else ''} "
+                         f"({_kinds_of([p['content'] for p in new])})")
+    for place, items in events["honey"].items():
+        if any(key not in before.get("honey", []) for key, _ in items) and "honey" in wanted:
+            lines.append(f"🍯 **Hives full** at {place}: {len(items)} hive{'s' if len(items) != 1 else ''}, "
+                         f"{sum(p['level'] for _, p in items)} honey to collect")
+    for place, items in events["fuel"].items():
+        new = [p for key, p in items if key not in before.get("fuel", [])]
+        if new and "fuel" in wanted:
+            fuels = sorted({QUEUE_STATIONS[p["kind"]] for p in new})
+            kinds = sorted({p["kind"] for p in new})
+            what = (f"a {kinds[0]}" if len(new) == 1 else _count(kinds[0], len(new)) if len(kinds) == 1
+                    else f"{len(new)} stations")
+            lines.append(f"⚠️ **Out of {' and '.join(fuels)}** at {place}: {what} with "
+                         f"{_tally([i for p in new for i in p['queue']])} waiting")
+    if not lines:
+        return None, now
+    return ({"title": "🏭 The stations need you", "color": 0xE67E22, "description": "\n".join(lines)[:4000],
+             "footer": {"text": "From the last world save · /muninn stations for all of them"}}, now)
+
+
 # -- the explored map (/muninn explored) -------------------------------------------------
 def explored_bounds(explored: bytes, margin: int = 40) -> Optional[tuple]:
     """(first col, first row, last col, last row) around the explored cells, with a margin."""

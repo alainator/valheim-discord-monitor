@@ -76,6 +76,7 @@
     "runestone_news": false,
     "patch_notes": { "enabled": true, "public_test": false },
     "wiki": true,
+    "station_alerts": { "mead": true, "honey": true, "fuel": true },
     "voice_lobby": false,
     "bounties": { "role": "Skadi", "role_days": 7 },
     "stat_channels": {
