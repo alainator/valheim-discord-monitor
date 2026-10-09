@@ -94,6 +94,9 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Wrong-password alerts:** when someone fails the server password 3 times in 10 minutes,
+  the admin channel hears about it, with who it is (if the bot knows) and a Ban button. A
+  linked player gets a DM saying where to find the password ([wrong passwords](#wrong-password-alerts)).
 - **Station alerts:** Huginn posts when mead is ready to tap, the beehives are full, or a
   smelter with ore waiting runs out of coal, once each, read from the world save after
   every save. Turn any of them off with `admin_bot.station_alerts` ([alerts](#station-alerts)).
@@ -531,6 +534,7 @@ Vanilla Valheim already prints everything needed to `valheim_console.log`
 | Respawn | next non-zero ZDOID for that name |
 | Logout  | `Destroying abandoned non persistent zdo … owner 1234567890` (owner id matches the player), or `Closing socket …` on direct-Steam servers, or `Player disconnected … now 0 player(s)` |
 | Refused join | `Player Stranger : V_7656… is blacklisted or not in whitelist.` (see [admin bot](#join-attempt-alerts--discord-admin-bot)) |
+| Wrong password | `Peer V_7656… has wrong password` (see [wrong passwords](#wrong-password-alerts)) |
 | Restart / online | `OnApplicationQuit` / `ZNet Shutdown` … then `Game server connected` |
 
 The monitor tails the log by byte offset, so its own restarts never re-post. It runs the
@@ -703,6 +707,30 @@ lists are doing their job. There are two ways to receive it:
   Alheim as Frankeem was refused: you're not on the permitted list. The admins have been
   told…". Banned players aren't told. There's at most one DM per player per 30 minutes,
   and the notice says when a DM was sent.
+
+  <a id="wrong-password-alerts"></a>**Wrong passwords.** Valheim logs each failed password
+  (`Peer V_7656… has wrong password`). One typo is nothing, so the bot waits until the same
+  player fails **3 times in 10 minutes**, then posts to the admin channel:
+
+  ```
+  🔑 Wrong password, again and again
+  Someone tried to join Alheim with the wrong password 3 times in 4 minutes.
+  Platform ID: V_76561190000000001 (Steam profile)
+  Who this is: Discord: @Ingrid (linked character) · Played before as: Ingrid
+  [Ban] [Ignore]
+  ```
+
+  - **Who it is**, like a refused join: the linked Discord member and the characters that
+    account has played as. "Nobody the bot has seen before" means a stranger guessing, or a
+    new player who wasn't given the password.
+  - **The player is told:** a linked player gets a DM that the password was wrong, and
+    `/valheim join` shows it (when `admin_bot.join.password` is set; otherwise "ask an
+    admin"). The DM never contains the password itself.
+  - **Ban and Ignore** buttons (no Permit: the password isn't something a list can fix).
+  - **At most once an hour** per player, and only the platform ID is known (the password
+    is checked before the character is), so there's no character name in the title.
+  - **Change it or turn it off:** `"password_alerts": {"after": 3, "minutes": 10}` in
+    `admin_bot`, or `false`.
 
   **Wrong game version.** When someone's game is older or newer than the server's, the
   public channel already gets a note (`version_mismatch` in `events`). If the bot knows who
@@ -2408,6 +2436,7 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn bases` shows two bases where you have one | Its pieces are more than 40 m apart with nothing in between (a bed, a workbench, a chest…) | Nothing to fix; a workbench or chest in between joins them |
 | `/muninn bases` leaves out a place you built | Only a workbench is there (it's counted as a "lone workbench"), or it's never been saved | Add a bed, a ward, another station or 3 chests; or wait for the next save |
 | A base is "A base nobody's named" | No named house pin within 50 m on the cartography table, no bed owner, and its builders have never slept in a bed or left a tombstone | Put a house pin with a name on the map and record it at a cartography table |
+| No wrong-password alert | Fewer than 3 tries in 10 minutes (`password_alerts`), one was already posted for that player this hour, or the server has no password | Check `admin_bot.password_alerts`; `docker compose logs valheim-discord-monitor \| grep wrong_password` shows each failed try |
 | No station alerts | It's the first check after updating (it only takes note), they're turned off (`admin_bot.station_alerts`), or `save_dir` or the stats database isn't set | Wait for the next save; check the config |
 | A station alert came late | Valheim saves every 30 minutes and the bot checks every 10 | Nothing to fix: up to 40 minutes behind |
 | `/muninn stations` says a smelter has ore but it's full of bars in-game | Nobody has been near it since it was filled: it catches up when someone comes back | Visit it; the next save shows it as it is |
@@ -3158,6 +3187,7 @@ or run it in a terminal.
 | `discord.digest_seconds` | 0 | Group joins and leaves within this many seconds into one post. |
 | `admin_bot.announce_channel_id` | #runestone | The [rules channel](#the-rules-channel-runestone) for `/odin rules`, `/odin announce`, news and [patch notes](#valheim-patch-notes). |
 | `admin_bot.runestone_news` | false | Also post Valheim updates, restores and boss kills in the rules channel. |
+| `admin_bot.password_alerts` | `{"after": 3, "minutes": 10}` | Tell the admin channel when someone fails the server password `after` times within `minutes` ([wrong passwords](#wrong-password-alerts)); `false` turns it off. |
 | `admin_bot.station_alerts` | all on | [Station alerts](#station-alerts) in Huginn's feed: `{"mead": true, "honey": true, "fuel": true}`; `false` turns them all off. |
 | `admin_bot.wiki` | true | `/valheim wiki` lookups on the [Valheim Wiki](#wiki-lookup-valheim-wiki); `false` turns it off. |
 | `admin_bot.patch_notes` | `{"enabled": true}` | Post Valheim [patch notes](#valheim-patch-notes) from Steam. `channel_id`: another channel than #runestone. `public_test`: public test patches too. `false` turns it off. |
@@ -3356,6 +3386,8 @@ Added here:
   pieces and builders, portals, ships, tombstones, tames and the explored map.
 - **Explored map:** the explored map and pins shared on the cartography table, read from the
   world save and drawn with the bases and portals.
+- **Wrong-password alerts:** repeated failed passwords to the admin channel, with who it is
+  and a DM to a linked player saying where to find the password.
 - **Stations:** what's in the smelters, kilns, fermenters and beehives, from the world save:
   what's waiting, what's out of coal, what's ready, and a post in the feed when something
   becomes ready or runs dry.

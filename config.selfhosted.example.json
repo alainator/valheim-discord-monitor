@@ -64,6 +64,7 @@
     "patch_notes": { "enabled": true, "public_test": false },
     "wiki": true,
     "station_alerts": { "mead": true, "honey": true, "fuel": true },
+    "password_alerts": { "after": 3, "minutes": 10 },
     "voice_lobby": false,
     "bounties": { "role": "Skadi", "role_days": 7 },
     "stat_channels": {
