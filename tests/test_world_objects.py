@@ -83,7 +83,7 @@ class ParseTest(unittest.TestCase):
         junk = struct.pack("<3f", float("nan"), 1, 1) + struct.pack("<I", wo.stable_hash("portal_wood"))
         junk += struct.pack("<3f", 1e9, 1, 1) + struct.pack("<I", wo.stable_hash("Player_tombstone"))
         self.assertEqual(wo.scan_bytes(junk), {"portals": [], "tombstones": [], "ships": [], "tames": [],
-                                              "containers": [], "signs": [],
+                                              "containers": [], "signs": [], "pieces": [],
                                               "builders": {}, "names": {}})
 
     def test_ships_and_tames(self):

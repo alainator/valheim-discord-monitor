@@ -16,7 +16,10 @@ its position (3 floats), its prefab's hash, then its data, where strings are a k
     the name players gave it ("TamedName") and its "level" (1 + stars);
   * every piece a player placed has the long "creator": the player's ID. The save has no
     names for those IDs, but beds and tombstones keep both "owner" (the ID) and
-    "ownerName" (the character), which is how IDs get names.
+    "ownerName" (the character), which is how IDs get names;
+  * a sign keeps what's written on it under "text";
+  * workbenches, forges, beds, wards and the other crafting stations are just their prefab,
+    position and creator, and close together they make a base.
 
 Run it on its own to check a save: python3 world_objects.py /path/to/valheim_save_data
 """
@@ -26,6 +29,7 @@ from __future__ import annotations
 import glob
 import math
 import os
+import re
 import struct
 import sys
 from typing import Optional
@@ -64,6 +68,15 @@ CHESTS = {_key(p): kind for p, kind in (
     ("piece_chest_wood", "chest"), ("piece_chest", "reinforced chest"), ("piece_chest_private", "personal chest"),
     ("piece_chest_blackmetal", "black metal chest"), ("piece_chest_barrel", "barrel"))}
 ITEMS, TEXT, SIGN = _key("items"), _key("text"), _key("sign")
+# What makes a base: prefab -> (what to call it, emoji). Beds keep their owner's name.
+BASE_PIECES = {_key(p): kind for p, kind in (
+    ("piece_workbench", ("workbench", "🔨")), ("forge", ("forge", "⚒️")), ("bed", ("bed", "🛏️")),
+    ("piece_bed02", ("bed", "🛏️")), ("guard_stone", ("ward", "🛡️")), ("piece_stonecutter", ("stonecutter", "🪨")),
+    ("piece_artisanstation", ("artisan table", "🪚")), ("blackforge", ("black forge", "⚒️")),
+    ("piece_magetable", ("galdr table", "🔮")), ("piece_cauldron", ("cauldron", "🍲")),
+    ("fermenter", ("fermenter", "🍺")), ("smelter", ("smelter", "🔥")), ("charcoal_kiln", ("kiln", "🔥")),
+    ("blastfurnace", ("blast furnace", "🔥")), ("eitrrefinery", ("eitr refinery", "🔥")),
+    ("piece_spinningwheel", ("spinning wheel", "🧶")), ("windmill", ("windmill", "🌾")))}
 INVENTORY_WINDOW = 2048          # how far after the prefab a container's "items" may start
 WINDOW = 512                     # bytes after the prefab hash to look for an object's data
 
@@ -193,10 +206,10 @@ def scan_bytes(data: bytes) -> dict:
     """{"portals", "tombstones", "ships", "tames", "containers", "signs": [...], "builders",
     "names": {...}} found in one file's bytes."""
     kinds = [(PORTALS, "portal"), ({TOMBSTONE: None}, "tombstone"), (SHIPS, "ship"), (TAMEABLE, "animal"),
-             (CHESTS, "chest"), ({SIGN: None}, "sign")]
+             (CHESTS, "chest"), ({SIGN: None}, "sign"), (BASE_PIECES, "piece")]
     hits = sorted((i, what, kind) for table, what in kinds for key, kind in table.items() for i in _hits(data, key))
     out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "containers": [], "signs": [],
-                 "builders": {}, "names": {}}
+                 "pieces": [], "builders": {}, "names": {}}
     for n, (i, what, kind) in enumerate(hits):
         pos = _position(data, i)
         if not pos:
@@ -226,10 +239,16 @@ def scan_bytes(data: bytes) -> dict:
         elif what == "chest":
             if stored is not None:
                 out["containers"].append({"kind": kind, "items": stored, **place})
+            out["pieces"].append({"kind": "chest", "emoji": "📦", "creator": _long(data, i + 4, end, CREATOR), **place})
         elif what == "sign":
-            text = (_string(data, i + 4, end, TEXT) or "").strip()
+            text = sign_text(_string(data, i + 4, end, TEXT) or "")
             if text:
                 out["signs"].append({"text": text, **place})
+        elif what == "piece":
+            piece = {"kind": kind[0], "emoji": kind[1], "creator": _long(data, i + 4, end, CREATOR), **place}
+            if kind[0] == "bed":
+                piece["owner"] = (_string(data, i + 4, end, OWNER_NAME) or "").strip()
+            out["pieces"].append(piece)
         elif _int(data, i + 4, end, TAMED) == 1:
             level = _int(data, i + 4, end, LEVEL)
             out["tames"].append({"kind": kind[0], "emoji": kind[1], "name": (_string(data, i + 4, end, TAMED_NAME)
@@ -268,14 +287,14 @@ def scan(save_dir: str, world: Optional[str] = None) -> Optional[dict]:
     if not files:
         return None
     out: dict = {"portals": [], "tombstones": [], "ships": [], "tames": [], "containers": [], "signs": [],
-                 "builders": {}, "names": {}}
+                 "pieces": [], "builders": {}, "names": {}}
     for path in files:
         try:
             with open(path, "rb") as f:
                 found = scan_bytes(f.read())
         except OSError:
             continue
-        for k in ("portals", "tombstones", "ships", "tames", "containers", "signs"):
+        for k in ("portals", "tombstones", "ships", "tames", "containers", "signs", "pieces"):
             out[k] += found[k]
         for pid, n in found["builders"].items():
             out["builders"][pid] = out["builders"].get(pid, 0) + n
@@ -296,6 +315,17 @@ def builder_counts(found: dict) -> tuple:
             unnamed[0] += 1
             unnamed[1] += n
     return sorted(named.items(), key=lambda kv: (-kv[1], kv[0].lower())), tuple(unnamed)
+
+
+def sign_text(raw: str) -> str:
+    """A sign's text without the game's rich-text tags (<color=red>, <b>…) and with its lines
+    joined: what players actually read on it."""
+    return " ".join(re.sub(r"<[^<>]{1,40}>", "", raw).split())[:80]
+
+
+def md(text: str) -> str:
+    """Player-written text, safe to put in an embed: no accidental bold, links or code."""
+    return re.sub(r"([\\*_~`|>#\[\]()])", r"\\\1", text)
 
 
 # -- what to show -----------------------------------------------------------------------
@@ -444,7 +474,7 @@ def landmark(x: float, z: float, found: dict) -> str:
     bits = []
     sign = min(found.get("signs", []), key=lambda s: math.hypot(s["x"] - x, s["z"] - z), default=None)
     if sign and math.hypot(sign["x"] - x, sign["z"] - z) <= 15:
-        bits.append(f"by the sign “{sign['text'][:40]}”")
+        bits.append(f"by the sign “{md(sign['text'][:40])}”")
     portal = min((p for p in found.get("portals", []) if p["tag"]),
                  key=lambda p: math.hypot(p["x"] - x, p["z"] - z), default=None)
     if portal and math.hypot(portal["x"] - x, portal["z"] - z) <= 100:
@@ -517,6 +547,153 @@ def render_stock(found: dict, server_name: str = "", limit: int = 40) -> dict:
             "description": "\n".join(lines) + (f"\n…and {more} more kinds of item" if more > 0 else ""),
             "footer": {"text": f"{len(totals)} kinds of item in {boxes} chests, barrels, carts and ships · "
                                "from the last world save · /muninn find <item> says where"}}
+
+
+# -- bases and signs (/muninn bases, /muninn signs) --------------------------------------
+BASE_LINK = 40         # metres: pieces this close (or chained this close) are one base
+SIGN_REACH = 20        # a sign this close to a base's pieces can name it
+PORTAL_REACH = 150     # a named portal this close to a base's centre is "its" portal
+
+
+def _groups(points: list, link: float) -> list:
+    """Single-linkage groups of points ({"x", "z"}) closer than `link`, via a grid."""
+    parent = list(range(len(points)))
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    cells: dict = {}
+    for i, pt in enumerate(points):
+        cells.setdefault((int(pt["x"] // link), int(pt["z"] // link)), []).append(i)
+    for (cx, cz), members in cells.items():
+        near = [j for dx in (-1, 0, 1) for dz in (-1, 0, 1) for j in cells.get((cx + dx, cz + dz), ())]
+        for i in members:
+            for j in near:
+                if j > i and math.hypot(points[i]["x"] - points[j]["x"], points[i]["z"] - points[j]["z"]) < link:
+                    parent[root(i)] = root(j)
+    groups: dict = {}
+    for i in range(len(points)):
+        groups.setdefault(root(i), []).append(points[i])
+    return list(groups.values())
+
+
+def _is_base(pieces: list) -> bool:
+    """A bed, a ward, a station beyond the workbench, or 3+ chests. A workbench alone (put
+    down to build a portal or a bridge) is an outpost, not a base."""
+    kinds = [p["kind"] for p in pieces]
+    return any(k not in ("workbench", "chest") for k in kinds) or kinds.count("chest") >= 3
+
+
+def bases(found: dict) -> tuple:
+    """([base], outposts): each base is {"x", "z", "pieces", "beds": [owner], "kinds": {kind: n},
+    "builders": [(name, n)], "sign", "portal"}, biggest first."""
+    out, outposts = [], 0
+    for group in _groups(found.get("pieces", []), BASE_LINK):
+        if not _is_base(group):
+            outposts += 1
+            continue
+        x = sum(p["x"] for p in group) / len(group)
+        z = sum(p["z"] for p in group) / len(group)
+        kinds: dict = {}
+        for p in group:
+            kinds[p["kind"]] = kinds.get(p["kind"], 0) + 1
+        beds = sorted({p["owner"] for p in group if p.get("owner")}, key=str.lower)
+        built: dict = {}
+        for p in group:
+            name = found.get("names", {}).get(p.get("creator"))
+            if name:
+                built[name] = built.get(name, 0) + 1
+        signs = [sg for sg in found.get("signs", [])
+                 if any(math.hypot(sg["x"] - p["x"], sg["z"] - p["z"]) <= SIGN_REACH for p in group)]
+        sign = min(signs, key=lambda sg: math.hypot(sg["x"] - x, sg["z"] - z), default=None)
+        portal = min((pt for pt in found.get("portals", []) if pt["tag"]),
+                     key=lambda pt: math.hypot(pt["x"] - x, pt["z"] - z), default=None)
+        if portal and math.hypot(portal["x"] - x, portal["z"] - z) > PORTAL_REACH:
+            portal = None
+        out.append({"x": x, "z": z, "pieces": len(group), "beds": beds, "kinds": kinds,
+                    "builders": sorted(built.items(), key=lambda kv: (-kv[1], kv[0].lower())),
+                    "sign": sign["text"] if sign else None, "portal": portal["tag"] if portal else None})
+    out.sort(key=lambda b: (-b["pieces"], b["x"], b["z"]))
+    return out, outposts
+
+
+def _names(names: list) -> str:
+    names = [md(n) for n in names]
+    if len(names) <= 2:
+        return " and ".join(names)
+    if len(names) == 3:
+        return f"{names[0]}, {names[1]} and {names[2]}"
+    return f"{names[0]}, {names[1]} and {len(names) - 2} more"
+
+
+def base_name(b: dict) -> str:
+    if b["sign"]:
+        return f"“{md(b['sign'][:40])}”"
+    who = b["beds"] or [name for name, _ in b["builders"][:2]]
+    return f"{_names(who)}'s base" if who else "A base nobody's named"
+
+
+def _count(kind: str, n: int) -> str:
+    """ "workbench", "3 workbenches"."""
+    if n == 1:
+        return kind
+    return f"{n} {kind}es" if kind.endswith(("ch", "sh")) else f"{n} {kind}s"
+
+
+def render_bases(found: dict, server_name: str = "", limit: int = 12) -> dict:
+    found_bases, outposts = bases(found)
+    lines = []
+    for b in found_bases[:limit]:
+        place = " · ".join(([f"near the {md(b['portal'])} portal"] if b["portal"] else []) + [where(b["x"], b["z"])])
+        lines.append(f"🏠 **{base_name(b)}** · {place}")
+        stuff = []
+        if b["beds"]:
+            stuff.append("🛏️ " + _names(b["beds"]))
+        elif b["kinds"].get("bed"):
+            stuff.append(f"🛏️ {_count('bed', b['kinds']['bed'])}, nobody's")
+        icons = {kind[0]: kind[1] for kind in BASE_PIECES.values()}
+        others = [(k, n) for k, n in b["kinds"].items() if k not in ("bed", "chest")]
+        others.sort(key=lambda kn: (-kn[1], kn[0]))
+        stuff += [f"{icons.get(k, '')} {_count(k, n)}" for k, n in others[:5]]
+        if b["kinds"].get("chest"):
+            stuff.append(f"📦 {b['kinds']['chest']} chest{'s' if b['kinds']['chest'] != 1 else ''}")
+        line = " · ".join(stuff)
+        builders = [n for n, _ in b["builders"]]
+        if builders and set(builders) != set(b["beds"]):          # not just repeating the bed owners
+            line += f" · built by {_names(builders)}"
+        lines.append(line + "\n")
+    if len(found_bases) > limit:
+        lines.append(f"…and {len(found_bases) - limit} smaller base{'s' if len(found_bases) - limit != 1 else ''}")
+    footer = (f"{outposts} lone workbench{'es' if outposts != 1 else ''} not counted · " if outposts else "") + \
+        "from the last world save · put a sign up to name your base"
+    return {"title": f"🏠 Bases{' in ' + server_name if server_name else ''}: {len(found_bases)}", "color": 0x8D6E63,
+            "description": "\n".join(lines).strip()[:4000] or "No bases yet: a bed or a ward, a forge or a few chests "
+                                                                  "makes one.",
+            "footer": {"text": footer}}
+
+
+def render_signs(found: dict, search: str = "", server_name: str = "", limit: int = 30) -> dict:
+    q = search.strip().lower()
+    signs = sorted((sg for sg in found.get("signs", []) if q in sg["text"].lower()), key=lambda sg: sg["text"].lower())
+    lines = []
+    for sg in signs[:limit]:
+        portal = min((pt for pt in found.get("portals", []) if pt["tag"]),
+                     key=lambda pt: math.hypot(pt["x"] - sg["x"], pt["z"] - sg["z"]), default=None)
+        near = (f" · near the {md(portal['tag'])} portal"
+                if portal and math.hypot(portal["x"] - sg["x"], portal["z"] - sg["z"]) <= 100 else "")
+        lines.append(f"🪧 “{md(sg['text'])}”{near} · {where(sg['x'], sg['z'])}")
+    if len(signs) > limit:
+        lines.append(f"…and {len(signs) - limit} more: add a search to narrow it down")
+    if not signs:
+        empty = (f"No sign says **{md(search.strip())}**." if q else
+                 "No signs yet. Build one with the hammer, then hover it and press E to write on it.")
+    title = f"🪧 Signs{' in ' + server_name if server_name else ''}: {len(signs)}"
+    if q:
+        title += f" with “{search.strip()[:40]}”"
+    return {"title": title, "color": 0x8D6E63, "description": "\n".join(lines)[:4000] if signs else empty,
+            "footer": {"text": "What's written on the signs in the world · from the last world save"}}
 
 
 # -- the death map ------------------------------------------------------------------------
@@ -743,6 +920,15 @@ def main(argv=None) -> int:
     print(f"{len(found['signs'])} signs:")
     for s in found["signs"][:20]:
         print(f"  {s['text'][:40]:<40} {where(s['x'], s['z'])}")
+    kinds: dict = {}
+    for piece in found["pieces"]:
+        kinds[piece["kind"]] = kinds.get(piece["kind"], 0) + 1
+    found_bases, outposts = bases(found)
+    print(f"{len(found_bases)} bases ({outposts} lone workbenches left out), from "
+          + ", ".join(f"{n} {k}" for k, n in sorted(kinds.items(), key=lambda kv: -kv[1])) + ":")
+    for b in found_bases[:20]:
+        name = b["sign"] or ", ".join(b["beds"]) or ", ".join(n for n, _ in b["builders"][:2]) or "(no name)"
+        print(f"  {name[:30]:<30} {b['pieces']:>4} beds, stations and chests  {where(b['x'], b['z'])}")
     print(f"{len(found['tames'])} tamed animals:")
     for a in sorted(found["tames"], key=lambda a: (a["kind"], a["name"].lower())):
         print(f"  {a['kind']:<12} {a['name'] or '(no name)':<16} {'*' * a['stars']:<3} {where(a['x'], a['z'])}")

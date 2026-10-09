@@ -54,7 +54,7 @@ except ImportError:
 COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "bots", "compare": "bots",
                   "uptime": "bots", "bosses": "bots", "honors": "bots", "progress": "bots", "portals": "bots",
                   "tombstones": "bots", "ships": "bots", "tames": "bots", "when": "bots", "builders": "bots", "deathmap": "bots", "find": "bots",
-                  "stock": "bots",
+                  "stock": "bots", "bases": "bots", "signs": "bots",
                   "plan": "plans",
                   "bounties": "plans"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
@@ -3427,6 +3427,30 @@ class AdminBot:
                 return
             await it.followup.send(embed=discord.Embed.from_dict(world_objects.render_stock(found, bot.server_name)),
                                    allowed_mentions=discord.AllowedMentions.none())
+
+        @muninn.command(name="bases", description="Everyone's bases: whose beds, which stations, the nearest portal")
+        async def bases_cmd(it: discord.Interaction):
+            import world_objects
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)
+            if found is None:
+                await private_followup(it, "I can't find the world save (`save_dir`/worlds_local).")
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(world_objects.render_bases(found, bot.server_name)),
+                                   allowed_mentions=discord.AllowedMentions.none())
+
+        @muninn.command(name="signs", description="What's written on the signs in the world, and where they are")
+        @app_commands.describe(search="Only signs with this in them, e.g. ores or road")
+        async def signs_cmd(it: discord.Interaction, search: str = ""):
+            import world_objects
+            await it.response.defer()
+            found = await asyncio.to_thread(bot.world_objects)
+            if found is None:
+                await private_followup(it, "I can't find the world save (`save_dir`/worlds_local).")
+                return
+            await it.followup.send(embed=discord.Embed.from_dict(
+                world_objects.render_signs(found, search, bot.server_name)),
+                allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="ships", description="Every ship and cart in the world, and where it is")
         async def ships_cmd(it: discord.Interaction):

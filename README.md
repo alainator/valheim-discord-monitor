@@ -55,6 +55,10 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   `/muninn tames` every tamed animal and its name ([ships and tames](#ships-and-tames)), and
   `/muninn builders` who built the most, with a **Völundr** title ([builders](#builders-muninn-builders)),
   and `/muninn deathmap` where everyone keeps dying ([death map](#death-map-muninn-deathmap)).
+- **What's in the chests, and where everyone lives:** `/muninn find iron` says which chests
+  hold it, next to which sign, and `/muninn stock` adds up everything
+  ([find and stock](#find-and-stock-muninn-find-muninn-stock)). `/muninn bases` lists the bases, whose beds are there and which
+  stations, and `/muninn signs` what players wrote on their signs ([bases and signs](#bases-and-signs-muninn-bases-muninn-signs)).
 - **Achievement progress from a character file:** players upload their `.fch` with
   `/valheim progress` and see which achievements they're still missing. Those who opt in
   join a `/muninn progress` board, with the **Mímir** title for the leader and a post when
@@ -88,6 +92,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **`/muninn bases` and `/muninn signs`:** every base in the world, named by its sign or
+  whose beds are there, with its workbenches, forges, wards and chests and the nearest
+  portal. `signs` lists what's written on every sign, with a search
+  ([bases and signs](#bases-and-signs-muninn-bases-muninn-signs)).
 - **`/muninn find <item>` and `/muninn stock`:** where is the iron? `find` searches every
   chest, barrel, cart, ship and tombstone in the world and says how many are where, next to
   which sign or portal. `stock` adds up everything the server owns. Read from the world save;
@@ -304,7 +312,7 @@ And without the bot:
   [All Discord commands](#discord-commands) · [Status channel](#status-voice-channel) ·
   [Stat channels](#stat-channels) · [Server setup](#server-setup-odin-setup) ·
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
-  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) · [Builders](#builders-muninn-builders) · [Death map](#death-map-muninn-deathmap) ·
+  [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) · [Builders](#builders-muninn-builders) · [Find & stock](#find-and-stock-muninn-find-muninn-stock) · [Bases & signs](#bases-and-signs-muninn-bases-muninn-signs) · [Death map](#death-map-muninn-deathmap) ·
   [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [When people play](#when-people-play-muninn-when) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
@@ -709,7 +717,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `find`, `stock`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `find`, `stock`, `bases`, `signs`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `progress-remove`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -777,6 +785,8 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn builders` | Anyone | Who built the most: pieces still standing in the world, per builder ([builders](#builders-muninn-builders)) | `save_dir` |
 | `/muninn find <item>` | Anyone | Which chests, barrels, carts, ships and tombstones hold an item, how many, and where (by the nearest sign and portal); items in the world are suggested as you type ([find](#find-and-stock-muninn-find-muninn-stock)) | `save_dir` |
 | `/muninn stock` | Anyone | Everything in the chests, barrels, carts and ships, added up ([stock](#find-and-stock-muninn-find-muninn-stock)) | `save_dir` |
+| `/muninn bases` | Anyone | Every base: its name (from a sign, or whose beds), its stations, wards and chests, who built it, and the nearest portal ([bases](#bases-and-signs-muninn-bases-muninn-signs)) | `save_dir` |
+| `/muninn signs [search]` | Anyone | What's written on the signs in the world and where they are; `search` keeps the ones with that in them ([signs](#bases-and-signs-muninn-bases-muninn-signs)) | `save_dir` |
 | `/muninn deathmap [player]` | Anyone | A map of where people die, from every tombstone seen in a world save, with the worst spots listed ([death map](#death-map-muninn-deathmap)) | `save_dir`, stats database |
 | `/muninn ships` | Anyone | Every raft, karve, longship and drakkar, furthest from the start first, and the carts ([ships](#ships-and-tames)) | `save_dir` |
 | `/muninn tames` | Anyone | Tamed animals: how many of each, and the named ones with stars and where they are ([tames](#ships-and-tames)) | `save_dir` |
@@ -1680,6 +1690,72 @@ Bronze nails: 80 in 1 place
   which portal to take to get there.
 - **Keep secrets in personal chests.** They're the only ones `find` and `stock` leave out.
 
+### Bases and signs: `/muninn bases`, `/muninn signs`
+
+Every bed, workbench, ward and crafting station is in the world save, with who placed it, so
+the bot can tell where people live:
+
+```
+🏠 Bases in Alheim: 9
+🏠 “Caterpillar House” · near the Longest portal · x -2508, z -1131 · 2.8 km SW of the start
+🛏️ Bjorn and Ingrid · 🔨 6 workbenches · 🔥 2 smelters · ⚒️ forge · 🛡️ ward · 📦 14 chests ·
+   built by Ingrid, Bjorn and Sigrid
+
+🏠 Sigrid's base · near the Swamp portal · x 1840, z -620 · 1.9 km E of the start
+🛏️ Sigrid · 🔨 2 workbenches · 🍺 fermenter · 📦 4 chests
+…
+12 lone workbenches not counted · from the last world save · put a sign up to name your base
+```
+
+- **What a base is:** beds, workbenches, forges, wards, chests and the other stations
+  (stonecutter, artisan table, black forge, galdr table, cauldron, fermenter, smelter,
+  kiln, blast furnace, eitr refinery, spinning wheel, windmill). Pieces less than 40 m apart
+  belong to the same base, even through a chain of them. A group with a bed, a ward, any
+  station other than a workbench, or 3+ chests counts as a base. A workbench on its own (put
+  down to build a portal or a bridge) doesn't, and is only counted in the footer.
+- **Its name** is the sign nearest its middle, from the signs within 20 m of its pieces.
+  Without one, it's named after whoever has a bed there ("Sigrid's base"), or else
+  whoever built it. A base gets "nobody's named" only when none of those is known.
+- **Built by** names the people who placed its pieces. Like the
+  [builders board](#builders-muninn-builders), a builder's name is known once they've slept
+  in a bed or left a tombstone. It's left out when it's the same people as the beds.
+- **The nearest named portal** within 150 m of its middle, so people know how to get there.
+- The 12 biggest bases are shown first: the most beds, stations and chests. Walls and floors
+  aren't counted. Stations are listed most first, up to 5 kinds.
+
+`/muninn signs` lists what players wrote on their signs, alphabetically, with the nearest
+portal and where each one is:
+
+```
+🪧 Signs in Alheim: 17
+🪧 “Caterpillar House” · near the Longest portal · x -2509, z -1133 · 2.8 km SW of the start
+🪧 “Ores” · x 1838, z -612 · 1.9 km E of the start
+🪧 “This way to the swamp” · near the Swamp portal · x 1790, z -580 · 1.9 km E of the start
+…
+```
+
+- **`search`** keeps only the signs with that text in them: `/muninn signs search:road`.
+  Up to 30 signs are shown at a time.
+- **Colours and formatting** (`<color=red>`, `<b>`) are left out, and the text is shown as
+  written: a `*` on a sign stays a `*`, not bold.
+- Signs also name chests in [`/muninn find`](#find-and-stock-muninn-find-muninn-stock) (within 15 m) and bases here (within
+  20 m). Putting up signs pays off.
+
+**Both:** read from the world save like the other world commands. They're up to 30 minutes
+behind, need no setup, and follow `bosses.world`. The answers are public in
+#🪶┃muninns-roost, so everyone sees where the bases are. That's fine for a group of friends,
+but worth knowing if your bases are secret.
+
+**Check it on your server:** `docker compose exec valheim-discord-monitor python3
+world_objects.py /valheim_save_data` prints the bases after the signs, and how many of each
+piece it found:
+```
+9 bases (12 lone workbenches left out), from 97 workbench, 28 bed, 160 chest, 3 forge, 1 ward:
+  Caterpillar House                25 beds, stations and chests  x -2508, z -1131 · 2.8 km SW of the start
+  Sigrid                            8 beds, stations and chests  x 1840, z -620 · 1.9 km E of the start
+  …
+```
+
 ### Death map: `/muninn deathmap`
 
 Every tombstone that shows up in a world save is written down (whose, which day, where),
@@ -2139,6 +2215,9 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | A `/muninn` world command (builders, portals, tombstones, ships, tames) never answered | A bug in versions before this one: the first run after each save failed | Update; a failing command now always answers, and the error is in the bot's log |
 | `/muninn find` shows "unknown item (…)" | An item newer than the bot's item list, or one the wiki lists without its ID | Update the list: `python3 tools/update_items.py`, then rebuild |
 | `/muninn find` doesn't list a chest you know about | It's a personal chest (kept private), or the world hasn't been saved since it was filled | Wait for the next save (every 30 minutes) |
+| `/muninn bases` shows two bases where you have one | Its pieces are more than 40 m apart with nothing in between (a bed, a workbench, a chest…) | Nothing to fix; a workbench or chest in between joins them |
+| `/muninn bases` leaves out a place you built | Only a workbench is there (it's counted as a "lone workbench"), or it's never been saved | Add a bed, a ward, another station or 3 chests; or wait for the next save |
+| A base is "A base nobody's named" | No sign within 20 m, no bed owner, and its builders have never slept in a bed or left a tombstone | Put a sign up, or have someone claim a bed there |
 | A death is missing from `/muninn deathmap` | The tombstone was emptied before the world was next saved (every 30 minutes) | Nothing to fix: only tombstones that last until a save are seen |
 | A builder shows as "can't name yet" | They've never slept in a bed or left a tombstone in this world | Have them sleep in a bed once; the name shows after the next save |
 | Mímir has a holder but nobody got the role | The leading character isn't linked | `/valheim link <character>`; the role follows within a minute |
@@ -2944,7 +3023,7 @@ save; never written to):
 | `_main.<N>.fwl2` | World name and seed | `/valheim map` |
 | `_main.<N>.db2`, first 12 bytes | World version and the game clock | The ☀️ Day channel, tombstone days |
 | `_main.<N>.db2`, packed part | Global keys (`defeated_eikthyr`, …) | [Boss progress](#boss-progress) |
-| `*.chunk` | Every object in the world | [Find and stock](#find-and-stock-muninn-find-muninn-stock), [portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the death map](#death-map-muninn-deathmap), [the weekly world digest](#this-week-in-the-world) |
+| `*.chunk` | Every object in the world | [Find and stock](#find-and-stock-muninn-find-muninn-stock), [bases and signs](#bases-and-signs-muninn-bases-muninn-signs), [portals and tombstones](#portals-and-tombstones), [ships and tames](#ships-and-tames), [builders](#builders-muninn-builders), [the death map](#death-map-muninn-deathmap), [the weekly world digest](#this-week-in-the-world) |
 
 Valheim writes all of them at each save (every 30 minutes and at shutdown), so everything
 read from the save is up to half an hour behind the game. Before 1.0 a world was one
@@ -3067,6 +3146,8 @@ Added here:
   tombstones, with the Völundr title.
 - **Find and stock:** chest, barrel, cart, ship and tombstone contents from the world save
   (the inventory layout worked out from a real save), with item names from the wiki.
+- **Bases and signs:** beds, workbenches, wards, crafting stations and chests grouped into
+  bases, named by their signs and bed owners; every sign's text, searchable.
 - **Death map:** every tombstone seen in a world save is recorded and mapped, with the
   worst spots.
 - **Weekly world digest:** the recap compares this week's world save with last week's:
