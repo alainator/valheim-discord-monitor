@@ -687,6 +687,58 @@ class HealthWatch:
 
 
 # ---------------------------------------------------------------------------
+# Lost crossplay lobby
+# ---------------------------------------------------------------------------
+class LobbyWatch:
+    """Notices when the server loses its PlayFab (crossplay) lobby and doesn't get a new one.
+    Valheim keeps running and saving, so it looks healthy, but nobody can join. A lost lobby
+    often comes back by itself (a new join code), so it waits `minutes` first; then it asks
+    for a restart if nobody is online (at most once an hour), or tells the admins."""
+
+    def __init__(self, cfg: dict, clock=time.time):
+        self.minutes = max(1, int(cfg.get("minutes", 10)))
+        self.restart = cfg.get("restart", True) is not False
+        self.clock = clock
+        self.lost_at: Optional[float] = None
+        self.detail = ""
+        self.told = False
+        self.last_restart = -1e12
+
+    def observe(self, ev) -> None:
+        if ev.kind == "lobby_lost":
+            if self.lost_at is None:
+                self.lost_at, self.detail, self.told = self.clock(), ev.extra.get("detail", ""), False
+        elif ev.kind in ("join_code", "server_online", "server_restart"):
+            self.lost_at = None                      # a new lobby, or a new server session
+
+    def check(self, online: int, can_restart: bool) -> Optional[tuple]:
+        """("restart" | "alert", text) once the lobby has been gone `minutes`, else None."""
+        if self.lost_at is None:
+            return None
+        now = self.clock()
+        gone = now - self.lost_at
+        if gone < self.minutes * 60:
+            return None
+        why = (f"The server lost its crossplay (PlayFab) lobby {gone / 60:.0f} minutes ago and hasn't got a "
+               f"new one, so nobody can join, although it's still running and saving."
+               + (f" Last log line: `{self.detail[:150]}`" if self.detail else ""))
+        if online == 0 and self.restart and can_restart and now - self.last_restart >= 3600:
+            self.last_restart, self.lost_at = now, None
+            return "restart", f"🔌 {why} Nobody is online, so it's restarting now."
+        if self.told:
+            return None
+        self.told = True
+        if online:
+            advice = (f"{online} player{'s are' if online != 1 else ' is'} still connected and can keep playing; "
+                      "restart when they're done (`/odin restart`).")
+        elif not (self.restart and can_restart):
+            advice = "Restart it to fix this (`/odin restart`, or on the host)."
+        else:
+            advice = "It was restarted for this less than an hour ago, so it's not restarting again by itself."
+        return "alert", f"🔌 {why} {advice}"
+
+
+# ---------------------------------------------------------------------------
 # Daily restart
 # ---------------------------------------------------------------------------
 class DailyRestart:
