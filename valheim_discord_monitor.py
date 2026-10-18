@@ -88,6 +88,9 @@ RE_SERVERNAME = re.compile(r"server \"(?P<server>[^\"]*)\"")
 # prints it. The code changes every time the server restarts.
 RE_JOINCODE = re.compile(r"join code (?P<code>\d+)(?: and IP (?P<ip>\d{1,3}(?:\.\d{1,3}){3}:\d+))?")
 RE_READY = re.compile(_TS + r"Game server connected")
+# The crossplay (PlayFab) lobby failing: the server may stay up, saving, while nobody can join.
+RE_LOBBY_LOST = re.compile(_TS + r"(?P<detail>.*?(?:create lobby failed|failed to create lobby|"
+                           r"lobbies exceeds the limit|UnregisterServer).*)", re.IGNORECASE)
 # Any line that sounds like a connection ending. Used only together with a connection id we
 # already paired with a character, so an unrelated line can't log anyone out.
 RE_GONE = re.compile(r"disconnect|lost|clos|dispos|timed? ?out|timeout|kick", re.IGNORECASE)
@@ -295,6 +298,11 @@ class ValheimLogParser:
                 self.s.down = True
                 yield Event("server_restart", None, {})
             self.s.server_count = 0
+            return
+
+        m = RE_LOBBY_LOST.search(line)
+        if m:
+            yield Event("lobby_lost", None, {"detail": m.group("detail").strip()[:200]})
             return
 
         # The join code rides on count lines, so note it without consuming the line.
@@ -1783,6 +1791,8 @@ def main():
         discord.on_posted = admin.react_to        # the bot reacts to some of Huginn's posts
 
     health = extras.HealthWatch(cfg.get("health") or {})
+    lw = cfg.get("lobby_watch", True)
+    lobby = extras.LobbyWatch({} if lw is True else lw) if lw is not False and isinstance(lw, (bool, dict)) else None
     daily = extras.DailyRestart(cfg["daily_restart"]) if (cfg.get("daily_restart") or {}).get("time") else None
     if daily and not (upd and upd.bot_dir):
         log.warning("daily_restart needs the updater link (updater.bot_dir, host/README.md); it's off")
@@ -1824,6 +1834,8 @@ def main():
             admin.on_logout(ev.player)
         elif admin and ev.kind == "version_mismatch" and ev.extra.get("platform_id"):
             admin.notify_version(ev.extra)
+        if lobby:
+            lobby.observe(ev)
         alert = health.observe(ev)
         if alert:
             log.warning("HEALTH %s", alert)
@@ -2029,6 +2041,18 @@ def main():
                                 admin.news("", embed)
                 except Exception as e:  # noqa: BLE001
                     log.warning("Server birthday check failed: %s", e)
+            if lobby and not offline:
+                action = lobby.check(count or 0, bool(upd and upd.bot_dir))
+                if action and action[0] == "restart":
+                    err = upd.request("restart")
+                    log.warning("Lost lobby: %s", err or "restart requested")
+                    if admin:
+                        admin.post_admin(f"🔌 The server lost its crossplay lobby, but the restart failed: {err}"
+                                         if err else action[1])
+                elif action:
+                    log.warning("Lost lobby: %s", action[1])
+                    if admin:
+                        admin.post_admin(action[1])
             if daily and daily.due(datetime.now().astimezone(), not offline and count == 0):
                 err = upd.request("restart")
                 log.info("Daily restart: %s", err or "requested (server empty)")

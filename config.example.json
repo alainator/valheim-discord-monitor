@@ -152,6 +152,7 @@
     "low_disk_gb": 10,
     "slow_save_seconds": 5
   },
+  "lobby_watch": { "minutes": 10, "restart": true },
   "source": {
     "type": "a2s",
     "host": "YOUR.SERVER.IP",

@@ -94,6 +94,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **A lost crossplay lobby is noticed:** when the server loses its PlayFab lobby and doesn't
+  get a new one, it keeps running and saving but nobody can join. After 10 minutes the
+  monitor restarts it if nobody's on (or tells the admins if someone is)
+  ([lost crossplay lobby](#lost-crossplay-lobby)).
 - **Wrong-password alerts:** when someone fails the server password 3 times in 10 minutes,
   the admin channel hears about it, with who it is (if the bot knows) and a Ban button. A
   linked player gets a DM saying where to find the password ([wrong passwords](#wrong-password-alerts)).
@@ -2449,6 +2453,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 | `/muninn bases` shows two bases where you have one | Its pieces are more than 40 m apart with nothing in between (a bed, a workbench, a chest…) | Nothing to fix; a workbench or chest in between joins them |
 | `/muninn bases` leaves out a place you built | Only a workbench is there (it's counted as a "lone workbench"), or it's never been saved | Add a bed, a ward, another station or 3 chests; or wait for the next save |
 | A base is "A base nobody's named" | No named house pin within 50 m on the cartography table, no bed owner, and its builders have never slept in a bed or left a tombstone | Put a house pin with a name on the map and record it at a cartography table |
+| Nobody can join, but the server shows as up and keeps saving | It lost its crossplay lobby and gave up (`create lobby failed` / `UnregisterServer` in the log) | Restart it; with `lobby_watch` on (the default) the monitor does that by itself after 10 minutes when nobody's on ([lost crossplay lobby](#lost-crossplay-lobby)) |
+| The monitor restarted the server for a lost lobby, but it was fine | The lobby came back without a new join code within `lobby_watch.minutes` | Raise `lobby_watch.minutes`, and please report it with the log lines around that time |
 | No wrong-password alert | Fewer than 3 tries in 10 minutes (`password_alerts`), one was already posted for that player this hour, or the server has no password | Check `admin_bot.password_alerts`; `docker compose logs valheim-discord-monitor \| grep wrong_password` shows each failed try |
 | A failed password doesn't show up as `EVENT wrong_password` at all | Valheim's log line differs from the one expected (`Peer … has wrong password`) | Please [open an issue](https://github.com/alainator/valheim-discord-monitor/issues) with the line from the Valheim log (search it for "password") |
 | No station alerts | It's the first check after updating (it only takes note), they're turned off (`admin_bot.station_alerts`), or `save_dir` or the stats database isn't set | Wait for the next save; check the config |
@@ -2820,6 +2826,31 @@ waiting update:
 - If people play right through the window, that day is skipped.
 - Times are in the container's time zone (`TZ`).
 - The admin channel is told each time.
+
+#### Lost crossplay lobby
+
+A crossplay server keeps a lobby at PlayFab, which hands out the join code. If the
+connection to PlayFab drops, the server normally makes a new lobby (and a new join code)
+within a minute or two. But sometimes PlayFab refuses ("the number of lobbies exceeds the
+limit"), and the server gives up: it **keeps running and saving the world, and looks
+healthy, but nobody can join** until it's restarted.
+
+The monitor watches the log for that (`create lobby failed`, `UnregisterServer`):
+- **It waits 10 minutes** for a new join code first, since a lost lobby usually comes back
+  by itself. One that does is never mentioned.
+- **Nobody online:** it restarts the server, like `/odin restart`, and tells the admin
+  channel why. At most once an hour, so a PlayFab outage can't cause a restart loop.
+- **Someone online:** they're still connected and can keep playing, but nobody new can
+  join. The admin channel is told once, so you can restart when they're done.
+- **Without the [host helper](host/README.md)** (no restarts from the monitor), it only
+  tells the admin channel.
+- **The new join code** comes with the restart: `/valheim join` shows it.
+
+```json
+"lobby_watch": { "minutes": 10, "restart": true }
+```
+`"restart": false` only tells the admins; `"lobby_watch": false` turns it off. Steam-only
+servers (no crossplay) never log these lines, so it does nothing there.
 
 ### Auto-updates and restarts from Discord
 
@@ -3193,6 +3224,7 @@ or run it in a terminal.
 | `admin_bot.titles.away_days` / `away_role` / `away_dm` | 14 / Óðr / false | The [away role](#title-roles) for linked players not seen for that long; `away_role: false` turns it off; `away_dm` sends one "come back" DM. |
 | `health.low_disk_gb` | 10 | Warn when the save disk has less free space than this. |
 | `health.slow_save_seconds` | 5 | Warn when a world save takes longer than this. |
+| `lobby_watch.minutes` / `restart` | 10 / true | When the crossplay lobby is lost and not back within `minutes`, restart if nobody's on (needs the host helper), else tell the admins ([lost crossplay lobby](#lost-crossplay-lobby)). `false` turns it off. |
 | `daily_restart.time` / `window_minutes` | — / 120 | Restart once a day in this window while nobody's on (needs the host helper). |
 | `admin_bot.world_settings.file` | `/valheim_home/world-settings.env` | The host's world settings file, as mounted in the container (read-only). |
 | `discord.embeds` | true | Coloured embed vs plain text. |
@@ -3400,6 +3432,8 @@ Added here:
   pieces and builders, portals, ships, tombstones, tames and the explored map.
 - **Explored map:** the explored map and pins shared on the cartography table, read from the
   world save and drawn with the bases and portals.
+- **Lost crossplay lobby:** notices when the server loses its PlayFab lobby for good (still
+  running, nobody can join) and restarts it when it's empty.
 - **Wrong-password alerts:** repeated failed passwords to the admin channel, with who it is
   and a DM to a linked player saying where to find the password.
 - **Stations:** what's in the smelters, kilns, fermenters and beehives, from the world save:
