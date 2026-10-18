@@ -2852,6 +2852,38 @@ The monitor watches the log for that (`create lobby failed`, `UnregisterServer`)
 `"restart": false` only tells the admins; `"lobby_watch": false` turns it off. Steam-only
 servers (no crossplay) never log these lines, so it does nothing there.
 
+**What the admin channel gets:**
+```
+🔌 The server lost its crossplay (PlayFab) lobby 11 minutes ago and hasn't got a new one,
+so nobody can join, although it's still running and saving. Last log line: `Create lobby
+failed: The number of lobbies exceeds the limit.` Nobody is online, so it's restarting now.
+```
+With players online it ends with "2 players are still connected and can keep playing;
+restart when they're done (`/odin restart`)." instead.
+
+**The timeline of a lost lobby:**
+
+| Time | What happens |
+|---|---|
+| 0 min | The log says the lobby failed. The monitor notes the time, quietly. |
+| 0–10 min | A new join code in the log means the lobby is back: nothing more happens. |
+| 10 min | Still no new lobby. Nobody online: restart, and the admins are told why. Someone online: the admins are told, once. |
+| After a restart | The server starts a fresh session with a new join code. If the lobby fails again within the hour, the admins are told instead of a second restart. |
+
+**Good to know:**
+- **It goes in the monitor's part of `config.json`** (next to `health` and
+  `daily_restart`), not under `admin_bot`. The alerts go through the admin bot, so without
+  it they're only in the monitor's log (`docker compose logs valheim-discord-monitor |
+  grep "Lost lobby"`).
+- **Repeated failures don't reset the clock:** 10 minutes after the first one, whatever
+  happens in between, unless a new join code shows up.
+- **Tell your friends the new code.** Joining by code needs the new one after a restart;
+  joining by IP address (on PC) works as before.
+- **Not yet seen on a real log:** the patterns come from a real incident report, but not
+  from the log lines themselves. If your server loses its lobby and the monitor doesn't
+  react within `minutes`, please [open an issue](https://github.com/alainator/valheim-discord-monitor/issues) with the log lines from around that
+  time (search for "lobby", "PlayFab" and "join code").
+
 ### Auto-updates and restarts from Discord
 
 For self-hosted servers with a cron-driven update script (`check_update.sh`, which
