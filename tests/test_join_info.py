@@ -50,6 +50,19 @@ class JoinCodeTest(unittest.TestCase):
             prime_live_state(live, LocalFileSource(path))
             self.assertIsNone(live.join_code)
 
+    def test_a_steam_reconnect_keeps_the_join_code(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "console.log")
+            with open(path, "w") as f:
+                f.write("09/28/2026 09:00:00: DungeonDB Start 19075\n"
+                        "09/28/2026 09:00:10: Game server connected\n"
+                        '09/28/2026 09:40:00: Player joined server "A" that has join code 222222, now 1 player(s)\n'
+                        "09/28/2026 10:00:00: Game server disconnected\n"
+                        "09/28/2026 10:00:20: Game server connected\n")
+            live = extras.LiveState()
+            prime_live_state(live, LocalFileSource(path))
+            self.assertEqual(live.join_code, "222222")
+
 
 class JoinEmbedTest(unittest.TestCase):
     def make_bot(self, d, join=None):

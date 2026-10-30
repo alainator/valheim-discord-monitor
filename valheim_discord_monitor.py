@@ -87,7 +87,11 @@ RE_SERVERNAME = re.compile(r"server \"(?P<server>[^\"]*)\"")
 # and on the "Session "…" with join code … and IP a.b.c.d:2456" line where the server
 # prints it. The code changes every time the server restarts.
 RE_JOINCODE = re.compile(r"join code (?P<code>\d+)(?: and IP (?P<ip>\d{1,3}(?:\.\d{1,3}){3}:\d+))?")
-RE_READY = re.compile(_TS + r"Game server connected")
+# The end of the line matters: the server also prints "Game server connected failed".
+RE_READY = re.compile(_TS + r"Game server connected\s*$")
+# Printed once per boot, before the first "Game server connected". The server also prints
+# "connected" whenever it gets back to Steam after a drop, with nobody disconnected.
+RE_BOOT = re.compile(_TS + r"DungeonDB Start")
 # The crossplay (PlayFab) lobby failing: the server may stay up, saving, while nobody can join.
 RE_LOBBY_LOST = re.compile(_TS + r"(?P<detail>.*?(?:create lobby failed|failed to create lobby|"
                            r"lobbies exceeds the limit|UnregisterServer).*)", re.IGNORECASE)
@@ -162,6 +166,7 @@ class ParserState:
     server_count: Optional[int] = None               # authoritative count from the server's own log lines
     down: bool = False                               # True after a shutdown, until the next boot
     join_code: Optional[str] = None                  # crossplay join code of this server session
+    ready: bool = False                              # True once this boot has connected to Steam
 
 
 class ValheimLogParser:
@@ -191,7 +196,8 @@ class ValheimLogParser:
         return {"online": s.online, "owner_to_name": s.owner_to_name, "dead": sorted(s.dead),
                 "pending_ids": s.pending_ids, "id_to_name": s.id_to_name, "id_to_steam": s.id_to_steam,
                 "id_to_platform": s.id_to_platform,
-                "server_count": s.server_count, "down": s.down, "join_code": s.join_code}
+                "server_count": s.server_count, "down": s.down, "join_code": s.join_code,
+                "ready": s.ready}
 
     def load_state(self, d: dict) -> None:
         try:
@@ -202,7 +208,9 @@ class ValheimLogParser:
                                  id_to_steam=dict(d.get("id_to_steam") or {}),
                                  id_to_platform=dict(d.get("id_to_platform") or {}),
                                  server_count=d.get("server_count"), down=bool(d.get("down")),
-                                 join_code=d.get("join_code"))
+                                 join_code=d.get("join_code"),
+                                 # State saved before this field existed: assume it's running.
+                                 ready=bool(d.get("ready", not d.get("down"))))
         except (TypeError, ValueError) as e:
             log.warning("Ignoring the saved parser state: %s", e)
             self.s = ParserState()
@@ -476,12 +484,19 @@ class ValheimLogParser:
                     yield self._logout(name)
                     return
 
+        if RE_BOOT.search(line):
+            self.s.ready = False
+            return
+
         if RE_READY.search(line):
+            # Back on Steam after a drop: the same server session, with everyone still on it.
+            if self.s.ready and not self.s.down:
+                return
             # A new server session is starting.
             had_players = bool(self.s.online)
             was_down = self.s.down
             yield from self._flush()          # close anyone still tracked (stale, not posted)
-            self.s = ParserState()
+            self.s = ParserState(ready=True)
             # If players were still online and we never saw the shutdown, note the restart
             # now; then always announce the server is back up.
             if had_players and not was_down:
@@ -1350,6 +1365,7 @@ def prime_live_state(live, source) -> None:
     last_ts = boot = shutdown = save = backup = None
     raid = code = None
     day = None
+    ready = False
     try:
         with open(source.path, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -1358,10 +1374,13 @@ def prime_live_state(live, source) -> None:
                     last_ts = ts
                 if (m := RE_VERSION.search(line)):
                     live.version = m.group("version")
+                elif RE_BOOT.search(line):
+                    ready = False
                 elif RE_READY.search(line):
-                    boot, code = last_ts, None       # a new session gets a new join code
+                    if not ready:                    # else it's only back on Steam after a drop
+                        boot, code, ready = last_ts, None, True    # a new session gets a new join code
                 elif RE_SHUTDOWN.search(line):
-                    shutdown, code = last_ts, None   # the old join code dies with the session
+                    shutdown, code, ready = last_ts, None, False   # the old join code dies with the session
                 elif RE_SAVED.search(line):
                     save = last_ts
                 elif RE_BACKUP.search(line):
