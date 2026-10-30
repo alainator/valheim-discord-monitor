@@ -46,8 +46,8 @@ TEMPLATE = [
           ["builds", "building", "bases", "base-tours", "creations"], set()),
          ("bots", "text", "🪶┃muninns-roost",
           "Ask Muninn: /muninn stats, top, titles, online, when, compare, uptime, bosses, honors, progress, "
-          "builders, deathmap, find, stock, bases, signs, explored, stations, portals, tombstones, ships and tames. "
-          "/valheim join, link, notify, map, progress, patch-notes and wiki work in any channel.",
+          "builders, deathmap, find, stock, bases, signs, explored, stations, portals, tombstones, ships, tames "
+          "and valor. /valheim join, link, notify, map, progress, patch-notes and wiki work in any channel.",
           ["bot-commands", "bots", "commands", "bot", "bot-spam", "botspam"], set()),
      ]},
     {"key": "wilds", "name": "⚔️ The Wilds", "aliases": ["Gaming", "Valheim", "Game", "Games"],
@@ -87,6 +87,9 @@ TEMPLATE = [
 # wrote themselves are never touched). Add the old text here whenever a default topic changes.
 OLD_TOPICS = {
     "bots": ("Ask Muninn: /valheim stats, top, titles, link, notify, map and more.",
+             "Ask Muninn: /muninn stats, top, titles, online, when, compare, uptime, bosses, honors, progress, "
+             "builders, deathmap, find, stock, bases, signs, explored, stations, portals, tombstones, ships and tames. "
+             "/valheim join, link, notify, map, progress, patch-notes and wiki work in any channel.",
              "Ask Muninn: /muninn stats, top, titles and online. /valheim join, link, notify and map "
              "work in any channel.",
              "Ask Muninn: /muninn stats, top, titles, online, compare, uptime, bosses and honors. "

@@ -191,6 +191,41 @@ def init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (owner, died, x, z)
         );
 
+        -- Odin's Wager: Valor is a fake currency, and these rows are bets, not log data
+        CREATE TABLE IF NOT EXISTS valor (
+            user_id     TEXT PRIMARY KEY,            -- Discord user
+            balance     INTEGER NOT NULL,
+            wins        INTEGER NOT NULL DEFAULT 0,
+            losses      INTEGER NOT NULL DEFAULT 0,
+            biggest_win INTEGER NOT NULL DEFAULT 0,
+            last_pity   INTEGER NOT NULL DEFAULT 0,  -- real epoch of the last gift to the broke
+            updated_at  INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS wager_rounds (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            opened_at   INTEGER NOT NULL,            -- real epoch
+            closes_at   INTEGER NOT NULL,            -- when betting ends
+            markets     TEXT NOT NULL,               -- JSON: the picks, odds and line
+            first_death TEXT,
+            deaths      INTEGER NOT NULL DEFAULT 0,
+            status      TEXT NOT NULL DEFAULT 'open', -- open | done
+            closed_shown INTEGER NOT NULL DEFAULT 0, -- the post has greyed out its buttons
+            finished_at INTEGER,
+            channel_id  TEXT,
+            message_id  TEXT
+        );
+        CREATE TABLE IF NOT EXISTS wager_bets (
+            round_id  INTEGER NOT NULL,
+            user_id   TEXT NOT NULL,
+            market    TEXT NOT NULL,                 -- first | total
+            pick      TEXT NOT NULL,
+            stake     INTEGER NOT NULL,
+            odds      REAL NOT NULL,                 -- fixed when the bet was placed
+            payout    INTEGER,                       -- NULL until settled
+            placed_at INTEGER NOT NULL,
+            PRIMARY KEY (round_id, user_id, market)
+        );
+
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT

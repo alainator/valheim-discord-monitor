@@ -38,7 +38,7 @@ class BotCommandsTest(unittest.TestCase):
             "valheim": sorted(["join", "map", "link", "unlink", "notify", "request-access", "progress",
                               "patch-notes", "wiki"]),
             "muninn": sorted(["stats", "top", "titles", "online", "compare", "uptime", "bosses", "honors",
-                              "progress", "portals", "tombstones", "ships", "tames",
+                              "progress", "portals", "tombstones", "ships", "tames", "valor",
                               "when", "builders", "deathmap", "find", "stock", "bases", "signs", "explored", "stations"]),
             "warcouncil": ["bounties", "plan"],
             "odin": sorted(["permit", "ban", "unban", "unpermit", "lists", "settings", "modifier", "preset",

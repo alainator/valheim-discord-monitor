@@ -645,7 +645,7 @@ class Discord:
             return
         fields = _SafeDict({**ev.extra, "player": _escape_md(ev.player),
                             "server": server_name or ev.extra.get("server", "the server")})
-        text = self.messages[ev.kind].format_map(fields)
+        text = (ev.extra.get("heckle") or self.messages[ev.kind]).format_map(fields)
         emoji = self.EMOJI.get(ev.kind, "")
         if ev.kind in self.quiet_events and self.is_quiet():
             self.held.append(f"{emoji} {text}".strip())
@@ -1751,6 +1751,7 @@ def main():
         admin = build_admin_bot(cfg, server_name)
 
     import extras
+    import games
     import stats_db
     live = extras.LiveState()
     prime_live_state(live, source)
@@ -1933,6 +1934,8 @@ def main():
     stale_after = float(((cfg.get("admin_bot") or {}).get("status_channel") or {}).get("stale_after_seconds", 900))
     last_line_at = time.time()
     booted = False                         # saw a boot: until a count line, the server is empty
+    heckle_cfg = cfg.get("heckle") or {}
+    heckler = games.Heckler(heckle_cfg) if heckle_cfg.get("enabled") else None
 
     backoff = interval
     while True:
@@ -1958,7 +1961,11 @@ def main():
                         backups.copy_in_background()
                     if maint:
                         maint.observe(ev, len(parser.s.online))
+                    if heckler and ev.kind in ("login", "death"):
+                        heckler.observe(ev)
                     announce(ev)
+                    if admin and ev.kind in ("login", "death"):
+                        admin.notify_game(ev.kind, ev.player, list(parser.s.online))
                     # Track down/up so we can tell a lingering outage from a quick restart.
                     if ev.kind == "server_restart":
                         down_since, offline_posted = time.time(), False
