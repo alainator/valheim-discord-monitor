@@ -94,6 +94,10 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Odin's Wager and Odin's heckling, both optional:** bet fake Valor on who dies first and
+  how many die, with odds from your own death history ([Odin's Wager](#odins-wager)), and
+  let Odin roast streaks and quick deaths in the usual death post
+  ([Odin's heckling](#odins-heckling)). Both are off until you turn them on.
 - **A lost crossplay lobby is noticed:** when the server loses its PlayFab lobby and doesn't
   get a new one, it keeps running and saving but nobody can join. After 10 minutes the
   monitor restarts it if nobody's on (or tells the admins if someone is)
@@ -253,6 +257,9 @@ And without the bot:
 - **Bounties:** admins post challenges with `/odin bounty` ("Kill Moder without dying");
   members press **🎯 I did it**, an admin confirms, and the winner is **Skadi** for a week
   ([bounties](#bounties)).
+- **Games for your group:** **Odin's Wager** takes bets in fake Valor on each session's
+  deaths ([Odin's Wager](#odins-wager)), and **Odin's heckling** roasts the deaths worth
+  roasting ([Odin's heckling](#odins-heckling)). Each has its own switch, off by default.
 - **A calmer, friendlier feed:** **quiet hours** hold joins and leaves overnight and post
   them as one summary in the morning, a **digest** groups a burst of joins into one post,
   and milestones now include **play streaks** ("5-day streak 🔥") and **anniversaries**
@@ -336,6 +343,7 @@ And without the bot:
   [Players & community](#players--community) · [Boss progress](#boss-progress) ·
   [Portals & tombstones](#portals-and-tombstones) · [Ships & tames](#ships-and-tames) · [Builders](#builders-muninn-builders) · [Find & stock](#find-and-stock-muninn-find-muninn-stock) · [Bases & signs](#bases-and-signs-muninn-bases-muninn-signs) · [Explored map](#explored-map-muninn-explored) · [Stations](#stations-muninn-stations) · [Death map](#death-map-muninn-deathmap) ·
   [Achievement progress](#achievement-progress-valheim-progress) · [Patch notes](#valheim-patch-notes) · [Wiki lookup](#wiki-lookup-valheim-wiki) · [When people play](#when-people-play-muninn-when) · [Honors](#honors) · [Bounties](#bounties) · [Join-to-create voice](#join-to-create-voice-channels) ·
+  [Odin's Wager](#odins-wager) · [Odin's heckling](#odins-heckling) ·
   [Title roles](#title-roles) ·
   [Roles & names](#roles--names) ·
   [Testing](#testing-it) ·
@@ -777,7 +785,7 @@ The commands are in four groups, one per place they're used:
 | Group | Commands | Where |
 |---|---|---|
 | **`/valheim`** | `join`, `map`, `link`, `unlink`, `notify`, `request-access`, `progress`, `patch-notes`, `wiki` | Anywhere: the replies are private |
-| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `find`, `stock`, `bases`, `signs`, `explored`, `stations`, `portals`, `tombstones`, `ships`, `tames` | #🪶┃muninns-roost |
+| **`/muninn`** | `stats`, `top`, `titles`, `online`, `when`, `compare`, `uptime`, `bosses`, `honors`, `progress`, `builders`, `deathmap`, `find`, `stock`, `bases`, `signs`, `explored`, `stations`, `portals`, `tombstones`, `ships`, `tames`, `valor` | #🪶┃muninns-roost |
 | **`/warcouncil`** | `plan`, `bounties` | #🗺️┃war-council and its game-night threads |
 | **`/odin`** | `permit`, `ban`, `unban`, `unpermit`, `lists`, `settings`, `modifier`, `preset`, `setkey`, `backups`, `update-check`, `restart`, `restart-cancel`, `setup`, `announce`, `bounty`, `bounty-close`, `restore`, `rules`, `progress-remove`, `honor give/take/create/delete/vote` | Admins, anywhere: replies are private |
 
@@ -855,6 +863,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn tombstones` | Anyone | Every tombstone nobody has emptied yet: whose, the day they died, and where ([tombstones](#portals-and-tombstones)) | `save_dir` |
 | `/muninn honors [member]` | Anyone | Every [honor](#honors) and who holds it, or one member's honors | Stats database |
 | `/muninn progress [only]` | Anyone | The [progress board](#the-progress-board-muninn-progress): achievement counts from `/valheim progress` uploads, for everything or one list | Stats database |
+| `/muninn valor` | Anyone | Who has the most Valor, and how much you have ([Odin's Wager](#odins-wager)) | Stats database, `admin_bot.wager.enabled` |
 | `/muninn uptime` | Anyone | Share of time the server was up this week, the last 7 and 30 days, with restarts and downtime | Stats database |
 | `/muninn titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
 | `/valheim notify <when> [player] [players]` | Anyone | DM me when the first player joins an empty server, when `players` are online (`crowd`), or when a given character joins; `off` / `list` | Stats database |
@@ -2103,6 +2112,62 @@ Admins post a challenge; whoever does it gets the glory and a role for a week.
 - Config (all optional): `"bounties": {"channel_id": "…", "role": "Skadi", "role_days": 7}`.
   `"role": false` gives no role.
 
+### Odin's Wager
+
+A betting game on your own group's misfortune, in **Valor**, a fake currency that only
+buys bragging rights. It's off by default:
+`"admin_bot": {"wager": {"enabled": true}}`. It needs the stats database.
+
+1. **A round opens** when the first player arrives: a post in #🪶┃muninns-roost (or
+   `wager.channel_id`) with a button for each pick.
+2. **Press a pick** and choose how much, privately. Everyone starts with 100 Valor.
+3. **Betting closes** after 15 minutes, or at the first death, so nobody can bet on
+   something that's already happened.
+4. **It pays out:** who-dies-first as soon as someone dies, and the total once the server
+   has been empty for 15 minutes.
+
+```
+🎲 Odin's Wager · round 12
+Who dies first?
+💀 Ingrid · pays 1.9×
+💀 Bjorn · pays 3.2×
+🕊️ Nobody dies · pays 4.8×
+
+Total deaths this session: over or under 2.5 · pays 1.9×
+```
+
+- **The two bets:** who dies first, and over or under on the session's deaths. You can
+  place one of each per round.
+- **Odds** come from the last 30 days of your own log: whoever dies most pays least, and
+  the line is the median day's deaths. They're fixed when you bet.
+- **Your own death:** nobody can bet on their own character dying, once linked with
+  `/valheim link`.
+- **Going broke:** someone below the smallest stake gets a gift from Odin, at most once a
+  day, so they can keep playing.
+- `/muninn valor` shows the leaderboard and your balance.
+
+Options, all under `admin_bot.wager`: see [Options](#options).
+
+### Odin's heckling
+
+Odin roasts the deaths worth roasting, in place of the usual death post, so it never adds
+a post to the feed. It only needs log mode, not the bot. It's off by default:
+`"heckle": {"enabled": true}`.
+
+| When | Example |
+|---|---|
+| Two or more deaths in 10 minutes | "Ingrid has died 3 times in 4 minutes. Odin requests a pattern change." |
+| Dead within 90 seconds of arriving or dying | "Bjorn lasted 40 seconds. A fine effort." |
+| Alive for 2 hours or more | "Odin raises his horn: 2.5 hours alive. Ingrid fell, but it was a good run." |
+| The day's first death | "First blood today, and it belongs to Bjorn." |
+| Any other death, 35% of the time | "Bjorn has been reassigned to the ground." |
+
+- **Your own jokes:** `"heckle": {"enabled": true, "lines": {"any": ["{player} fell over."]}}`
+  replaces a list. The lists are `first`, `streak`, `quick`, `survivor` and `any`, and they
+  can use `{player}`, `{streak}`, `{minutes}`, `{seconds}` and `{hours}`.
+- **Other deaths** use your normal `discord.messages.death` text.
+- Streaks reset when the monitor restarts.
+
 ### Achievement progress: `/valheim progress`
 
 Valheim's achievements ("craft every item", "kill every creature", "catch every fish", "die
@@ -2438,6 +2503,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| No round of Odin's Wager opens | It's off, a round started less than `gap_hours` ago, or the database is off | Set `admin_bot.wager.enabled`; rounds open when someone arrives |
+| `/muninn valor` says it's turned off | `admin_bot.wager.enabled` isn't set | Turn it on and restart the monitor |
 | The server's birthday came on the wrong day, or not at all | It counts from the first visit in the stats database, which can be later than the server's real start; and it needs `milestone` in `events` | Load older logs with `--backfill` ([catching up](#catching-up-on-old-logs)) so the first visit is right |
 | ☀️ Day says "not known yet" | No world save found under `save_dir` (and nobody has slept since the start) | Check `save_dir` points at the folder holding `worlds_local`; with several worlds, set `bosses.world` |
 | ☀️ Day is behind the game by a day | The save is up to 30 minutes old | It catches up at the next save or the next sleep |
@@ -3239,6 +3306,17 @@ or run it in a terminal.
 | `admin_bot.stat_channels.categories` | — | Category names for `split`: `{"watch": …, "saga": …, "hall": …}`. |
 | `admin_bot.stat_channels.category` | 📊 Valheim | Category name for `single`. |
 | `admin_bot.owner_role` | — | `true` (or a role name): an "Odin" role for the Discord server's owner. |
+| `admin_bot.wager.enabled` | false | Turn on [Odin's Wager](#odins-wager). |
+| `admin_bot.wager.channel_id` | #muninns-roost | Where rounds are posted. |
+| `admin_bot.wager.start_valor` / `pity_valor` | 100 / 25 | What a new player starts with, and the daily gift to someone who's broke. |
+| `admin_bot.wager.stakes` | 10, 25, 50, 100 | The bet sizes offered (up to 4), plus all-in. |
+| `admin_bot.wager.bet_minutes` | 15 | How long betting stays open. |
+| `admin_bot.wager.quiet_minutes` / `max_hours` | 15 / 12 | Settle a round once the server's been empty this long, or after this many hours. |
+| `admin_bot.wager.gap_hours` | 4 | The least time between round starts. |
+| `heckle.enabled` | false | Turn on [Odin's heckling](#odins-heckling). |
+| `heckle.chance` | 0.35 | How often an ordinary death gets a roast. |
+| `heckle.streak_minutes` / `quick_seconds` / `survivor_hours` | 10 / 90 / 2 | What counts as a streak, a quick death and a long run. |
+| `heckle.lines` | — | Your own roasts, by list ([heckling](#odins-heckling)). |
 | `admin_bot.lfg.reminder_minutes` | 15 | Ping game-night signups this long before the start. |
 | `admin_bot.lfg.discord_event` | false | Also create a Discord Event for each plan (needs Manage Events). |
 | `admin_bot.bosses.enabled` / `announce` | true / true | [Boss progress](#boss-progress) from the world save; `announce` posts each new kill. |
@@ -3420,6 +3498,7 @@ Added here:
   filled in from the existing log at start-up.
 - **`/odin setup`:** organises a Discord server into themed channels, with preview and
   undo.
+- **Odin's Wager and Odin's heckling:** optional games built on the log.
 - **`/valheim join`:** the current join code (tracked across restarts), address and how
   to connect.
 - **Extras:** raid alerts, version-mismatch alerts, session summaries, first-visit

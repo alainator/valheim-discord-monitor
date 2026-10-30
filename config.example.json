@@ -9,6 +9,7 @@
     "server_online",
     "server_offline"
   ],
+  "heckle": { "enabled": false },
   "log_archive": {
     "enabled": true,
     "keep_days": 0
@@ -80,6 +81,7 @@
     "password_alerts": { "after": 3, "minutes": 10 },
     "voice_lobby": false,
     "bounties": { "role": "Skadi", "role_days": 7 },
+    "wager": { "enabled": false },
     "stat_channels": {
       "enabled": false
     },

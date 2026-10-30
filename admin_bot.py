@@ -56,7 +56,7 @@ COMMAND_PLACES = {"stats": "bots", "top": "bots", "titles": "bots", "online": "b
                   "tombstones": "bots", "ships": "bots", "tames": "bots", "when": "bots", "builders": "bots", "deathmap": "bots", "find": "bots",
                   "stock": "bots", "bases": "bots", "signs": "bots", "explored": "bots", "stations": "bots",
                   "plan": "plans",
-                  "bounties": "plans"}
+                  "bounties": "plans", "valor": "bots"}
 # A pinned guide to each command group, in the channel it belongs to (from /odin setup).
 GUIDES = [
     ("valheim", "welcome", "🚪 Getting into the game: /valheim",
@@ -564,6 +564,20 @@ class AdminBot:
         self.bounty_role_name = role.strip() if isinstance(role, str) and role.strip() else None
         self.bounty_role_days = float(bc.get("role_days", 7))
         self._bounty_claims: dict = {}        # (bounty id, user id) -> when they pressed "I did it"
+        # Odin's Wager: bets in fake Valor on who dies first and how many die. Off by default.
+        wc = cfg.get("wager") or {}
+        self.wager_enabled = bool(wc.get("enabled", False))
+        ch = str(wc.get("channel_id", ""))
+        self.wager_channel = int(ch) if ch.isdigit() else None
+        self.wager_start = int(wc.get("start_valor", 100))
+        self.wager_stakes = [int(x) for x in wc.get("stakes", [10, 25, 50, 100])][:4]
+        self.wager_bet_minutes = float(wc.get("bet_minutes", 15))
+        self.wager_gap_hours = float(wc.get("gap_hours", 4))
+        self.wager_quiet_minutes = float(wc.get("quiet_minutes", 15))
+        self.wager_max_hours = float(wc.get("max_hours", 12))
+        self.wager_pity = int(wc.get("pity_valor", 25))
+        self._game_count: Optional[int] = None  # players on the server, from set_status
+        self._empty_since: Optional[float] = None
         cc = cfg.get("command_channels", True)
         self.command_channels_on = cc is not False
         self.command_channel_ids = {k: int(v) for k, v in cc.items() if str(v).isdigit()} \
@@ -653,6 +667,13 @@ class AdminBot:
         self.last_notice[pid] = now
         fut = asyncio.run_coroutine_threadsafe(self._post_refused(name, pid), self.loop)
         fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot post failed: %s", f.exception()))
+
+    def notify_game(self, kind: str, player: str, online: list) -> None:
+        """A login or death for Odin's Wager (called from the monitor's thread)."""
+        if not (self.wager_enabled and self.db_path and self.loop and self.client and self.ready.is_set()):
+            return
+        fut = asyncio.run_coroutine_threadsafe(self._wager_event(kind, player, online), self.loop)
+        fut.add_done_callback(lambda f: f.exception() and log.warning("admin_bot wager failed: %s", f.exception()))
 
     def notify_wrong_password(self, pid: str, now: Optional[float] = None) -> bool:
         """A failed password from `pid` (called from the monitor's thread). Tells the admins
@@ -931,6 +952,7 @@ class AdminBot:
 
     def set_status(self, offline: bool, count: Optional[int]) -> None:
         """Thread-safe: record the server's state; the bot renames the channel when allowed."""
+        self._game_count = 0 if offline else count
         if self.status:
             self.status.set_state(offline, count)
 
@@ -1418,7 +1440,7 @@ class AdminBot:
         import community
         while True:
             await asyncio.sleep(30)
-            for job in (self._resolve_polls, self._tidy_notices, self._bounty_tick):
+            for job in (self._resolve_polls, self._tidy_notices, self._bounty_tick, self._wager_tick):
                 try:
                     await job()
                 except Exception as e:  # noqa: BLE001
@@ -2489,6 +2511,12 @@ class AdminBot:
         if action == "bclaim":                   # "I did it" on a bounty: anyone
             await self._on_bounty_claim(it, pid)
             return
+        if action == "wbet":                     # a pick on Odin's Wager: anyone
+            await self._on_wager_pick(it, pid)
+            return
+        if action == "wstake":                   # how much to bet on that pick
+            await self._on_wager_stake(it, pid)
+            return
         if not self._is_admin(it.user):
             await it.response.send_message("Only the server admins can do that.", ephemeral=True)
             return
@@ -2900,6 +2928,160 @@ class AdminBot:
             return
         self._voice_temps.discard(ch.id)
         self._voice_save()
+
+    # -- Odin's Wager ------------------------------------------------------------
+    def _wager_view(self, r: dict, disabled: bool = False):
+        import discord
+        import games
+        view = discord.ui.View(timeout=None)
+        for i, option in enumerate(r["markets"][games.FIRST]):
+            view.add_item(discord.ui.Button(
+                label=f"{games.pick_label(option['pick'])} · {option['odds']}×"[:80],
+                style=discord.ButtonStyle.secondary, disabled=disabled, row=i // 5,
+                custom_id=f"{BTN_PREFIX}:wbet:{r['id']}-{games.FIRST}-{i}"))
+        line = r["markets"][games.TOTAL]["line"]
+        for i, name in ((games.OVER, "Over"), (games.UNDER, "Under")):
+            view.add_item(discord.ui.Button(
+                label=f"{name} {line}", style=discord.ButtonStyle.primary, disabled=disabled, row=2,
+                custom_id=f"{BTN_PREFIX}:wbet:{r['id']}-{games.TOTAL}-{i}"))
+        return view
+
+    async def _wager_target(self):
+        """Where rounds go: wager.channel_id, else #muninns-roost from /odin setup, else the
+        admin channel."""
+        for cid in (self.wager_channel, self._meta("layout:ch:bots"), self.channel_id):
+            if cid and str(cid).isdigit():
+                try:
+                    return self.client.get_channel(int(cid)) or await self.client.fetch_channel(int(cid))
+                except Exception:  # noqa: BLE001  (deleted, or no access)
+                    pass
+        return None
+
+    async def _wager_message(self, r: dict):
+        if not r.get("message_id"):
+            return None
+        try:
+            channel = self.client.get_channel(int(r["channel_id"])) or await self.client.fetch_channel(int(r["channel_id"]))
+            return channel, channel.get_partial_message(int(r["message_id"]))
+        except Exception as e:  # noqa: BLE001
+            log.info("admin_bot: couldn't find wager round #%s's post: %s", r["id"], e)
+            return None
+
+    async def _wager_refresh(self, round_id: int) -> None:
+        """Redraw a round's post: the running total of bets, and the buttons once closed."""
+        import discord
+        import games
+        r = games.get_round(self.db, round_id)
+        found = await self._wager_message(r) if r else None
+        if not found:
+            return
+        open_now = games.betting_open(r)
+        try:
+            await found[1].edit(embed=discord.Embed.from_dict(
+                games.render_round(r, games.round_bets(self.db, round_id), open_now)),
+                view=self._wager_view(r, disabled=not open_now))
+        except Exception as e:  # noqa: BLE001
+            log.info("admin_bot: couldn't update wager round #%s: %s", round_id, e)
+
+    async def _wager_event(self, kind: str, player: str, online: list) -> None:
+        import discord
+        import games
+        now = time.time()
+        r = games.current_round(self.db)
+        if kind == "login":
+            if r or now - games.last_opened(self.db) < self.wager_gap_hours * 3600:
+                return
+            channel = await self._wager_target()
+            if not channel:
+                log.info("admin_bot: nowhere to post Odin's Wager; skipping the round")
+                return
+            markets = games.build_markets(self.db, online or [player])
+            rid = games.open_round(self.db, markets, int(now + self.wager_bet_minutes * 60))
+            r = games.get_round(self.db, rid)
+            msg = await channel.send(embed=discord.Embed.from_dict(games.render_round(r, [], True)),
+                                     view=self._wager_view(r), allowed_mentions=discord.AllowedMentions.none())
+            games.set_round_message(self.db, rid, channel.id, msg.id)
+        elif kind == "death" and r:
+            settled = games.record_death(self.db, r["id"], player)
+            if settled is None:
+                return
+            await self._wager_refresh(r["id"])
+            found = await self._wager_message(r)
+            if found and settled:                # only worth a post if someone had a bet on it
+                await found[0].send(games.render_first_blood(player, settled),
+                                    allowed_mentions=discord.AllowedMentions.none())
+
+    async def _wager_tick(self) -> None:
+        """Close the betting when its time is up, and settle a round once the server has
+        been empty for a while, or after max_hours whatever happens."""
+        import discord
+        import games
+        if not (self.wager_enabled and self.db_path):
+            return
+        now = time.time()
+        self._empty_since = (self._empty_since or now) if self._game_count == 0 else None
+        r = games.current_round(self.db)
+        if not r:
+            return
+        if not r["closed_shown"] and now >= r["closes_at"]:
+            await self._wager_refresh(r["id"])
+            games.mark_closed_shown(self.db, r["id"])
+        quiet = self._empty_since and now - self._empty_since >= self.wager_quiet_minutes * 60
+        if not quiet and now - r["opened_at"] < self.wager_max_hours * 3600:
+            return
+        result = games.finish_round(self.db, r["id"])
+        await self._wager_refresh(r["id"])
+        found = await self._wager_message(r)
+        if result and result["bets"] and found:
+            await found[0].send(embed=discord.Embed.from_dict(games.render_result(result)),
+                                allowed_mentions=discord.AllowedMentions.none())
+
+    @staticmethod
+    def _wager_args(arg: str) -> Optional[tuple]:
+        parts = arg.split("-")
+        return tuple(parts) if parts[0].isdigit() and all(p.isdigit() for p in parts[2:]) else None
+
+    async def _on_wager_pick(self, it, arg: str) -> None:
+        """A pick was pressed: ask how much, privately."""
+        import discord
+        import games
+        args = self._wager_args(arg)
+        r = games.get_round(self.db, int(args[0])) if self.db_path and args else None
+        if not self.wager_enabled or not games.betting_open(r):
+            await it.response.send_message("Betting has closed on this round.", ephemeral=True)
+            return
+        picked = games.pick_of(r, args[1], int(args[2]))
+        if not picked:
+            await it.response.send_message("That bet isn't on the board.", ephemeral=True)
+            return
+        floor = min(self.wager_stakes or [1])
+        gift = games.pity(self.db, it.user.id, floor, self.wager_pity)
+        balance = games.account(self.db, it.user.id, self.wager_start)["balance"]
+        view = discord.ui.View(timeout=None)
+        for stake in [s for s in self.wager_stakes if s <= balance] + [0]:
+            view.add_item(discord.ui.Button(
+                label=f"{stake} Valor" if stake else f"All in ({balance})",
+                style=discord.ButtonStyle.danger if not stake else discord.ButtonStyle.secondary,
+                custom_id=f"{BTN_PREFIX}:wstake:{arg}-{stake}"))
+        text = (f"**{games.pick_label(picked[0]).capitalize()}** pays **{picked[1]}×**. You have **{balance}** Valor.")
+        if gift:
+            text = f"Odin takes pity on you: **+{gift}** Valor.\n{text}"
+        await it.response.send_message(text, view=view, ephemeral=True)
+
+    async def _on_wager_stake(self, it, arg: str) -> None:
+        import community
+        import games
+        args = self._wager_args(arg)
+        if not (self.db_path and self.wager_enabled and args and len(args) == 4):
+            await it.response.send_message("That bet has gone.", ephemeral=True)
+            return
+        own = tuple(community.linked_players(self.db, it.user.id))
+        ok, detail = games.place_bet(self.db, int(args[0]), it.user.id, args[1], int(args[2]), int(args[3]),
+                                     own, self.wager_start)
+        text = f"🪙 Bet placed: **{detail}** Valor. Odin has noted it." if ok else detail
+        await it.response.edit_message(content=text, view=None)
+        if ok:
+            await self._wager_refresh(int(args[0]))
 
     # -- bounties ----------------------------------------------------------------
     def _bounty_view(self, bounty_id: int, disabled: bool = False):
@@ -3607,6 +3789,19 @@ class AdminBot:
                 return
             await it.followup.send(embed=discord.Embed.from_dict(
                 world_objects.render_tames(found["tames"], bot.server_name)),
+                allowed_mentions=discord.AllowedMentions.none())
+
+        @muninn.command(name="valor", description="Odin's Wager: who has the most Valor, and how much you have")
+        async def valor(it: discord.Interaction):
+            import games
+            if not await need_db(it):
+                return
+            if not bot.wager_enabled:
+                await it.response.send_message("Odin's Wager is turned off on this server.", ephemeral=True)
+                return
+            you = games.account(bot.db, it.user.id, bot.wager_start)
+            await it.response.send_message(
+                embed=discord.Embed.from_dict(games.render_leaderboard(games.leaderboard(bot.db), you)),
                 allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="uptime", description="How much the server was up: this week, 30 days, restarts")
