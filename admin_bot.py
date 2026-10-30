@@ -3800,8 +3800,9 @@ class AdminBot:
                 await it.response.send_message("Odin's Wager is turned off on this server.", ephemeral=True)
                 return
             you = games.account(bot.db, it.user.id, bot.wager_start)
+            how = games.render_how_to_bet(games.current_round(bot.db), it.guild_id)
             await it.response.send_message(
-                embed=discord.Embed.from_dict(games.render_leaderboard(games.leaderboard(bot.db), you)),
+                embed=discord.Embed.from_dict(games.render_leaderboard(games.leaderboard(bot.db), you, how)),
                 allowed_mentions=discord.AllowedMentions.none())
 
         @muninn.command(name="uptime", description="How much the server was up: this week, 30 days, restarts")

@@ -355,11 +355,25 @@ def render_result(result: dict) -> dict:
             "color": 0xF1C40F}
 
 
-def render_leaderboard(rows: list, you: Optional[dict] = None) -> dict:
+def render_how_to_bet(r: Optional[dict], guild_id=None, now: Optional[float] = None) -> str:
+    """How betting works, and what's happening with the current round if there is one."""
+    how = ("**How to bet:** a round opens when someone joins the server. Press a pick on its "
+           "post, then choose your stake. There's no command.")
+    if not r:
+        return f"{how}\n🎲 No round right now."
+    if not betting_open(r, now):
+        return f"{how}\n🎲 Round {r['id']} is under way, and betting has closed."
+    where = (f"[Bet here](https://discord.com/channels/{guild_id}/{r['channel_id']}/{r['message_id']})"
+             if guild_id and r.get("message_id") else "Find its post to bet")
+    return f"{how}\n🎲 Round {r['id']} is open. {where}, closes <t:{r['closes_at']}:R>."
+
+
+def render_leaderboard(rows: list, you: Optional[dict] = None, how: str = "") -> dict:
     lines = [f"**{i}.** <@{r['user_id']}> · **{r['balance']}** Valor · {r['wins']}W {r['losses']}L"
              for i, r in enumerate(rows, 1)]
+    board = "\n".join(lines) or "Nobody has placed a bet yet."
     embed = {"title": "🪙 Valor", "color": 0xC27C0E,
-             "description": "\n".join(lines) or "Nobody has placed a bet yet."}
+             "description": f"{board}\n\n{how}" if how else board}
     if you:
         embed["footer"] = {"text": f"You: {you['balance']} Valor · best win {you['biggest_win']}"}
     return embed

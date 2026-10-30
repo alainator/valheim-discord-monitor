@@ -863,7 +863,7 @@ too. So test what members see with a friend or a second account: in #🍺┃mead
 | `/muninn tombstones` | Anyone | Every tombstone nobody has emptied yet: whose, the day they died, and where ([tombstones](#portals-and-tombstones)) | `save_dir` |
 | `/muninn honors [member]` | Anyone | Every [honor](#honors) and who holds it, or one member's honors | Stats database |
 | `/muninn progress [only]` | Anyone | The [progress board](#the-progress-board-muninn-progress): achievement counts from `/valheim progress` uploads, for everything or one list | Stats database |
-| `/muninn valor` | Anyone | Who has the most Valor, and how much you have ([Odin's Wager](#odins-wager)) | Stats database, `admin_bot.wager.enabled` |
+| `/muninn valor` | Anyone | Who has the most Valor, how much you have, how to bet, and the open round ([Odin's Wager](#odins-wager)) | Stats database, `admin_bot.wager.enabled` |
 | `/muninn uptime` | Anyone | Share of time the server was up this week, the last 7 and 30 days, with restarts and downtime | Stats database |
 | `/muninn titles [refresh]` | Anyone (`refresh`: admin) | Who holds each title role; `refresh` reassigns them now | [`titles`](#title-roles) |
 | `/valheim notify <when> [player] [players]` | Anyone | DM me when the first player joins an empty server, when `players` are online (`crowd`), or when a given character joins; `off` / `list` | Stats database |
@@ -2144,7 +2144,8 @@ Total deaths this session: over or under 2.5 · pays 1.9×
   `/valheim link`.
 - **Going broke:** someone below the smallest stake gets a gift from Odin, at most once a
   day, so they can keep playing.
-- `/muninn valor` shows the leaderboard and your balance.
+- `/muninn valor` shows the leaderboard, your balance, how to bet, and a link to the open
+  round if there is one. Betting itself has no command: it's all on the round's post.
 
 Options, all under `admin_bot.wager`: see [Options](#options).
 

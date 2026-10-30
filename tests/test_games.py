@@ -217,6 +217,30 @@ class WagerTest(unittest.TestCase):
         games.account(self.conn, 2)
         self.assertEqual(games.pity(self.conn, 2, 10, 25), 0)
 
+    def test_how_to_bet_with_no_round(self):
+        text = games.render_how_to_bet(None)
+        self.assertIn("How to bet", text)
+        self.assertIn("No round right now", text)
+
+    def test_how_to_bet_links_an_open_round(self):
+        rid = self.round()
+        games.set_round_message(self.conn, rid, 7, 8)
+        r = games.get_round(self.conn, rid)
+        text = games.render_how_to_bet(r, 5, now=1000)
+        self.assertIn("https://discord.com/channels/5/7/8", text)
+        self.assertIn(f"<t:{r['closes_at']}:R>", text)
+
+    def test_how_to_bet_when_betting_has_closed(self):
+        rid = self.round()
+        text = games.render_how_to_bet(games.get_round(self.conn, rid), 5, now=2000)
+        self.assertIn("betting has closed", text)
+        self.assertNotIn("Bet here", text)
+
+    def test_the_leaderboard_carries_the_note(self):
+        board = games.render_leaderboard([], None, "How to bet")["description"]
+        self.assertIn("Nobody has placed a bet yet", board)
+        self.assertIn("How to bet", board)
+
     def test_posts_render(self):
         rid = self.round()
         games.place_bet(self.conn, rid, 1, games.TOTAL, games.OVER, 10, now=1000)
