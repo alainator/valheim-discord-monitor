@@ -95,6 +95,11 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **Quick rejoins aren't posted:** a player who drops and is back within 3 minutes (a
+  dropped connection, a console restarting the game) no longer posts a leave and an
+  arrival; their session summary covers the whole visit. Leaves now post up to 3 minutes
+  late because of it; `discord.rejoin_grace_seconds` sets the window, `0` turns it off
+  ([quick rejoins](#quick-rejoins)).
 - **A crash is announced:** a server that dies without logging a shutdown (a crash, a
   kill, a frozen host) used to go quiet with no post. Now, once its log has been silent
   for `stale_after_seconds` (15 min), or can't be read for that long, Huginn posts that
@@ -360,7 +365,7 @@ And without the bot:
 - **Extras:** [Raids, summaries, milestones, recap](#extras-raids-summaries-milestones-recap-board-backups) ·
   [This week in the world](#this-week-in-the-world) ·
   [Streaks & the server's birthday](#streaks-anniversaries-and-the-servers-birthday) ·
-  [Status board](#status-board) · [Backup copies](#world-backup-copies) ·
+  [Status board](#status-board) · [Quick rejoins](#quick-rejoins) · [Backup copies](#world-backup-copies) ·
   [Restoring a backup](#restoring-a-backup-odin-restore) ·
   [Server health](#server-health) · [Outage alert](#outage-alert) ·
   [Auto-updates, restarts & world settings](#auto-updates-and-restarts-from-discord)
@@ -2527,6 +2532,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| A leave is posted a few minutes late | Leaves are held for `discord.rejoin_grace_seconds` in case the player comes straight back | Lower it, or `0` to post at once ([quick rejoins](#quick-rejoins)) |
+| A player dropped and rejoined but nothing was posted | That's the quick-rejoin window working | Set `discord.rejoin_grace_seconds` to `0` to see every drop |
 | "is offline" posted but the server was fine | Its log was silent, or unreadable, for `stale_after_seconds` (the log moved, the mount broke, or the feed failed) | The admin channel message and the monitor's log say which; fix the log path or raise `stale_after_seconds` |
 | A crash wasn't announced | `server_offline` isn't in `events`, or it was less than `stale_after_seconds` | Add it; the alert waits 15 minutes by default so a quick restart isn't reported |
 | No round of Odin's Wager opens | It's off, a round started less than `gap_hours` ago, or the database is off | Set `admin_bot.wager.enabled`; rounds open when someone arrives |
@@ -2672,6 +2679,17 @@ in: ⚔️ raids, 👋 welcomes, 🏆 milestones (birthdays too) and boss kills,
 
 **Session summaries and milestones only count sessions the monitor saw start.** Someone who
 was already online when the monitor started gets a plain leave message.
+
+#### Quick rejoins
+
+Crossplay players, consoles especially, often drop and come straight back. So each leave
+is held for `discord.rejoin_grace_seconds` (default 180): if the same player is back in
+that time, neither the leave nor the arrival is posted, nobody gets a "just joined" DM,
+and the session summary when they really leave covers the whole visit. A real leave is
+posted when the window ends, so up to 3 minutes late. A server shutdown posts the held
+leaves first. The stats database still records the drop as it happened. On one busy
+crossplay server, 70 of 326 returns over seven weeks came within 3 minutes, and none
+between 4 and 5. `0` posts every leave at once, as before.
 
 **Weekly recap timing:**
 ```json
@@ -3365,6 +3383,7 @@ or run it in a terminal.
 | `admin_bot.world_settings.file` | `/valheim_home/world-settings.env` | The host's world settings file, as mounted in the container (read-only). |
 | `discord.embeds` | true | Coloured embed vs plain text. |
 | `discord.show_player_count` | true | Footer with the current online count. |
+| `discord.rejoin_grace_seconds` | 180 | Hold each leave this long; a player back within it posts nothing ([quick rejoins](#quick-rejoins)). `0` posts leaves at once. |
 | `discord.quiet_hours` | — | `{"from": "23:00", "to": "08:00", "timezone": …, "events": […]}`: hold those posts and summarise them when it ends ([quiet hours](#quiet-hours-and-digests)). |
 | `discord.digest_seconds` | 0 | Group joins and leaves within this many seconds into one post. |
 | `admin_bot.announce_channel_id` | #runestone | The [rules channel](#the-rules-channel-runestone) for `/odin rules`, `/odin announce`, news and [patch notes](#valheim-patch-notes). |
@@ -3526,6 +3545,7 @@ Added here:
   undo.
 - **Odin's Wager and Odin's heckling:** optional games built on the log.
 - **Outage alert:** a crash or frozen host with no shutdown line is posted after 15 quiet minutes.
+- **Quick rejoins:** a drop and return within 3 minutes posts nothing; the summary covers the whole visit.
 - **`/valheim join`:** the current join code (tracked across restarts), address and how
   to connect.
 - **Extras:** raid alerts, version-mismatch alerts, session summaries, first-visit

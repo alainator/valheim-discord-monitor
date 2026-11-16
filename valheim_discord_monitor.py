@@ -1820,6 +1820,8 @@ def main():
         discord.on_posted = admin.react_to        # the bot reacts to some of Huginn's posts
 
     health = extras.HealthWatch(cfg.get("health") or {})
+    rejoin_grace = extras.RejoinGrace(float((cfg.get("discord") or {}).get("rejoin_grace_seconds", 180)),
+                                      slack=interval)
     lw = cfg.get("lobby_watch", True)
     lobby = extras.LobbyWatch({} if lw is True else lw) if lw is not False and isinstance(lw, (bool, dict)) else None
     daily = extras.DailyRestart(cfg["daily_restart"]) if (cfg.get("daily_restart") or {}).get("time") else None
@@ -1839,9 +1841,10 @@ def main():
         except Exception:  # noqa: BLE001
             return None
 
-    def announce(ev: "Event") -> None:
+    def announce(ev: "Event") -> bool:
         """Post one event, upgraded where the extras apply: a first-ever login becomes a
-        welcome, a logout becomes a session summary, and milestones follow."""
+        welcome, a logout becomes a session summary, and milestones follow. True for a
+        login that is only a quick rejoin (nothing was posted)."""
         first_visit = False
         if ev.kind == "login" and store and "welcome" in events:
             first_visit = stats_db.player_totals(store.conn, ev.player)["sessions"] == 0
@@ -1857,9 +1860,18 @@ def main():
         was_empty = not live.online
         before = len(live.online)
         summary = live.observe(ev)
-        if admin and ev.kind == "login":
+        if ev.kind == "logout":
+            summary = rejoin_grace.with_carry(ev.player, summary)
+        # A quick rejoin posts nothing (its leave was held and is dropped); a leave is held
+        # for a while in case they come straight back. The DB has both already.
+        rejoined = ev.kind == "login" and bool(rejoin_grace) and rejoin_grace.rejoin(ev)
+        holding = (ev.kind == "logout" and bool(rejoin_grace) and not ev.extra.get("stale"))
+        if rejoined:
+            log.info("%s is back within %.0fs: not posting the leave or the arrival", ev.player,
+                     rejoin_grace.seconds)
+        elif admin and ev.kind == "login":
             admin.on_login(ev.player, was_empty, before, max(live.count or 0, len(live.online)), list(live.online))
-        elif admin and ev.kind == "logout":
+        elif admin and ev.kind == "logout" and not holding:
             admin.on_logout(ev.player)
         elif admin and ev.kind == "version_mismatch" and ev.extra.get("platform_id"):
             admin.notify_version(ev.extra)
@@ -1875,6 +1887,23 @@ def main():
                     f"Players need the same version to join.")
             post_update(text)
             news(text)
+        if rejoined:
+            return True
+        if holding:
+            rejoin_grace.hold(ev, summary)
+            return False
+        publish(ev, summary, first_visit)
+        return False
+
+    def release_leaves(force: bool = False) -> None:
+        """Post the held leaves whose window has passed (all of them when `force`)."""
+        for ev, summary in (rejoin_grace.release_all() if force else rejoin_grace.due(parser.last_ts)):
+            if admin:
+                admin.on_logout(ev.player)
+            publish(ev, summary)
+
+    def publish(ev: "Event", summary: Optional[dict], first_visit: bool = False) -> None:
+        """The Discord side of announce(): the post itself and any milestones."""
         if maint and maint.suppressing(ev.kind):
             return
         if ev.kind == "logout" and summary and "session_summary" in events:
@@ -1986,8 +2015,10 @@ def main():
                         maint.observe(ev, len(parser.s.online))
                     if heckler and ev.kind in ("login", "death"):
                         heckler.observe(ev)
-                    announce(ev)
-                    if admin and ev.kind in ("login", "death"):
+                    if ev.kind in ("server_restart", "server_online"):
+                        release_leaves(force=True)   # who left before it goes down, first
+                    rejoined = announce(ev)
+                    if admin and ev.kind in ("login", "death") and not rejoined:
                         admin.notify_game(ev.kind, ev.player, list(parser.s.online))
                     # Track down/up so we can tell a lingering outage from a quick restart.
                     if ev.kind == "server_restart":
@@ -1999,6 +2030,7 @@ def main():
                     if silence.observe(ev, parser.s.ready):
                         log.info("Server is logging again after an outage alert")
                         discord.post(Event("server_online", None, {}), server_name, events)
+            release_leaves()
             check_silence()
             backoff = interval
             save_parser_state()
@@ -2128,6 +2160,7 @@ def main():
                     log.warning("Maintenance check failed: %s", e)
         except KeyboardInterrupt:
             log.info("Stopping")
+            release_leaves(force=True)
             if store:
                 store.close()
             return
@@ -2141,7 +2174,14 @@ def main():
             time.sleep(backoff)
             backoff = min(backoff * 2, 300)
             continue
-        time.sleep(interval)
+        try:
+            time.sleep(interval)
+        except KeyboardInterrupt:          # docker stop while sleeping between polls
+            log.info("Stopping")
+            release_leaves(force=True)
+            if store:
+                store.close()
+            return
 
 
 if __name__ == "__main__":
