@@ -31,7 +31,8 @@
   "discord": {
     "username": "Huginn",
     "embeds": true,
-    "show_player_count": true
+    "show_player_count": true,
+    "rejoin_grace_seconds": 180
   },
   "admin_bot": {
     "enabled": true,

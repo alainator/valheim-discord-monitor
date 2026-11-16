@@ -46,6 +46,75 @@ def deaths_text(n: int) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Quick rejoins
+# ---------------------------------------------------------------------------
+class RejoinGrace:
+    """Holds each leave's Discord post for `seconds`. If the same player is back within that
+    time (a dropped connection, a console restarting the game), neither the leave nor the
+    arrival is posted, and the next session summary covers both parts. The stats database
+    still records both, as they happened; only what's posted is smoothed.
+
+    Matching uses log timestamps, so a backlog read in one go after a monitor restart is
+    judged by when things happened, not when they were read. Releasing uses whichever
+    clock runs first: the log moving past the window, or real time (an empty server only
+    logs every 10 minutes), plus `slack` for the poll interval."""
+
+    def __init__(self, seconds: float = 180, slack: float = 15, clock=time.time):
+        self.seconds = float(seconds)
+        self.slack = float(slack)
+        self.clock = clock
+        self.held: dict = {}       # player -> (event, summary or None, held at (real))
+        self.carry: dict = {}      # player -> (seconds, deaths) played before a quick rejoin
+
+    def __bool__(self) -> bool:
+        return self.seconds > 0
+
+    def hold(self, ev, summary: Optional[dict]) -> None:
+        self.held[ev.player] = (ev, summary, self.clock())
+
+    def rejoin(self, ev) -> bool:
+        """For a login: True if it's a quick rejoin, whose held leave is then dropped."""
+        held = self.held.get(ev.player)
+        if not held:
+            return False
+        left, summary, at = held
+        t0, t1 = left.extra.get("ts"), ev.extra.get("ts")
+        gap = (t1 - t0) if t0 is not None and t1 is not None else self.clock() - at
+        if gap > self.seconds:
+            return False
+        del self.held[ev.player]
+        if summary:            # already includes any earlier parts (with_carry ran at the leave)
+            self.carry[ev.player] = (summary["duration_seconds"], summary["deaths"])
+        return True
+
+    def with_carry(self, player: str, summary: Optional[dict]) -> Optional[dict]:
+        """For a logout: its summary, including the time played before any quick rejoins."""
+        secs, deaths = self.carry.pop(player, (0, 0))
+        if not summary or not (secs or deaths):
+            return summary
+        total, died = summary["duration_seconds"] + secs, summary["deaths"] + deaths
+        return {**summary, "duration": fmt_duration(total), "duration_seconds": total,
+                "deaths": died, "deaths_text": deaths_text(died)}
+
+    def due(self, log_ts: Optional[float] = None) -> list:
+        """Held leaves whose window has passed: [(event, summary)], oldest first."""
+        now, out = self.clock(), []
+        for player, (ev, summary, at) in sorted(self.held.items(), key=lambda kv: kv[1][2]):
+            ts = ev.extra.get("ts")
+            if (now - at > self.seconds + self.slack
+                    or (log_ts is not None and ts is not None and log_ts - ts > self.seconds)):
+                out.append((ev, summary))
+                del self.held[player]
+        return out
+
+    def release_all(self) -> list:
+        """Everything still held (the server is going down, or the monitor is stopping)."""
+        out = [(ev, summary) for ev, summary, _ in sorted(self.held.values(), key=lambda v: v[2])]
+        self.held.clear()
+        return out
+
+
+# ---------------------------------------------------------------------------
 # Live state
 # ---------------------------------------------------------------------------
 @dataclass

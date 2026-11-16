@@ -30,6 +30,7 @@
     "username": "Huginn",
     "embeds": true,
     "show_player_count": true,
+    "rejoin_grace_seconds": 180,
     "digest_seconds": 0,
     "quiet_hours": {},
     "messages": {
