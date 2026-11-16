@@ -69,8 +69,13 @@ class RejoinGrace:
     def __bool__(self) -> bool:
         return self.seconds > 0
 
-    def hold(self, ev, summary: Optional[dict]) -> None:
+    def hold(self, ev, summary: Optional[dict]) -> Optional[tuple]:
+        """Hold a leave. Returns (event, summary) of an earlier leave of theirs still held,
+        which must be posted now rather than lost (the caller releases due leaves first, so
+        this is only a safety net)."""
+        old = self.held.pop(ev.player, None)
         self.held[ev.player] = (ev, summary, self.clock())
+        return old[:2] if old else None
 
     def rejoin(self, ev) -> bool:
         """For a login: True if it's a quick rejoin, whose held leave is then dropped."""
