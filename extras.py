@@ -652,6 +652,58 @@ def exploration(details: list) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Server health
 # ---------------------------------------------------------------------------
+class SilenceWatch:
+    """Notices a server that died without a shutdown line (a crash, a kill, a frozen host):
+    its log just stops. Valheim writes "Connections N" every 10 minutes even when nobody is
+    on, so a log that stays quiet for longer than `after` seconds means it isn't running.
+    A log that can't be read counts the same way: silence is measured from the last line
+    actually read, so a failing feed can't look healthy."""
+
+    def __init__(self, after: float = 900, clock=time.time):
+        self.after = float(after)
+        self.clock = clock
+        self.last_line = clock()
+        self.alerted = False
+        self.error: Optional[str] = None
+
+    def saw_lines(self) -> None:
+        self.last_line = self.clock()
+        self.error = None
+
+    def feed_failed(self, error) -> None:
+        self.error = str(error)[:200]
+
+    def silent_for(self) -> float:
+        return self.clock() - self.last_line
+
+    def check(self, down: bool, hold: bool = False) -> bool:
+        """True once, when the log has gone quiet with no shutdown seen (`down` means the
+        shutdown path already covers it; `hold` is our own maintenance keeping it down)."""
+        if self.alerted or down or hold or self.silent_for() <= self.after:
+            return False
+        self.alerted = True
+        return True
+
+    def reason(self) -> str:
+        if self.error:
+            return f"the server's log can't be read ({self.error})"
+        return f"the server has logged nothing for {fmt_duration(self.silent_for())}"
+
+    def observe(self, ev, ready: bool) -> bool:
+        """After an alert: True once when a server that never rebooted shows it's alive
+        again (a frozen host coming back). A reboot posts its own "back online", and a
+        shutdown its own "restarting", so those just end the alert."""
+        if not self.alerted:
+            return False
+        if ev.kind in ("server_online", "server_restart"):
+            self.alerted = False
+            return False
+        if ready and ev.kind in ("count", "login", "logout", "death", "respawn", "world_saved"):
+            self.alerted = False
+            return True
+        return False
+
+
 class HealthWatch:
     """Warns before the save disk fills up (Valheim stops saving below its own limit)
     and when world saves get slow. Each warning repeats at most once a day."""

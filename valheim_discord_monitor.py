@@ -1942,9 +1942,21 @@ def main():
     # means the server is down (crashed, or stopped without a shutdown line).
     stale_after = float(((cfg.get("admin_bot") or {}).get("status_channel") or {}).get("stale_after_seconds", 900))
     last_line_at = time.time()
+    silence = extras.SilenceWatch(stale_after)
     booted = False                         # saw a boot: until a count line, the server is empty
     heckle_cfg = cfg.get("heckle") or {}
     heckler = games.Heckler(heckle_cfg) if heckle_cfg.get("enabled") else None
+
+    def check_silence() -> None:
+        """A server that dies without a shutdown line just goes quiet: say so once."""
+        if not silence.check(parser.s.down, bool(maint and maint.suppressing("server_offline"))):
+            return
+        why = silence.reason()
+        log.warning("Server looks down, with no shutdown line: %s", why)
+        discord.post(Event("server_offline", None, {}), server_name, events)
+        if admin:
+            admin.post_admin(f"🔴 **{server_name}** looks down: {why}, and it never logged a "
+                             "shutdown (a crash, a kill or a frozen host). Check the server.")
 
     backoff = interval
     while True:
@@ -1955,6 +1967,8 @@ def main():
                 for line in lines:
                     archive.add(line)
                 archive.flush()
+            if lines:
+                silence.saw_lines()
             for line in lines:
                 last_line_at = time.time()
                 log.debug("LOG: %s", line)
@@ -1982,6 +1996,10 @@ def main():
                         down_since = None
                     if ev.kind == "server_online":
                         booted = True
+                    if silence.observe(ev, parser.s.ready):
+                        log.info("Server is logging again after an outage alert")
+                        discord.post(Event("server_online", None, {}), server_name, events)
+            check_silence()
             backoff = interval
             save_parser_state()
             discord.flush()
@@ -2115,6 +2133,11 @@ def main():
             return
         except Exception as e:
             log.warning("Poll failed: %s (retrying in %.0fs)", e, backoff)
+            silence.feed_failed(e)
+            try:
+                check_silence()                # a feed that keeps failing is a symptom too
+            except Exception as e2:  # noqa: BLE001
+                log.warning("Outage check failed: %s", e2)
             time.sleep(backoff)
             backoff = min(backoff * 2, 300)
             continue
