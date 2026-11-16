@@ -42,7 +42,8 @@ On top of the Discord posts it can also, with the optional **admin bot**:
   **server birthday** post, and a smoother first join
   ([players & community](#players--community), [roles & names](#roles--names)).
 - **Server health:** warnings before the save disk fills up or saves get slow, and an
-  optional daily restart while nobody's on ([server health](#server-health)).
+  optional daily restart while nobody's on ([server health](#server-health)), plus a post
+  when the server crashes without a shutdown ([outage alert](#outage-alert)).
 - **Steam achievements in Discord:** unlock posts, achievements in `/muninn stats`, a
   leaderboard and the Bragi title, with a free Steam API key
   ([achievements](#steam-achievements-in-discord)).
@@ -94,6 +95,14 @@ And without the bot:
 [self-hosted quick start](#self-hosted-linux-server-quick-start).
 
 **What's new** (already running it? `git pull && docker compose up -d --build`):
+- **A crash is announced:** a server that dies without logging a shutdown (a crash, a
+  kill, a frozen host) used to go quiet with no post. Now, once its log has been silent
+  for `stale_after_seconds` (15 min), or can't be read for that long, Huginn posts that
+  it's offline, the admins are told why, and "back online" follows when it returns
+  ([outage alert](#outage-alert)).
+- **No more false leaves on crossplay:** a player whose connection blips for a few
+  seconds (`Keep socket … try to reconnect`) was posted as leaving while still playing,
+  and their real leave later went missing. Fixed.
 - **Odin's Wager and Odin's heckling, both optional:** bet fake Valor on who dies first and
   how many die, with odds from your own death history ([Odin's Wager](#odins-wager)), and
   let Odin roast streaks and quick deaths in the usual death post
@@ -353,7 +362,7 @@ And without the bot:
   [Streaks & the server's birthday](#streaks-anniversaries-and-the-servers-birthday) ·
   [Status board](#status-board) · [Backup copies](#world-backup-copies) ·
   [Restoring a backup](#restoring-a-backup-odin-restore) ·
-  [Server health](#server-health) ·
+  [Server health](#server-health) · [Outage alert](#outage-alert) ·
   [Auto-updates, restarts & world settings](#auto-updates-and-restarts-from-discord)
 - **Stats & LOW.MS:** [Stats page](#player-stats--public-web-page) ·
   [Catching up on old logs](#catching-up-on-old-logs) · [Log archive](#the-log-archive) ·
@@ -548,6 +557,20 @@ Vanilla Valheim already prints everything needed to `valheim_console.log`
 | Refused join | `Player Stranger : V_7656… is blacklisted or not in whitelist.` (see [admin bot](#join-attempt-alerts--discord-admin-bot)) |
 | Wrong password | `Peer V_7656… has wrong password` (see [wrong passwords](#wrong-password-alerts); not yet seen on a real server) |
 | Restart / online | `OnApplicationQuit` / `ZNet Shutdown` … then `Game server connected` |
+| Outage | no line at all for `stale_after_seconds` (see [outage alert](#outage-alert)) |
+
+### Outage alert
+
+A server that crashes, is killed, or whose host freezes writes no shutdown line: its log
+just stops. Valheim logs `Connections N` every 10 minutes even with nobody on, so when
+the log has been silent for `admin_bot.status_channel.stale_after_seconds` (default 900,
+15 minutes) the monitor posts `server_offline` ("… is offline") and, with the admin bot,
+tells the admins why: nothing logged for how long, or the log can't be read (a missing
+file, a failing feed). It posts once per outage. When the server reboots, the usual "back
+online" follows; a server that comes back without rebooting (a frozen host) gets a "back
+online" at its next log line. A graceful shutdown still goes through the usual
+"restarting" post instead, and our own maintenance holds the alert. Needs
+`server_offline` (and `server_online`) in `events`.
 
 The monitor tails the log by byte offset, so its own restarts never re-post. It runs the
 lines through a small state machine and posts an embed to a Discord webhook. When the game
@@ -2504,6 +2527,8 @@ can hand them out. If you drag one above Muninn, the log says `can't give the �
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| "is offline" posted but the server was fine | Its log was silent, or unreadable, for `stale_after_seconds` (the log moved, the mount broke, or the feed failed) | The admin channel message and the monitor's log say which; fix the log path or raise `stale_after_seconds` |
+| A crash wasn't announced | `server_offline` isn't in `events`, or it was less than `stale_after_seconds` | Add it; the alert waits 15 minutes by default so a quick restart isn't reported |
 | No round of Odin's Wager opens | It's off, a round started less than `gap_hours` ago, or the database is off | Set `admin_bot.wager.enabled`; rounds open when someone arrives |
 | `/muninn valor` says it's turned off | `admin_bot.wager.enabled` isn't set | Turn it on and restart the monitor |
 | The server's birthday came on the wrong day, or not at all | It counts from the first visit in the stats database, which can be later than the server's real start; and it needs `milestone` in `events` | Load older logs with `--backfill` ([catching up](#catching-up-on-old-logs)) so the first visit is right |
@@ -3286,7 +3311,7 @@ or run it in a terminal.
 | `admin_bot.status_channel.channel_id` | — | Voice channel whose name shows the server status. |
 | `admin_bot.status_channel.online` / `empty` / `offline` | see above | Name templates; `{count}`, `{server}`. |
 | `admin_bot.status_channel.min_interval_seconds` | 300 | Minimum time between renames (can't go below 300 because of Discord's limit). |
-| `admin_bot.status_channel.stale_after_seconds` | 900 | Show offline if the log has been silent this long. |
+| `admin_bot.status_channel.stale_after_seconds` | 900 | Show offline if the log has been silent this long, and post the [outage alert](#outage-alert). |
 | `admin_bot.status_board.channel_id` | — | Text channel for the live status board message. |
 | `admin_bot.status_board.state_file` | `status_board.json` | Where the board's message id is remembered. |
 | `admin_bot.join.address` | — | Shown by `/valheim join` for PC players, e.g. `203.0.113.7:2456` or `valheim.example.com:2456`. Without it, the IP the server logs is used, when it logs one. |
@@ -3500,6 +3525,7 @@ Added here:
 - **`/odin setup`:** organises a Discord server into themed channels, with preview and
   undo.
 - **Odin's Wager and Odin's heckling:** optional games built on the log.
+- **Outage alert:** a crash or frozen host with no shutdown line is posted after 15 quiet minutes.
 - **`/valheim join`:** the current join code (tracked across restarts), address and how
   to connect.
 - **Extras:** raid alerts, version-mismatch alerts, session summaries, first-visit
