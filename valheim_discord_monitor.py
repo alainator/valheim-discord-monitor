@@ -1890,7 +1890,9 @@ def main():
         if rejoined:
             return True
         if holding:
-            rejoin_grace.hold(ev, summary)
+            earlier = rejoin_grace.hold(ev, summary)
+            if earlier:
+                publish(*earlier)
             return False
         publish(ev, summary, first_visit)
         return False
@@ -2015,8 +2017,9 @@ def main():
                         maint.observe(ev, len(parser.s.online))
                     if heckler and ev.kind in ("login", "death"):
                         heckler.observe(ev)
-                    if ev.kind in ("server_restart", "server_online"):
-                        release_leaves(force=True)   # who left before it goes down, first
+                    # Held leaves go out before anything that happened after them: the
+                    # window is judged on this line's time, so a backlog stays in order.
+                    release_leaves(force=ev.kind in ("server_restart", "server_online"))
                     rejoined = announce(ev)
                     if admin and ev.kind in ("login", "death") and not rejoined:
                         admin.notify_game(ev.kind, ev.player, list(parser.s.online))

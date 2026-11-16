@@ -83,6 +83,18 @@ class RejoinGraceTest(unittest.TestCase):
         self.assertEqual([e.player for e, _ in self.g.due(log_ts=1000 + 181)], ["Bjorn"])
         self.assertFalse(self.g.rejoin(login("Bjorn", 1000 + 7200)))
 
+    def test_a_late_return_releases_the_leave_by_its_time(self):
+        """The monitor releases due leaves before each event, judged on that line's time."""
+        self.g.hold(logout("Bjorn", 1000), summary(3600))
+        self.assertEqual([e.player for e, _ in self.g.due(log_ts=1240)], ["Bjorn"])
+        self.assertFalse(self.g.rejoin(login("Bjorn", 1240)))
+
+    def test_holding_again_hands_back_the_earlier_leave(self):
+        self.assertIsNone(self.g.hold(logout("Bjorn", 1000), summary(3600)))
+        earlier = self.g.hold(logout("Bjorn", 2000), summary(600))
+        self.assertEqual((earlier[0].extra["ts"], earlier[1]["duration_seconds"]), (1000, 3600))
+        self.assertEqual(self.g.held["Bjorn"][0].extra["ts"], 2000)
+
     def test_off_when_zero(self):
         self.assertFalse(extras.RejoinGrace(0))
         self.assertTrue(extras.RejoinGrace(180))
