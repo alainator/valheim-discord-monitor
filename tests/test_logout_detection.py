@@ -123,6 +123,35 @@ class LogoutDetectionTest(unittest.TestCase):
         got = self.feed(p, ["09/14/2026 09:00:00: Peer 76561198017275560 disconnected"])
         self.assertEqual(got, [("logout", "Sven")])
 
+    BLIP = ["09/14/2026 08:00:00: Keep socket for playfab/AAAA1111BBBB2222, try to reconnect before timeout",
+            '09/14/2026 08:00:00: Player connection lost server "S" that has join code 034505, now 2 player(s)',
+            "09/14/2026 08:00:00: PlayFab network error in session 'S' and network abc|def",
+            "09/14/2026 08:00:00: Failed to send, suspend TX on playfab/AAAA1111BBBB2222 while trying to reconnect"]
+
+    def test_a_crossplay_blip_that_reconnects_is_not_a_leave(self):
+        """The connection drops for a moment and comes back: Bjorn never left."""
+        p = self.two_online()
+        got = self.feed(p, self.BLIP + [
+            "09/14/2026 08:00:36: Resume TX on playfab/AAAA1111BBBB2222",
+            '09/14/2026 08:00:36: Player joined server "S" that has join code 034505, now 2 player(s)'])
+        self.assertEqual(got, [])
+        self.assertEqual(set(p.s.online), {"Ingrid", "Bjorn"})
+        # His connection is still his: when he really leaves, it's him.
+        got = self.feed(p, ["09/14/2026 09:00:00: PlayFab socket with remote ID playfab/AAAA1111BBBB2222 "
+                            "closed by remote"])
+        self.assertEqual(got, [("logout", "Bjorn")])
+
+    def test_a_crossplay_blip_that_times_out_is_one_leave(self):
+        """The reconnect fails: Bjorn leaves once, when the server gives up on him."""
+        p = self.two_online()
+        self.assertEqual(self.feed(p, self.BLIP), [])
+        got = self.feed(p, ["09/14/2026 08:01:19: ZRpc timeout detected",
+                            "ZPlayFabSocket::Dispose. State: CONNECTED",
+                            "09/14/2026 08:01:19: Destroying abandoned non persistent zdo 222:1 owner 222",
+                            "09/14/2026 08:01:19: Destroying abandoned non persistent zdo 222:8 owner 222"])
+        self.assertEqual(got, [("logout", "Bjorn")])
+        self.assertEqual(set(p.s.online), {"Ingrid"})
+
     def test_bad_saved_state_is_ignored(self):
         p = vdm.ValheimLogParser()
         p.load_state({"online": 5})

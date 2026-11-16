@@ -98,6 +98,12 @@ RE_LOBBY_LOST = re.compile(_TS + r"(?P<detail>.*?(?:create lobby failed|failed t
 # Any line that sounds like a connection ending. Used only together with a connection id we
 # already paired with a character, so an unrelated line can't log anyone out.
 RE_GONE = re.compile(r"disconnect|lost|clos|dispos|timed? ?out|timeout|kick", re.IGNORECASE)
+# A crossplay connection blipping: "Keep socket for playfab/<id>, try to reconnect before
+# timeout", "suspend TX on playfab/<id> while trying to reconnect", then "Resume TX on …" once
+# it's back. The player is still in. If it doesn't come back, "ZRpc timeout detected" and the
+# player's abandoned objects follow, and those log them out.
+RE_RECONNECTING = re.compile(_TS + r"(?:Keep socket for \S+, try to reconnect|"
+                             r"Failed to send, suspend TX on \S+ while trying to reconnect|Resume TX on )")
 RE_TIMEOUT = re.compile(_TS + r"ZRpc timeout detected")
 # Server shutting down (scheduled restart, backup, update, crash). A graceful stop
 # prints these but NOT per-player "Destroying" lines or "now 0 player(s)", so anyone
@@ -456,6 +462,9 @@ class ValheimLogParser:
             cid = m.group("id")
             if cid not in self.s.pending_ids:
                 self.s.pending_ids.append(cid)
+            return
+
+        if RE_RECONNECTING.search(line):
             return
 
         m = RE_CLOSE.search(line)
