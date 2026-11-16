@@ -544,7 +544,7 @@ Vanilla Valheim already prints everything needed to `valheim_console.log`
 | Login   | `Got character ZDOID from Bjorn : 1234567890:67` (first non-zero ZDOID for a name) |
 | Death   | `Got character ZDOID from Bjorn : 0:0` |
 | Respawn | next non-zero ZDOID for that name |
-| Logout  | `Destroying abandoned non persistent zdo … owner 1234567890` (owner id matches the player), or `Closing socket …` on direct-Steam servers, or `Player disconnected … now 0 player(s)` |
+| Logout  | `Destroying abandoned non persistent zdo … owner 1234567890` (owner id matches the player), or `Closing socket …` on direct-Steam servers, or `Player disconnected … now 0 player(s)`. A crossplay `Keep socket for playfab/… try to reconnect` is not a logout: the player usually comes back (`Resume TX`), and if not, the abandoned-zdo line follows |
 | Refused join | `Player Stranger : V_7656… is blacklisted or not in whitelist.` (see [admin bot](#join-attempt-alerts--discord-admin-bot)) |
 | Wrong password | `Peer V_7656… has wrong password` (see [wrong passwords](#wrong-password-alerts); not yet seen on a real server) |
 | Restart / online | `OnApplicationQuit` / `ZNet Shutdown` … then `Game server connected` |
